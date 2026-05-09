@@ -1,6 +1,8 @@
 # Proteoscope
 
-Proteoscope is a self-contained desktop-style web application for interactive
+![proteoscope](proteoscope.png)
+
+Proteoscope is an application for interactive
 3D visualization of Protein Data Bank (`.pdb`) structures. It is written as a
 single Go binary that embeds the browser UI, static assets, and bundled PDB
 files, then serves the application on a local URL.
