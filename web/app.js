@@ -269,14 +269,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     uniforms.cameraUp.xyz * in.uv.y -
     uniforms.cameraForward.xyz * z
   );
-  let light = normalize(uniforms.lightDir.xyz);
   let view = normalize(-uniforms.cameraForward.xyz);
-  let diffuse = max(dot(normal, light), 0.0);
-  let halfway = normalize(light + view);
-  let specular = pow(max(dot(normal, halfway), 0.0), 42.0);
-  let rim = pow(1.0 - max(dot(normal, view), 0.0), 2.4);
-  let shade = 0.26 + 0.68 * diffuse + 0.26 * specular + 0.16 * rim;
-  let color = in.color.rgb * shade + vec3<f32>(0.03, 0.045, 0.05);
+  let front = max(dot(normal, view), 0.0);
+  let diffuse = pow(front, 0.55);
+  let specular = pow(front, 34.0);
+  let rim = pow(1.0 - front, 2.2);
+  let shade = 0.66 + 0.34 * diffuse + 0.16 * specular + 0.06 * rim;
+  let color = in.color.rgb * shade + vec3<f32>(0.025, 0.035, 0.038);
   return vec4<f32>(color, in.color.a);
 }`,
   });
@@ -1143,7 +1142,7 @@ function render(time) {
   gpu.uniformData.set([...state.camera.right, 0], 16);
   gpu.uniformData.set([...state.camera.up, 0], 20);
   gpu.uniformData.set([...state.camera.forward, 0], 24);
-  gpu.uniformData.set(normalize([0.35, 0.48, 0.82]).concat(0), 28);
+  gpu.uniformData.set([...scale(state.camera.forward, -1), 0], 28);
   gpu.uniformData.set([time * 0.001, aspect, state.glowScale, 0], 32);
   gpu.device.queue.writeBuffer(gpu.uniformBuffer, 0, gpu.uniformData);
 
@@ -1246,16 +1245,16 @@ function renderCanvas(time) {
     const color = item.atom.color;
     const highlight = state.selectedAtom && item.record?.atom.id === state.selectedAtom.id;
     const gradient = ctx.createRadialGradient(
-      item.point.x - radius * 0.35,
-      item.point.y - radius * 0.45,
-      radius * 0.1,
+      item.point.x,
+      item.point.y,
+      radius * 0.08,
       item.point.x,
       item.point.y,
       radius,
     );
-    gradient.addColorStop(0, rgbaCSS(lerpColor(color, [1, 1, 1], 0.42), 1));
-    gradient.addColorStop(0.7, rgbaCSS(color, 0.96));
-    gradient.addColorStop(1, rgbaCSS(lerpColor(color, [0, 0, 0], 0.48), 0.94));
+    gradient.addColorStop(0, rgbaCSS(lerpColor(color, [1, 1, 1], 0.5), 1));
+    gradient.addColorStop(0.62, rgbaCSS(color, 0.98));
+    gradient.addColorStop(1, rgbaCSS(lerpColor(color, [0, 0, 0], 0.28), 0.95));
     ctx.fillStyle = gradient;
     ctx.beginPath();
     ctx.arc(item.point.x, item.point.y, radius * (highlight ? 1.28 : 1), 0, Math.PI * 2);
