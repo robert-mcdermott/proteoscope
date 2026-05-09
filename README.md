@@ -12,25 +12,106 @@ inspect chains and ligands, switch molecular representations, color by
 scientific properties, search atoms or residues, measure distances, and export
 publication-prep screenshots.
 
-## Quick Start
+## Quick Start: Download A Release
 
-```sh
-go run .
-```
+Most users do not need Go installed. Download a prebuilt binary from the
+Proteoscope release page:
 
-Proteoscope prints a local URL, usually:
+[https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.1](https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.1)
+
+Choose the file for your operating system:
+
+| Platform | Download |
+| --- | --- |
+| macOS, Apple Silicon | [`proteoscope-darwin-arm64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.1/proteoscope-darwin-arm64) |
+| Linux, x64 | [`proteoscope-linux-amd64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.1/proteoscope-linux-amd64) |
+| Windows, x64 | [`proteoscope-windows-amd64.exe`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.1/proteoscope-windows-amd64.exe) |
+
+When Proteoscope starts, it prints a local URL, usually:
 
 ```text
 http://127.0.0.1:8765
 ```
 
-Open that URL in a browser. By default, Proteoscope also tries to open the URL
-for you.
+It will also try to open that URL in your browser. For best performance, open
+the URL in Chrome, Edge, or Brave, which have strong WebGPU support. Safari may
+fall back to a slower compatibility renderer.
 
-To start the server without opening a browser:
+### macOS
+
+Download the macOS binary for your Mac:
+
+Open Terminal and run:
 
 ```sh
-go run . --no-open
+chmod +x ./proteoscope-darwin-arm64
+./proteoscope-darwin-arm64
+```
+
+Because the binary is not signed with an Apple developer certificate, macOS may
+show a warning such as:
+
+```text
+Apple could not verify "proteoscope-darwin-arm64" is free of malware.
+```
+
+You can unblock it in either of these ways.
+
+Option 1, from System Settings:
+
+1. Try to open the app once and dismiss the warning.
+2. Open `System Settings`.
+3. Go to `Privacy & Security`.
+4. Scroll to the `Security` section.
+5. Click `Open Anyway` for Proteoscope.
+6. Confirm by clicking `Open`.
+
+Option 2, from Terminal:
+
+```sh
+cd ~/Downloads
+xattr -d com.apple.quarantine ./proteoscope-darwin-arm64
+chmod +x ./proteoscope-darwin-arm64
+./proteoscope-darwin-arm64
+```
+
+If `xattr` says the quarantine attribute was not found, continue with the
+`chmod` and run commands. Replace the filename with the Intel binary if needed.
+
+### Linux
+
+Download `proteoscope-linux-amd64`, then run:
+
+```sh
+cd ~/Downloads
+chmod +x ./proteoscope-linux-amd64
+./proteoscope-linux-amd64
+```
+
+If your browser does not open automatically, copy the printed localhost URL into
+Chrome, Edge, Brave, or another WebGPU-capable browser.
+
+### Windows
+
+Download `proteoscope-windows-amd64.exe`, then double-click it.
+
+If Windows SmartScreen blocks the app:
+
+1. Click `More info`.
+2. Click `Run anyway`.
+
+If Windows marks the downloaded file as blocked:
+
+1. Right-click `proteoscope-windows-amd64.exe`.
+2. Choose `Properties`.
+3. On the `General` tab, check `Unblock` if it appears.
+4. Click `Apply`.
+5. Run the `.exe` again.
+
+You can also run it from PowerShell:
+
+```powershell
+.\proteoscope-windows-amd64.exe
 ```
 
 ## Getting PDB Files
