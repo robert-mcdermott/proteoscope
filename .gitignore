@@ -1,0 +1,5 @@
+/dist/
+/proteoscope
+*.exe
+*.test
+.DS_Store

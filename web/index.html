@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#050708" />
+    <title>Proteoscope</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="viewport" aria-label="Interactive 3D molecular structure viewport"></canvas>
+
+      <section class="panel title-panel" aria-label="Structure summary">
+        <div class="brand-row">
+          <div>
+            <p class="eyebrow">Proteoscope</p>
+            <h1 id="structure-title">Loading structure</h1>
+          </div>
+          <span id="gpu-badge" class="status-badge">WebGPU</span>
+        </div>
+        <label class="field">
+          <span>Bundled structure</span>
+          <select id="sample-select"></select>
+        </label>
+        <label class="upload-zone" for="file-input">
+          <input id="file-input" type="file" accept=".pdb,chemical/x-pdb,text/plain" />
+          <span class="upload-icon" aria-hidden="true">+</span>
+          <span>
+            <strong>Open local PDB</strong>
+            <small>Choose a .pdb file</small>
+          </span>
+        </label>
+        <dl class="metrics">
+          <div><dt id="metric-atoms-label">Atoms</dt><dd id="metric-atoms">...</dd></div>
+          <div><dt>Total atoms</dt><dd id="metric-total-atoms">...</dd></div>
+          <div><dt>Residues</dt><dd id="metric-residues">...</dd></div>
+          <div><dt>Chains</dt><dd id="metric-chains">...</dd></div>
+          <div><dt>Models</dt><dd id="metric-models">...</dd></div>
+        </dl>
+      </section>
+
+      <section class="panel search-panel" aria-label="Search atoms and residues">
+        <label class="search-box">
+          <span aria-hidden="true">⌕</span>
+          <input id="search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Find residue, ligand, chain, atom..." />
+        </label>
+        <div id="search-results" class="search-results"></div>
+      </section>
+
+      <section class="panel controls-panel" aria-label="Rendering controls">
+        <div class="segmented" role="group" aria-label="Representation">
+          <button class="is-active" type="button" data-representation="ball-stick">Ball + Stick</button>
+          <button type="button" data-representation="spacefill">Spacefill</button>
+          <button type="button" data-representation="backbone">Backbone</button>
+        </div>
+        <div class="segmented" role="group" aria-label="Coloring">
+          <button class="is-active" type="button" data-color-scheme="chain">Chain</button>
+          <button type="button" data-color-scheme="element">Element</button>
+          <button type="button" data-color-scheme="bfactor">B-factor</button>
+          <button type="button" data-color-scheme="residue">Residue</button>
+        </div>
+        <div class="control-grid">
+          <label>
+            <span>Atom scale</span>
+            <input id="atom-scale" type="range" min="0.32" max="1.65" value="0.72" step="0.01" />
+          </label>
+          <label>
+            <span>Bond scale</span>
+            <input id="bond-scale" type="range" min="0.14" max="1.4" value="0.52" step="0.01" />
+          </label>
+          <label>
+            <span>Glow</span>
+            <input id="glow-scale" type="range" min="0" max="1" value="0.36" step="0.01" />
+          </label>
+          <label>
+            <span>Clip</span>
+            <input id="clip-depth" type="range" min="0" max="1" value="1" step="0.01" />
+          </label>
+        </div>
+        <div class="toggles">
+          <label><input id="show-hetero" type="checkbox" checked /> Ligands</label>
+          <label><input id="show-water" type="checkbox" /> Water</label>
+          <label><input id="show-hydrogen" type="checkbox" /> H</label>
+          <label><input id="auto-rotate" type="checkbox" checked /> Motion</label>
+        </div>
+      </section>
+
+      <aside class="panel chain-panel" aria-label="Chains">
+        <div class="panel-heading">
+          <span>Chains</span>
+          <button id="isolate-clear" type="button" title="Show all chains">All</button>
+        </div>
+        <div id="chain-list" class="chain-list"></div>
+      </aside>
+
+      <section class="panel detail-panel" aria-label="Selection details">
+        <p class="eyebrow">Selection</p>
+        <h2 id="selection-title">None</h2>
+        <p id="selection-meta">Click an atom or search for a residue.</p>
+        <div id="selection-actions" class="action-row">
+          <button id="frame-selection" type="button">Frame</button>
+          <button id="measure-reset" type="button">Clear measure</button>
+        </div>
+        <div id="measurement-list" class="measurement-list"></div>
+      </section>
+
+      <nav class="toolbar" aria-label="View controls">
+        <button id="reset-view" type="button" title="Reset view" aria-label="Reset view">↺</button>
+        <button id="screenshot" type="button" title="Export PNG" aria-label="Export PNG">▣</button>
+      </nav>
+
+      <div id="model-strip" class="model-strip" aria-label="Model controls">
+        <label>
+          <span>Model</span>
+          <input id="model-slider" type="range" min="1" max="1" value="1" step="1" />
+          <strong id="model-label">1 / 1</strong>
+        </label>
+      </div>
+
+      <div id="tooltip" class="tooltip" role="status"></div>
+      <div id="loading" class="loading">
+        <div class="loading-mark"></div>
+        <div>
+          <p>Preparing molecular scene</p>
+          <span id="loading-status">Starting renderer</span>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
