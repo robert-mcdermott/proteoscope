@@ -492,3 +492,8 @@ the URL printed in the terminal.
 Make sure the file is a PDB coordinate file ending in `.pdb`. Some RCSB download
 options provide `.cif`, compressed archives, validation reports, or PDFs; those
 are not currently accepted by Proteoscope.
+
+## License
+
+Proteoscope is licensed under the Apache License 2.0. See [LICENSE](LICENSE)
+for the full license text.
