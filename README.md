@@ -2,15 +2,15 @@
 
 ![proteoscope](proteoscope.png)
 
-Proteoscope is an application for interactive
-3D visualization of Protein Data Bank (`.pdb`) structures. It is written as a
-single Go binary that embeds the browser UI, static assets, and bundled PDB
-files, then serves the application on a local URL.
+Proteoscope is an application for interactive 3D visualization of Protein Data
+Bank structures in legacy PDB (`.pdb`) and PDBx/mmCIF (`.cif`, `.mmcif`)
+formats. It is written as a single Go binary that embeds the browser UI, static
+assets, and bundled structure files, then serves the application on a local URL.
 
-Proteoscope is designed for exploratory structural biology work: load a PDB,
-inspect chains and ligands, switch molecular representations, color by
-scientific properties, search atoms or residues, measure distances, and export
-publication-prep screenshots.
+Proteoscope is designed for exploratory structural biology work: load a
+structure, inspect chains and ligands, switch molecular representations, color by
+scientific properties, view PDBx/mmCIF biological assemblies, search atoms or
+residues, measure distances, and export publication-prep screenshots.
 
 ## Quick Start: Download A Release
 
@@ -114,9 +114,10 @@ You can also run it from PowerShell:
 .\proteoscope-windows-amd64.exe
 ```
 
-## Getting PDB Files
+## Getting Structure Files
 
-Proteoscope reads standard `.pdb` coordinate files.
+Proteoscope reads standard legacy `.pdb` coordinate files and modern
+PDBx/mmCIF files ending in `.cif` or `.mmcif`.
 
 You can download more structures from the RCSB PDB download service:
 
@@ -124,29 +125,32 @@ You can download more structures from the RCSB PDB download service:
 
 The RCSB download page supports downloading multiple files from the PDB archive
 and points users to individual data files from each structure's summary page.
-For use in Proteoscope, choose PDB coordinate files (`.pdb`) rather than PDFs or
-documentation files.
+For modern RCSB downloads, PDBx/mmCIF (`.cif` or `.mmcif`) is usually the best
+choice. Legacy PDB coordinate files (`.pdb`) are also supported. Avoid PDFs,
+validation reports, sequence files, compressed archives, and documentation files
+unless you decompress or convert them into one of the supported coordinate
+formats first.
 
 ## Loading Structures
 
 ### Bundled Structures
 
-The dropdown labeled `Bundled structure` lists every `.pdb` file embedded from
-the repository's `data/` directory at build time.
+The dropdown labeled `Bundled structure` lists every supported structure file
+embedded from the repository's `data/` directory at build time.
 
 To add default structures to your own build:
 
-1. Put one or more `.pdb` files in `data/`.
+1. Put one or more `.pdb`, `.cif`, or `.mmcif` files in `data/`.
 2. Rebuild the Go binary.
 3. The files will be embedded into the executable through Go's embedded
    filesystem.
 
 ### Local Uploads
 
-Use `Open local PDB` to load a structure from your computer.
+Use `Open local structure` to load a structure from your computer.
 
-The file is parsed in the browser. Proteoscope does not upload local PDB files
-to an external server; the Go process only serves the local application.
+The file is parsed in the browser. Proteoscope does not upload local coordinate
+files to an external server; the Go process only serves the local application.
 
 ## Main Viewer
 
@@ -175,13 +179,21 @@ path and can feel slower or less responsive with larger structures.
 
 The top-left panel shows metadata and counts for the active structure.
 
+The metadata strip reports:
+
+- Coordinate format, such as `PDB` or `PDBx/mmCIF`.
+- Experimental method when present.
+- Resolution when present.
+- Entry ID for deposited structures, or `Local` for files without an entry ID.
+- Active assembly, either the asymmetric unit or a selected biological assembly.
+
 ### Atoms
 
 For ordinary single-model structures, `Atoms` is the number of atoms in the
 loaded model.
 
-For NMR ensembles or other multi-model PDB files, Proteoscope renders one model
-at a time. In that case the UI shows:
+For NMR ensembles or other multi-model coordinate files, Proteoscope renders one
+model at a time. In that case the UI shows:
 
 - `Atoms/model`: atom count in the currently selected model.
 - `Total atoms`: total coordinate records across all models.
@@ -194,12 +206,13 @@ For example, an NMR ensemble with 40 models and 619 atoms in each model has
 
 Residues are grouped by chain, residue name, residue number, and insertion
 code. Standard residues, nucleic-acid residues, ligands, and waters are all
-recognized from the PDB atom records.
+recognized from the parsed coordinate records.
 
 ### Chains
 
-Chains come from the PDB chain identifier. The chain panel lets you isolate one
-chain at a time or return to all chains.
+Chains come from the PDB chain identifier or, for PDBx/mmCIF, the author chain
+identifier when present. The chain panel lets you isolate one chain at a time or
+return to all chains.
 
 ## Representations
 
@@ -363,11 +376,30 @@ Common uses:
 
 ## Model Slider
 
-Multi-model PDB files, especially NMR ensembles, show a model slider at the
-bottom of the viewport.
+Multi-model coordinate files, especially NMR ensembles, show a model slider at
+the bottom of the viewport.
 
 Proteoscope displays one model at a time. Move the slider to inspect alternate
 conformations in the ensemble.
+
+## Biological Assemblies
+
+PDBx/mmCIF files may define biological assemblies in addition to the deposited
+asymmetric unit. When assembly definitions are present, Proteoscope shows a
+`Biological assembly` selector in the structure panel.
+
+- `Asymmetric unit` shows the deposited coordinate set.
+- Numbered assemblies apply the transformations from the mmCIF assembly records
+  and display the generated biological unit.
+
+Proteoscope reads `_pdbx_struct_assembly`, `_pdbx_struct_assembly_gen`, and
+`_pdbx_struct_oper_list` for assembly definitions. Operation expressions,
+including ranges and Cartesian-product expressions such as `(1-4)(5,6)`, are
+resolved into 3D transforms before rendering.
+
+Assembly generation can multiply atom counts dramatically, so Proteoscope uses a
+300,000 atoms/model safety limit for generated assemblies. Assemblies above that
+limit are shown as unavailable rather than freezing the browser.
 
 ## Chain Panel
 
@@ -387,9 +419,13 @@ Use the square toolbar button to export the current viewport as a PNG image.
 The image reflects the current camera angle, representation, coloring mode,
 visibility toggles, clipping, glow, and selection state.
 
-## PDB Parsing Notes
+## Structure Parsing Notes
 
-Proteoscope currently reads these PDB records and fields:
+Proteoscope supports two coordinate formats.
+
+### Legacy PDB
+
+For `.pdb` files, Proteoscope reads these records and fields:
 
 - `HEADER`, `TITLE`, `EXPDTA`, and resolution remarks for metadata.
 - `ATOM` and `HETATM` for coordinates and atom properties.
@@ -399,12 +435,37 @@ Proteoscope currently reads these PDB records and fields:
 - Occupancy, B-factor, element, chain, residue name, residue number, insertion
   code, alternate location, and atom serial fields.
 
+### PDBx/mmCIF
+
+For `.cif` and `.mmcif` files, Proteoscope reads the PDBx/mmCIF categories used
+for interactive coordinate viewing:
+
+- `_atom_site` for atom coordinates, element, atom name, residue name, chain,
+  sequence ID, insertion code, occupancy, B-factor, model number, and
+  `ATOM`/`HETATM` group.
+- `_entry`, `_struct`, `_struct_keywords`, `_exptl`, `_refine`,
+  `_em_3d_reconstruction`, and `_reflns` for title, entry ID, method,
+  classification, keywords, and resolution metadata where present.
+- `_struct_conf` and `_struct_sheet_range` for helix and sheet ranges.
+- `_struct_conn` for explicit nonstandard links such as ligand, metal,
+  disulfide, salt-bridge, or other curated structure connections when those
+  records can be matched to rendered atoms.
+- `_pdbx_struct_assembly`, `_pdbx_struct_assembly_gen`, and
+  `_pdbx_struct_oper_list` for biological assembly generation.
+
+For mmCIF chain display, Proteoscope prefers author-provided chain and residue
+identifiers (`auth_*`) when present because they usually match the identifiers
+researchers see in publications and RCSB pages. Label identifiers (`label_*`)
+are also retained internally for connection matching.
+
 Bond handling:
 
 - Explicit `CONECT` bonds are used when present.
+- Explicit `_struct_conn` relationships are used for PDBx/mmCIF files when
+  they can be resolved to atom records.
 - Standard covalent bonds are inferred from element radii and interatomic
-  distance because many PDB files omit `CONECT` records for ordinary polymer
-  residues.
+  distance because many coordinate files omit explicit records for ordinary
+  polymer residues.
 
 Alternate locations:
 
@@ -414,10 +475,13 @@ Alternate locations:
 
 Limitations:
 
-- Proteoscope reads `.pdb` files, not `.cif`/`.mmCIF` files yet.
-- Biological assembly transformations are not currently expanded.
+- Biological assembly generation is currently implemented for PDBx/mmCIF files,
+  not legacy PDB `REMARK 350` records.
 - Full solvent-accessible surfaces, electrostatics, density maps, and sequence
   annotation tracks are not yet implemented.
+- PDBx/mmCIF coordinate, metadata, secondary-structure, and curated connection
+  categories are supported; full dictionary coverage is intentionally out of
+  scope for the interactive viewer.
 
 ## Development
 
@@ -450,7 +514,8 @@ go build -o proteoscope .
 The resulting executable embeds:
 
 - `web/*`
-- `data/*.pdb`
+- supported structure files from `data/`, including `.pdb`, `.cif`, and
+  `.mmcif`
 
 That means the app can be distributed as one file.
 
@@ -489,9 +554,9 @@ the URL printed in the terminal.
 
 ### My Downloaded File Does Not Load
 
-Make sure the file is a PDB coordinate file ending in `.pdb`. Some RCSB download
-options provide `.cif`, compressed archives, validation reports, or PDFs; those
-are not currently accepted by Proteoscope.
+Make sure the file is a coordinate file ending in `.pdb`, `.cif`, or `.mmcif`.
+Some RCSB download options provide compressed archives, validation reports,
+sequence files, or PDFs; those are not accepted directly by Proteoscope.
 
 ## License
 

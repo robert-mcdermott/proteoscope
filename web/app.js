@@ -3,9 +3,16 @@ const els = {
   loading: document.querySelector('#loading'),
   loadingStatus: document.querySelector('#loading-status'),
   sampleSelect: document.querySelector('#sample-select'),
+  assemblyField: document.querySelector('#assembly-field'),
+  assemblySelect: document.querySelector('#assembly-select'),
   fileInput: document.querySelector('#file-input'),
   title: document.querySelector('#structure-title'),
   gpuBadge: document.querySelector('#gpu-badge'),
+  metaFormat: document.querySelector('#meta-format'),
+  metaMethod: document.querySelector('#meta-method'),
+  metaResolution: document.querySelector('#meta-resolution'),
+  metaEntry: document.querySelector('#meta-entry'),
+  metaAssembly: document.querySelector('#meta-assembly'),
   atomsLabel: document.querySelector('#metric-atoms-label'),
   atomsMetric: document.querySelector('#metric-atoms'),
   totalAtomsMetric: document.querySelector('#metric-total-atoms'),
@@ -80,6 +87,8 @@ const RESIDUE_CLASSES = {
 const WATER_RESIDUES = new Set(['HOH', 'WAT', 'H2O', 'DOD']);
 const PROTEIN_BACKBONE = new Set(['CA']);
 const NUCLEIC_BACKBONE = new Set(['P', "C4'", "C3'", "C5'"]);
+const ASYMMETRIC_UNIT_ID = 'asym';
+const MAX_ASSEMBLY_ATOMS = 300000;
 
 const state = {
   samples: [],
@@ -168,7 +177,7 @@ async function init() {
   populateSamples();
 
   const first = state.samples[0];
-  if (!first) throw new Error('No embedded PDB files were found.');
+  if (!first) throw new Error('No embedded structure files were found.');
   await loadStructureFromURL(first.url, first.name);
 
   setLoading('Rendering');
@@ -442,6 +451,9 @@ function bindEvents() {
     const sample = state.samples.find((item) => item.id === els.sampleSelect.value);
     if (sample) await loadStructureFromURL(sample.url, sample.name);
   });
+  els.assemblySelect.addEventListener('change', async () => {
+    await activateAssembly(els.assemblySelect.value);
+  });
   els.fileInput.addEventListener('change', async () => {
     const file = els.fileInput.files?.[0];
     if (!file) return;
@@ -537,8 +549,11 @@ async function loadStructureFromURL(url, label) {
 }
 
 async function loadStructureFromText(text, label) {
-  setLoading('Parsing PDB records');
-  const structure = parsePDB(text, label);
+  const format = detectStructureFormat(text, label);
+  setLoading(`Parsing ${format.label} records`);
+  const structure = format.kind === 'mmcif' ? parseMMCIF(text, label) : parsePDB(text, label);
+  structure.baseModels = structure.models;
+  prepareAssemblyEstimates(structure);
   setLoading('Inferring bonds');
   deriveStructure(structure);
   state.structure = structure;
@@ -554,9 +569,17 @@ async function loadStructureFromText(text, label) {
   els.loading.classList.add('is-hidden');
 }
 
-function parsePDB(text, label) {
-  const structure = {
+function detectStructureFormat(text, label) {
+  const name = String(label || '').toLowerCase();
+  if (name.endsWith('.cif') || name.endsWith('.mmcif')) return { kind: 'mmcif', label: 'PDBx/mmCIF' };
+  if (/^\s*data_/i.test(text) && /_atom_site\./i.test(text)) return { kind: 'mmcif', label: 'PDBx/mmCIF' };
+  return { kind: 'pdb', label: 'PDB' };
+}
+
+function createStructure(label, format) {
+  return {
     label,
+    format,
     meta: {
       title: label,
       code: '',
@@ -564,14 +587,61 @@ function parsePDB(text, label) {
       method: '',
       resolution: '',
       numModels: 0,
+      keywords: '',
+      entities: [],
     },
     helices: [],
     sheets: [],
     conect: [],
+    assemblies: [],
+    baseModels: [],
+    activeAssemblyId: ASYMMETRIC_UNIT_ID,
     models: [],
     chains: [],
     residues: [],
   };
+}
+
+function createModel(number) {
+  return {
+    number,
+    atoms: [],
+    bonds: [],
+    serialToIndex: new Map(),
+    atomKeyToIndex: new Map(),
+  };
+}
+
+function addAtomToModel(model, atom) {
+  model.serialToIndex.set(atom.serial, atom.id);
+  registerAtomKeys(model, atom);
+  model.atoms.push(atom);
+}
+
+function registerAtomKeys(model, atom) {
+  const keys = [
+    atomLookupKey(atom.chain, atom.authSeq ?? atom.resSeq, atom.iCode, atom.resName, atom.name),
+    atom.authKey,
+    atom.labelKey,
+  ].filter(Boolean);
+  for (const key of keys) {
+    if (!model.atomKeyToIndex.has(key)) model.atomKeyToIndex.set(key, atom.id);
+  }
+}
+
+function atomLookupKey(chain, seq, iCode, comp, atom) {
+  const parts = [chain, seq, iCode, comp, atom].map((value) => normalizeLookupPart(value));
+  if (!parts[0] || !parts[1] || !parts[4]) return '';
+  return parts.join('|');
+}
+
+function normalizeLookupPart(value) {
+  const clean = cleanCIFValue(value);
+  return clean ? clean.toUpperCase() : '';
+}
+
+function parsePDB(text, label) {
+  const structure = createStructure(label, 'pdb');
   let currentModel = null;
   let implicitModel = null;
   const titleParts = [];
@@ -606,28 +676,20 @@ function parsePDB(text, label) {
         type: 'sheet',
       });
     } else if (record === 'MODEL') {
-      currentModel = {
-        number: parseIntSafe(slice(line, 10, 14)) || structure.models.length + 1,
-        atoms: [],
-        bonds: [],
-        serialToIndex: new Map(),
-      };
+      currentModel = createModel(parseIntSafe(slice(line, 10, 14)) || structure.models.length + 1);
       structure.models.push(currentModel);
     } else if (record === 'ENDMDL') {
       currentModel = null;
     } else if (record === 'ATOM' || record === 'HETATM') {
       if (!currentModel) {
         if (!implicitModel) {
-          implicitModel = { number: 1, atoms: [], bonds: [], serialToIndex: new Map() };
+          implicitModel = createModel(1);
           structure.models.push(implicitModel);
         }
         currentModel = implicitModel;
       }
       const atom = parseAtomLine(line, record, currentModel.atoms.length);
-      if (atom) {
-        currentModel.serialToIndex.set(atom.serial, atom.id);
-        currentModel.atoms.push(atom);
-      }
+      if (atom) addAtomToModel(currentModel, atom);
       if (implicitModel) currentModel = implicitModel;
     } else if (record === 'CONECT') {
       const source = parseIntSafe(slice(line, 6, 11));
@@ -666,6 +728,7 @@ function parseAtomLine(line, record, id) {
   const residueKey = `${chain}:${resSeq}${iCode}:${resName}`;
   const isHet = record === 'HETATM';
   const polymerType = inferPolymerType(resName);
+  const authSeq = String(resSeq || '');
   return {
     id,
     serial,
@@ -674,6 +737,8 @@ function parseAtomLine(line, record, id) {
     resName,
     chain,
     resSeq,
+    authSeq,
+    labelSeq: authSeq,
     iCode,
     x,
     y,
@@ -686,9 +751,699 @@ function parseAtomLine(line, record, id) {
     isWater,
     isHydrogen,
     residueKey,
+    authKey: atomLookupKey(chain, authSeq, iCode, resName, name),
+    labelKey: atomLookupKey(chain, authSeq, iCode, resName, name),
     polymerType,
     ss: 'coil',
   };
+}
+
+function parseMMCIF(text, label) {
+  const cif = parseCIFDocument(text);
+  const structure = createStructure(label, 'mmcif');
+  applyMMCIFMetadata(structure, cif, label);
+  applyMMCIFSecondaryStructure(structure, cif);
+  applyMMCIFConnections(structure, cif);
+  applyMMCIFAssemblies(structure, cif);
+
+  const atomRows = getCIFRows(cif, 'atom_site');
+  if (!atomRows.length) throw new Error('No _atom_site records were found in this PDBx/mmCIF file.');
+
+  const modelsByNumber = new Map();
+  for (const row of atomRows) {
+    const group = cleanCIFValue(row.group_pdb).toUpperCase();
+    if (group && group !== 'ATOM' && group !== 'HETATM') continue;
+    const record = group === 'HETATM' ? 'HETATM' : 'ATOM';
+    const altLoc = cleanCIFValue(row.label_alt_id);
+    if (altLoc && altLoc !== 'A' && altLoc !== '1') continue;
+    const modelNumber = parseIntSafe(row.pdbx_pdb_model_num) || 1;
+    let model = modelsByNumber.get(modelNumber);
+    if (!model) {
+      model = createModel(modelNumber);
+      modelsByNumber.set(modelNumber, model);
+      structure.models.push(model);
+    }
+    const atom = parseMMCIFAtom(row, record, model.atoms.length);
+    if (atom) addAtomToModel(model, atom);
+  }
+
+  structure.models.sort((a, b) => a.number - b.number);
+  structure.models = structure.models.filter((model) => model.atoms.length > 0);
+  if (!structure.models.length) throw new Error('No usable atom coordinates were found in this PDBx/mmCIF file.');
+  structure.meta.numModels = structure.models.length;
+  return structure;
+}
+
+function parseMMCIFAtom(row, record, id) {
+  const serial = parseIntSafe(row.id) || id + 1;
+  const name = firstCIFValue(row.auth_atom_id, row.label_atom_id, row.type_symbol) || 'X';
+  const resName = (firstCIFValue(row.auth_comp_id, row.label_comp_id) || 'UNK').toUpperCase();
+  const authChain = firstCIFValue(row.auth_asym_id);
+  const labelChain = firstCIFValue(row.label_asym_id);
+  const chain = authChain || labelChain || '_';
+  const authSeq = firstCIFValue(row.auth_seq_id);
+  const labelSeq = firstCIFValue(row.label_seq_id);
+  const seqText = authSeq || labelSeq || '0';
+  const resSeq = parseIntSafe(seqText);
+  const iCode = firstCIFValue(row.pdbx_pdb_ins_code);
+  const x = parseFloatSafe(row.cartn_x);
+  const y = parseFloatSafe(row.cartn_y);
+  const z = parseFloatSafe(row.cartn_z);
+  if (![x, y, z].every(Number.isFinite)) return null;
+  const occupancy = parseFloatSafe(row.occupancy);
+  const bFactor = parseFloatSafe(row.b_iso_or_equiv);
+  const element = inferElement(firstCIFValue(row.type_symbol), name);
+  const isWater = WATER_RESIDUES.has(resName);
+  const isHydrogen = element === 'H' || name.startsWith('H');
+  const residueID = seqText || String(resSeq || 0);
+  const residueKey = `${chain}:${residueID}${iCode}:${resName}`;
+  const isHet = record === 'HETATM';
+  const polymerType = inferPolymerType(resName);
+  const labelComp = firstCIFValue(row.label_comp_id) || resName;
+  const authComp = firstCIFValue(row.auth_comp_id) || resName;
+  const labelAtom = firstCIFValue(row.label_atom_id) || name;
+  const authAtom = firstCIFValue(row.auth_atom_id) || name;
+  return {
+    id,
+    serial,
+    name,
+    altLoc: firstCIFValue(row.label_alt_id),
+    resName,
+    chain,
+    authChain: authChain || chain,
+    labelChain: labelChain || chain,
+    resSeq,
+    authSeq,
+    labelSeq,
+    iCode,
+    x,
+    y,
+    z,
+    occupancy: Number.isFinite(occupancy) ? occupancy : 0,
+    bFactor: Number.isFinite(bFactor) ? bFactor : 0,
+    element,
+    record,
+    isHet,
+    isWater,
+    isHydrogen,
+    residueKey,
+    authKey: atomLookupKey(authChain || chain, authSeq || seqText, iCode, authComp, authAtom),
+    labelKey: atomLookupKey(labelChain || chain, labelSeq || seqText, iCode, labelComp, labelAtom),
+    polymerType,
+    ss: 'coil',
+  };
+}
+
+function applyMMCIFMetadata(structure, cif, label) {
+  const code = getCIFValue(cif, ['_entry.id']) || cif.dataBlock || '';
+  const title = getCIFValue(cif, ['_struct.title']) || label;
+  const methods = getCIFColumnValues(cif, 'exptl', 'method');
+  const resolution = getCIFValue(cif, [
+    '_refine.ls_d_res_high',
+    '_em_3d_reconstruction.resolution',
+    '_reflns.d_resolution_high',
+  ]);
+  structure.meta.code = code;
+  structure.meta.title = code ? `${code}: ${collapseWhitespace(title)}` : collapseWhitespace(title);
+  structure.meta.classification = getCIFValue(cif, ['_struct_keywords.pdbx_keywords', '_struct_keywords.text']);
+  structure.meta.keywords = getCIFValue(cif, ['_struct_keywords.text', '_struct_keywords.pdbx_keywords']);
+  structure.meta.method = methods.join('; ') || getCIFValue(cif, ['_exptl.method']);
+  structure.meta.resolution = resolution ? formatResolution(resolution) : '';
+  structure.meta.entities = getCIFRows(cif, 'entity').map((row) => ({
+    id: cleanCIFValue(row.id),
+    type: cleanCIFValue(row.type),
+    description: cleanCIFValue(row.pdbx_description),
+  })).filter((entity) => entity.id || entity.description);
+}
+
+function applyMMCIFSecondaryStructure(structure, cif) {
+  for (const row of getCIFRows(cif, 'struct_conf')) {
+    const type = cleanCIFValue(row.conf_type_id).toUpperCase();
+    const range = cifResidueRange(row);
+    if (!range) continue;
+    if (type.startsWith('HELX') || type.includes('HELIX')) {
+      structure.helices.push({ ...range, type: 'helix' });
+    } else if (type.startsWith('STRN') || type.includes('SHEET') || type.includes('BETA')) {
+      structure.sheets.push({ ...range, type: 'sheet' });
+    }
+  }
+  for (const row of getCIFRows(cif, 'struct_sheet_range')) {
+    const range = cifResidueRange(row);
+    if (range) structure.sheets.push({ ...range, type: 'sheet' });
+  }
+}
+
+function cifResidueRange(row) {
+  const chain = firstCIFValue(row.beg_auth_asym_id, row.beg_label_asym_id);
+  const start = parseIntSafe(firstCIFValue(row.beg_auth_seq_id, row.beg_label_seq_id));
+  const end = parseIntSafe(firstCIFValue(row.end_auth_seq_id, row.end_label_seq_id));
+  if (!chain || !start || !end) return null;
+  return { chain, start, end };
+}
+
+function applyMMCIFConnections(structure, cif) {
+  for (const row of getCIFRows(cif, 'struct_conn')) {
+    const aKeys = cifPartnerKeys(row, 'ptnr1');
+    const bKeys = cifPartnerKeys(row, 'ptnr2');
+    if (aKeys.length && bKeys.length) {
+      structure.conect.push({
+        aKeys,
+        bKeys,
+        type: cleanCIFValue(row.conn_type_id),
+      });
+    }
+  }
+}
+
+function applyMMCIFAssemblies(structure, cif) {
+  const operations = parseAssemblyOperations(cif);
+  const assemblies = new Map();
+  for (const row of getCIFRows(cif, 'pdbx_struct_assembly')) {
+    const id = firstCIFValue(row.id);
+    if (!id) continue;
+    assemblies.set(id, {
+      id,
+      details: firstCIFValue(row.details),
+      methodDetails: firstCIFValue(row.method_details),
+      oligomericDetails: firstCIFValue(row.oligomeric_details),
+      oligomericCount: firstCIFValue(row.oligomeric_count),
+      generators: [],
+      estimatedAtoms: 0,
+    });
+  }
+  for (const row of getCIFRows(cif, 'pdbx_struct_assembly_gen')) {
+    const assemblyID = firstCIFValue(row.assembly_id);
+    if (!assemblyID) continue;
+    if (!assemblies.has(assemblyID)) {
+      assemblies.set(assemblyID, {
+        id: assemblyID,
+        details: '',
+        methodDetails: '',
+        oligomericDetails: '',
+        oligomericCount: '',
+        generators: [],
+        estimatedAtoms: 0,
+      });
+    }
+    const combos = parseOperationExpression(firstCIFValue(row.oper_expression));
+    const transforms = combos.map((combo) => resolveOperationCombo(combo, operations)).filter(Boolean);
+    assemblies.get(assemblyID).generators.push({
+      asymIDs: new Set(splitCIFList(row.asym_id_list)),
+      authAsymIDs: new Set(splitCIFList(row.auth_asym_id_list)),
+      expression: firstCIFValue(row.oper_expression),
+      transforms,
+    });
+  }
+  structure.assemblies = [...assemblies.values()]
+    .filter((assembly) => assembly.generators.some((generator) => generator.transforms.length > 0))
+    .sort((a, b) => naturalCompare(a.id, b.id));
+}
+
+function parseAssemblyOperations(cif) {
+  const operations = new Map();
+  for (const row of getCIFRows(cif, 'pdbx_struct_oper_list')) {
+    const id = firstCIFValue(row.id);
+    if (!id) continue;
+    operations.set(id, {
+      id,
+      matrix: [
+        [parseFloatDefault(row['matrix[1][1]'], 1), parseFloatDefault(row['matrix[1][2]'], 0), parseFloatDefault(row['matrix[1][3]'], 0)],
+        [parseFloatDefault(row['matrix[2][1]'], 0), parseFloatDefault(row['matrix[2][2]'], 1), parseFloatDefault(row['matrix[2][3]'], 0)],
+        [parseFloatDefault(row['matrix[3][1]'], 0), parseFloatDefault(row['matrix[3][2]'], 0), parseFloatDefault(row['matrix[3][3]'], 1)],
+      ],
+      vector: [
+        parseFloatDefault(row['vector[1]'], 0),
+        parseFloatDefault(row['vector[2]'], 0),
+        parseFloatDefault(row['vector[3]'], 0),
+      ],
+    });
+  }
+  if (!operations.has('1')) operations.set('1', identityOperation('1'));
+  return operations;
+}
+
+function parseOperationExpression(expression) {
+  const clean = cleanCIFValue(expression).replace(/\s+/g, '');
+  if (!clean) return [];
+  const groups = [];
+  const matches = clean.matchAll(/\(([^()]+)\)/g);
+  for (const match of matches) groups.push(parseOperationList(match[1]));
+  if (!groups.length) groups.push(parseOperationList(clean));
+  return cartesianProduct(groups).filter((combo) => combo.length > 0);
+}
+
+function parseOperationList(value) {
+  const items = [];
+  for (const part of String(value || '').split(',')) {
+    const clean = part.trim();
+    if (!clean) continue;
+    const range = clean.match(/^(-?\d+)-(-?\d+)$/);
+    if (range) {
+      const start = Number(range[1]);
+      const end = Number(range[2]);
+      const step = start <= end ? 1 : -1;
+      for (let value = start; step > 0 ? value <= end : value >= end; value += step) {
+        items.push(String(value));
+      }
+    } else {
+      items.push(clean);
+    }
+  }
+  return items;
+}
+
+function cartesianProduct(groups) {
+  return groups.reduce((sets, group) => {
+    const next = [];
+    for (const set of sets) {
+      for (const item of group) next.push([...set, item]);
+    }
+    return next;
+  }, [[]]);
+}
+
+function resolveOperationCombo(combo, operations) {
+  let combined = identityOperation(combo.join('x') || '1');
+  for (let index = combo.length - 1; index >= 0; index -= 1) {
+    const operation = operations.get(combo[index]);
+    if (!operation) return null;
+    combined = composeOperations(operation, combined);
+  }
+  combined.id = combo.join('x') || '1';
+  return combined;
+}
+
+function identityOperation(id = '1') {
+  return {
+    id,
+    matrix: [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
+    vector: [0, 0, 0],
+  };
+}
+
+function composeOperations(a, b) {
+  const matrix = multiplyMatrix3(a.matrix, b.matrix);
+  const rotatedVector = multiplyMatrixVector3(a.matrix, b.vector);
+  return {
+    id: `${a.id}x${b.id}`,
+    matrix,
+    vector: [
+      rotatedVector[0] + a.vector[0],
+      rotatedVector[1] + a.vector[1],
+      rotatedVector[2] + a.vector[2],
+    ],
+  };
+}
+
+function multiplyMatrix3(a, b) {
+  return [
+    [
+      a[0][0] * b[0][0] + a[0][1] * b[1][0] + a[0][2] * b[2][0],
+      a[0][0] * b[0][1] + a[0][1] * b[1][1] + a[0][2] * b[2][1],
+      a[0][0] * b[0][2] + a[0][1] * b[1][2] + a[0][2] * b[2][2],
+    ],
+    [
+      a[1][0] * b[0][0] + a[1][1] * b[1][0] + a[1][2] * b[2][0],
+      a[1][0] * b[0][1] + a[1][1] * b[1][1] + a[1][2] * b[2][1],
+      a[1][0] * b[0][2] + a[1][1] * b[1][2] + a[1][2] * b[2][2],
+    ],
+    [
+      a[2][0] * b[0][0] + a[2][1] * b[1][0] + a[2][2] * b[2][0],
+      a[2][0] * b[0][1] + a[2][1] * b[1][1] + a[2][2] * b[2][1],
+      a[2][0] * b[0][2] + a[2][1] * b[1][2] + a[2][2] * b[2][2],
+    ],
+  ];
+}
+
+function multiplyMatrixVector3(matrix, vector) {
+  return [
+    matrix[0][0] * vector[0] + matrix[0][1] * vector[1] + matrix[0][2] * vector[2],
+    matrix[1][0] * vector[0] + matrix[1][1] * vector[1] + matrix[1][2] * vector[2],
+    matrix[2][0] * vector[0] + matrix[2][1] * vector[1] + matrix[2][2] * vector[2],
+  ];
+}
+
+function applyOperationToPoint(operation, atom) {
+  const rotated = multiplyMatrixVector3(operation.matrix, [atom.x, atom.y, atom.z]);
+  return [
+    rotated[0] + operation.vector[0],
+    rotated[1] + operation.vector[1],
+    rotated[2] + operation.vector[2],
+  ];
+}
+
+function splitCIFList(value) {
+  return cleanCIFValue(value).split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function cifPartnerKeys(row, prefix) {
+  const keys = [];
+  const ins = firstCIFValue(
+    row[`pdbx_${prefix}_pdb_ins_code`],
+    row[`pdbx_${prefix}_label_pdb_ins_code`],
+    row[`${prefix}_pdb_ins_code`],
+  );
+  const authKey = atomLookupKey(
+    firstCIFValue(row[`${prefix}_auth_asym_id`], row[`pdbx_${prefix}_auth_asym_id`]),
+    firstCIFValue(row[`${prefix}_auth_seq_id`], row[`pdbx_${prefix}_auth_seq_id`]),
+    ins,
+    firstCIFValue(row[`${prefix}_auth_comp_id`], row[`pdbx_${prefix}_auth_comp_id`]),
+    firstCIFValue(row[`${prefix}_auth_atom_id`], row[`pdbx_${prefix}_auth_atom_id`]),
+  );
+  const labelKey = atomLookupKey(
+    firstCIFValue(row[`${prefix}_label_asym_id`]),
+    firstCIFValue(row[`${prefix}_label_seq_id`]),
+    ins,
+    firstCIFValue(row[`${prefix}_label_comp_id`]),
+    firstCIFValue(row[`${prefix}_label_atom_id`]),
+  );
+  if (authKey) keys.push(authKey);
+  if (labelKey && labelKey !== authKey) keys.push(labelKey);
+  return keys;
+}
+
+function parseCIFDocument(text) {
+  const tokens = tokenizeCIF(text);
+  const cif = {
+    dataBlock: '',
+    fields: new Map(),
+    loops: new Map(),
+  };
+  let index = 0;
+  while (index < tokens.length) {
+    const token = tokens[index];
+    const lower = token.toLowerCase();
+    if (lower.startsWith('data_')) {
+      cif.dataBlock = token.slice(5).trim();
+      index += 1;
+    } else if (lower === 'loop_') {
+      index += 1;
+      const headers = [];
+      while (index < tokens.length && tokens[index].startsWith('_')) {
+        headers.push(tokens[index]);
+        index += 1;
+      }
+      if (!headers.length) continue;
+      const parsedHeaders = headers.map(splitCIFTag);
+      const category = parsedHeaders[0]?.category ?? '';
+      const rows = [];
+      while (index < tokens.length && !isCIFControlToken(tokens[index])) {
+        const row = {};
+        let complete = true;
+        for (let column = 0; column < parsedHeaders.length; column += 1) {
+          if (index >= tokens.length || isCIFControlToken(tokens[index])) {
+            complete = false;
+            break;
+          }
+          row[parsedHeaders[column].attribute] = tokens[index];
+          index += 1;
+        }
+        if (complete) rows.push(row);
+      }
+      if (category && rows.length) {
+        if (!cif.loops.has(category)) cif.loops.set(category, []);
+        cif.loops.get(category).push(...rows);
+      }
+    } else if (token.startsWith('_')) {
+      if (index + 1 < tokens.length) cif.fields.set(normalizeCIFTag(token), tokens[index + 1]);
+      index += 2;
+    } else {
+      index += 1;
+    }
+  }
+  return cif;
+}
+
+function tokenizeCIF(text) {
+  const tokens = [];
+  let index = 0;
+  while (index < text.length) {
+    while (index < text.length && /\s/.test(text[index])) index += 1;
+    if (index >= text.length) break;
+    const char = text[index];
+    if (char === '#') {
+      while (index < text.length && text[index] !== '\n') index += 1;
+      continue;
+    }
+    if (char === ';' && (index === 0 || text[index - 1] === '\n')) {
+      let start = index + 1;
+      if (text[start] === '\r') start += 1;
+      if (text[start] === '\n') start += 1;
+      let end = text.length;
+      let cursor = start;
+      while (cursor < text.length) {
+        const next = text.indexOf('\n;', cursor);
+        if (next < 0) break;
+        end = next;
+        index = next + 2;
+        while (index < text.length && text[index] !== '\n') index += 1;
+        if (index < text.length) index += 1;
+        break;
+      }
+      if (end === text.length) index = text.length;
+      tokens.push(text.slice(start, end));
+      continue;
+    }
+    if (char === '\'' || char === '"') {
+      const quote = char;
+      index += 1;
+      const start = index;
+      while (index < text.length && text[index] !== quote) index += 1;
+      tokens.push(text.slice(start, index));
+      if (index < text.length) index += 1;
+      continue;
+    }
+    const start = index;
+    while (index < text.length && !/\s/.test(text[index])) index += 1;
+    tokens.push(text.slice(start, index));
+  }
+  return tokens;
+}
+
+function splitCIFTag(tag) {
+  const key = normalizeCIFTag(tag).replace(/^_/, '');
+  const dot = key.indexOf('.');
+  if (dot < 0) return { category: key, attribute: '' };
+  return {
+    category: key.slice(0, dot),
+    attribute: key.slice(dot + 1),
+  };
+}
+
+function normalizeCIFTag(tag) {
+  return String(tag || '').trim().toLowerCase();
+}
+
+function isCIFControlToken(token) {
+  const lower = token.toLowerCase();
+  return token.startsWith('_') || lower === 'loop_' || lower === 'stop_' || lower.startsWith('data_') || lower.startsWith('save_');
+}
+
+function getCIFRows(cif, category) {
+  const key = String(category).toLowerCase();
+  const loopRows = cif.loops.get(key);
+  if (loopRows?.length) return loopRows;
+  const prefix = `_${key}.`;
+  const row = {};
+  for (const [tag, value] of cif.fields.entries()) {
+    if (tag.startsWith(prefix)) row[tag.slice(prefix.length)] = value;
+  }
+  return Object.keys(row).length ? [row] : [];
+}
+
+function getCIFValue(cif, tags) {
+  for (const tag of tags) {
+    const key = normalizeCIFTag(tag);
+    const direct = cleanCIFValue(cif.fields.get(key));
+    if (direct) return direct;
+    const { category, attribute } = splitCIFTag(key);
+    for (const row of getCIFRows(cif, category)) {
+      const value = cleanCIFValue(row[attribute]);
+      if (value) return value;
+    }
+  }
+  return '';
+}
+
+function getCIFColumnValues(cif, category, attribute) {
+  const values = [];
+  const seen = new Set();
+  for (const row of getCIFRows(cif, category)) {
+    const value = cleanCIFValue(row[String(attribute).toLowerCase()]);
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    values.push(value);
+  }
+  return values;
+}
+
+function firstCIFValue(...values) {
+  for (const value of values) {
+    const clean = cleanCIFValue(value);
+    if (clean) return clean;
+  }
+  return '';
+}
+
+function cleanCIFValue(value) {
+  const clean = String(value ?? '').trim();
+  return clean === '.' || clean === '?' ? '' : clean;
+}
+
+function collapseWhitespace(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function formatResolution(value) {
+  const clean = cleanCIFValue(value);
+  return clean && !/angstrom/i.test(clean) ? `${clean} Angstroms` : clean;
+}
+
+function prepareAssemblyEstimates(structure) {
+  if (!structure.assemblies.length || !structure.baseModels.length) return;
+  const firstModel = structure.baseModels[0];
+  for (const assembly of structure.assemblies) {
+    assembly.estimatedAtoms = estimateAssemblyAtoms(firstModel, assembly);
+  }
+}
+
+function estimateAssemblyAtoms(model, assembly) {
+  let total = 0;
+  for (const generator of assembly.generators) {
+    const selected = model.atoms.filter((atom) => atomMatchesAssemblyGenerator(atom, generator)).length;
+    total += selected * generator.transforms.length;
+  }
+  return total;
+}
+
+async function activateAssembly(assemblyID) {
+  const structure = state.structure;
+  if (!structure || structure.activeAssemblyId === assemblyID) return;
+  const previousAssemblyID = structure.activeAssemblyId;
+  const previousModels = structure.models;
+  const previousActiveModel = state.activeModel;
+  els.loading.classList.remove('is-hidden', 'is-error');
+  setLoading(assemblyID === ASYMMETRIC_UNIT_ID ? 'Restoring asymmetric unit' : `Building assembly ${assemblyID}`);
+  await nextFrame();
+  try {
+    structure.activeAssemblyId = assemblyID;
+    structure.models = materializeAssemblyModels(structure, assemblyID);
+    state.activeModel = 0;
+    state.selectedAtom = null;
+    state.hoveredAtom = null;
+    state.lastMeasureAtom = null;
+    state.measurements = [];
+    state.isolatedChain = null;
+    deriveStructure(structure);
+    updateStructureUI();
+    fitModel(true);
+    rebuildScene();
+    els.loading.classList.add('is-hidden');
+  } catch (error) {
+    console.error(error);
+    structure.activeAssemblyId = previousAssemblyID;
+    structure.models = previousModels;
+    state.activeModel = previousActiveModel;
+    updateStructureUI();
+    els.loading.classList.add('is-hidden');
+  }
+}
+
+function materializeAssemblyModels(structure, assemblyID) {
+  if (assemblyID === ASYMMETRIC_UNIT_ID) return structure.baseModels;
+  const assembly = structure.assemblies.find((item) => item.id === assemblyID);
+  if (!assembly) return structure.baseModels;
+  if (assembly.estimatedAtoms > MAX_ASSEMBLY_ATOMS) {
+    throw new Error(`Assembly ${assembly.id} would create ${formatNumber(assembly.estimatedAtoms)} atoms/model, above the ${formatNumber(MAX_ASSEMBLY_ATOMS)} atom safety limit.`);
+  }
+  return structure.baseModels.map((baseModel) => materializeAssemblyModel(baseModel, assembly));
+}
+
+function materializeAssemblyModel(baseModel, assembly) {
+  const model = createModel(baseModel.number);
+  model.precomputedBonds = [];
+  const chainCopyCounts = countAssemblyChainCopies(baseModel, assembly);
+  const chainOccurrences = new Map();
+
+  for (const generator of assembly.generators) {
+    const selectedAtoms = baseModel.atoms.filter((atom) => atomMatchesAssemblyGenerator(atom, generator));
+    if (!selectedAtoms.length) continue;
+    const selectedIDs = new Set(selectedAtoms.map((atom) => atom.id));
+    for (const transform of generator.transforms) {
+      const atomIDMap = new Map();
+      const chainLabels = assemblyChainLabels(selectedAtoms, chainCopyCounts, chainOccurrences);
+      for (const atom of selectedAtoms) {
+        const copy = transformAssemblyAtom(atom, model.atoms.length, transform, chainLabels.get(atom.chain) || atom.chain);
+        atomIDMap.set(atom.id, copy.id);
+        addAtomToModel(model, copy);
+      }
+      for (const bond of baseModel.bonds ?? []) {
+        if (!selectedIDs.has(bond.a) || !selectedIDs.has(bond.b)) continue;
+        const a = atomIDMap.get(bond.a);
+        const b = atomIDMap.get(bond.b);
+        if (a !== undefined && b !== undefined) model.precomputedBonds.push({ a, b, explicit: bond.explicit });
+      }
+    }
+  }
+  return model;
+}
+
+function countAssemblyChainCopies(model, assembly) {
+  const counts = new Map();
+  for (const generator of assembly.generators) {
+    const seen = new Set();
+    for (const atom of model.atoms) {
+      if (!atomMatchesAssemblyGenerator(atom, generator)) continue;
+      seen.add(atom.chain);
+    }
+    for (const chain of seen) {
+      counts.set(chain, (counts.get(chain) || 0) + generator.transforms.length);
+    }
+  }
+  return counts;
+}
+
+function assemblyChainLabels(atoms, chainCopyCounts, chainOccurrences) {
+  const labels = new Map();
+  for (const atom of atoms) {
+    if (labels.has(atom.chain)) continue;
+    const copies = chainCopyCounts.get(atom.chain) || 1;
+    if (copies <= 1) {
+      labels.set(atom.chain, atom.chain);
+    } else {
+      const next = (chainOccurrences.get(atom.chain) || 0) + 1;
+      chainOccurrences.set(atom.chain, next);
+      labels.set(atom.chain, `${atom.chain}.${next}`);
+    }
+  }
+  return labels;
+}
+
+function atomMatchesAssemblyGenerator(atom, generator) {
+  if (generator.asymIDs.size && generator.asymIDs.has(atom.labelChain)) return true;
+  if (generator.authAsymIDs.size && generator.authAsymIDs.has(atom.authChain || atom.chain)) return true;
+  return !generator.asymIDs.size && !generator.authAsymIDs.size;
+}
+
+function transformAssemblyAtom(atom, id, transform, chain) {
+  const [x, y, z] = applyOperationToPoint(transform, atom);
+  const copy = {
+    ...atom,
+    id,
+    serial: id + 1,
+    chain,
+    x,
+    y,
+    z,
+  };
+  copy.residueKey = `${copy.chain}:${copy.authSeq || copy.labelSeq || copy.resSeq}${copy.iCode}:${copy.resName}`;
+  copy.authKey = atomLookupKey(copy.chain, copy.authSeq || copy.resSeq, copy.iCode, copy.resName, copy.name);
+  copy.labelKey = atomLookupKey(copy.chain, copy.labelSeq || copy.resSeq, copy.iCode, copy.resName, copy.name);
+  return copy;
 }
 
 function deriveStructure(structure) {
@@ -761,9 +1516,11 @@ function assignSecondary(model, structure) {
 function buildBonds(model, conectRecords) {
   const bonds = [];
   const seen = new Set();
-  for (const [sourceSerial, targetSerial] of conectRecords) {
-    const a = model.serialToIndex.get(sourceSerial);
-    const b = model.serialToIndex.get(targetSerial);
+  for (const bond of model.precomputedBonds ?? []) {
+    addBond(bonds, seen, bond.a, bond.b, bond.explicit);
+  }
+  for (const connection of conectRecords) {
+    const [a, b] = resolveConnection(model, connection);
     if (a === undefined || b === undefined || a === b) continue;
     addBond(bonds, seen, a, b, true);
   }
@@ -795,6 +1552,23 @@ function buildBonds(model, conectRecords) {
     }
   }
   return bonds;
+}
+
+function resolveConnection(model, connection) {
+  if (Array.isArray(connection)) {
+    return [model.serialToIndex.get(connection[0]), model.serialToIndex.get(connection[1])];
+  }
+  return [
+    firstMappedIndex(model.atomKeyToIndex, connection.aKeys),
+    firstMappedIndex(model.atomKeyToIndex, connection.bKeys),
+  ];
+}
+
+function firstMappedIndex(map, keys) {
+  for (const key of keys ?? []) {
+    if (map.has(key)) return map.get(key);
+  }
+  return undefined;
 }
 
 function shouldInferBond(a, b) {
@@ -1461,6 +2235,8 @@ function updateStructureUI() {
   const structure = state.structure;
   els.title.textContent = structure.meta.title;
   document.title = `${structure.meta.code || 'Structure'} · Proteoscope`;
+  updateStructureMetadata();
+  updateAssemblyOptions();
   els.residuesMetric.textContent = formatNumber(structure.residues.length);
   els.chainsMetric.textContent = formatNumber(structure.chains.length);
   els.modelsMetric.textContent = formatNumber(structure.models.length);
@@ -1471,6 +2247,58 @@ function updateStructureUI() {
   updateModelMetrics();
   renderChains();
   clearSearch();
+}
+
+function updateStructureMetadata() {
+  const structure = state.structure;
+  const assembly = activeAssembly();
+  els.metaFormat.textContent = structure.format === 'mmcif' ? 'PDBx/mmCIF' : 'PDB';
+  els.metaMethod.textContent = structure.meta.method || 'Unknown';
+  els.metaResolution.textContent = structure.meta.resolution || 'N/A';
+  els.metaEntry.textContent = structure.meta.code || 'Local';
+  els.metaAssembly.textContent = assembly ? assemblyLabel(assembly, false) : 'Asymmetric unit';
+  els.metaFormat.title = els.metaFormat.textContent;
+  els.metaMethod.title = els.metaMethod.textContent;
+  els.metaResolution.title = els.metaResolution.textContent;
+  els.metaEntry.title = els.metaEntry.textContent;
+  els.metaAssembly.title = els.metaAssembly.textContent;
+}
+
+function updateAssemblyOptions() {
+  const structure = state.structure;
+  const hasAssemblies = structure.assemblies.length > 0;
+  els.assemblyField.hidden = !hasAssemblies;
+  els.assemblyField.style.display = hasAssemblies ? '' : 'none';
+  els.assemblySelect.replaceChildren();
+  if (!hasAssemblies) return;
+  const asymmetric = document.createElement('option');
+  asymmetric.value = ASYMMETRIC_UNIT_ID;
+  asymmetric.textContent = 'Asymmetric unit';
+  els.assemblySelect.appendChild(asymmetric);
+  for (const assembly of structure.assemblies) {
+    const option = document.createElement('option');
+    option.value = assembly.id;
+    option.textContent = assemblyLabel(assembly, true);
+    option.disabled = assembly.estimatedAtoms > MAX_ASSEMBLY_ATOMS;
+    if (option.disabled) {
+      option.textContent += ' · too large';
+      option.title = `Estimated ${formatNumber(assembly.estimatedAtoms)} atoms/model exceeds the ${formatNumber(MAX_ASSEMBLY_ATOMS)} atom safety limit.`;
+    }
+    els.assemblySelect.appendChild(option);
+  }
+  els.assemblySelect.value = structure.activeAssemblyId;
+}
+
+function activeAssembly() {
+  const structure = state.structure;
+  if (!structure || structure.activeAssemblyId === ASYMMETRIC_UNIT_ID) return null;
+  return structure.assemblies.find((assembly) => assembly.id === structure.activeAssemblyId) || null;
+}
+
+function assemblyLabel(assembly, includeAtoms) {
+  const details = assembly.oligomericDetails || assembly.details || 'assembly';
+  const atoms = includeAtoms && assembly.estimatedAtoms ? ` · ${formatNumber(assembly.estimatedAtoms)} atoms/model` : '';
+  return `${assembly.id}: ${details}${atoms}`;
 }
 
 function populateSamples() {
@@ -1699,8 +2527,21 @@ function parseFloatSafe(value) {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+function parseFloatDefault(value, fallback) {
+  const parsed = parseFloatSafe(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function formatNumber(value) {
   return Number(value || 0).toLocaleString();
+}
+
+function naturalCompare(a, b) {
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function nextFrame() {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
 }
 
 function align4(size) {

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -19,7 +20,7 @@ import (
 	"time"
 )
 
-//go:embed web/* data/*.pdb
+//go:embed web/* data
 var content embed.FS
 
 type sample struct {
@@ -109,7 +110,7 @@ func loadSamples() ([]sample, error) {
 	}
 	var samples []sample
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".pdb") {
+		if entry.IsDir() || !isStructureFile(entry.Name()) {
 			continue
 		}
 		path := "data/" + entry.Name()
@@ -128,9 +129,31 @@ func loadSamples() ([]sample, error) {
 	return samples, nil
 }
 
-func parseSample(filename, pdb string) sample {
-	id := strings.TrimSuffix(filename, ".pdb")
-	item := sample{ID: id, Name: strings.ToUpper(id), Models: 1}
+func isStructureFile(filename string) bool {
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".pdb", ".cif", ".mmcif":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseSample(filename, body string) sample {
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".cif", ".mmcif":
+		return parseCIFSample(filename, body)
+	default:
+		return parsePDBSample(filename, body)
+	}
+}
+
+func newSample(filename string) sample {
+	base := strings.TrimSuffix(filename, filepath.Ext(filename))
+	return sample{ID: filename, Name: strings.ToUpper(base), Models: 1}
+}
+
+func parsePDBSample(filename, pdb string) sample {
+	item := newSample(filename)
 	chains := make(map[string]bool)
 	residues := make(map[string]bool)
 	models := 0
@@ -175,6 +198,294 @@ func parseSample(filename, pdb string) sample {
 	item.Chains = len(chains)
 	item.Residues = len(residues)
 	return item
+}
+
+func parseCIFSample(filename, body string) sample {
+	item := newSample(filename)
+	cif := parseCIF(body)
+
+	if code := cifClean(cifValue(cif, "_entry.id")); code != "" {
+		item.Name = code
+	}
+	title := cifClean(cifValue(cif, "_struct.title"))
+	if title != "" {
+		item.Title = collapseSpace(title)
+	}
+	if item.Title == "" {
+		item.Title = item.Name
+	}
+	if item.Name != "" && !strings.HasPrefix(strings.ToUpper(item.Title), strings.ToUpper(item.Name)+":") {
+		item.Title = item.Name + ": " + item.Title
+	}
+	item.Classification = firstClean(
+		cifValue(cif, "_struct_keywords.pdbx_keywords"),
+		cifValue(cif, "_struct_keywords.text"),
+	)
+	item.Method = strings.Join(cifColumnValues(cif, "exptl", "method"), "; ")
+	if item.Method == "" {
+		item.Method = cifClean(cifValue(cif, "_exptl.method"))
+	}
+	item.Resolution = firstClean(
+		cifValue(cif, "_refine.ls_d_res_high"),
+		cifValue(cif, "_em_3d_reconstruction.resolution"),
+		cifValue(cif, "_reflns.d_resolution_high"),
+	)
+	if item.Resolution != "" && !strings.Contains(strings.ToLower(item.Resolution), "angstrom") {
+		item.Resolution += " Angstroms"
+	}
+
+	chains := make(map[string]bool)
+	residues := make(map[string]bool)
+	models := make(map[string]bool)
+	for _, row := range cif.loops["atom_site"] {
+		group := strings.ToUpper(cifClean(row["group_pdb"]))
+		if group != "ATOM" && group != "HETATM" {
+			continue
+		}
+		altLoc := cifClean(row["label_alt_id"])
+		if altLoc != "" && altLoc != "A" && altLoc != "1" {
+			continue
+		}
+		item.Atoms++
+		chain := firstClean(row["auth_asym_id"], row["label_asym_id"])
+		if chain == "" {
+			chain = "_"
+		}
+		resSeq := firstClean(row["auth_seq_id"], row["label_seq_id"])
+		resName := firstClean(row["auth_comp_id"], row["label_comp_id"])
+		model := cifClean(row["pdbx_pdb_model_num"])
+		if model == "" {
+			model = "1"
+		}
+		chains[chain] = true
+		residues[chain+"|"+resSeq+"|"+resName] = true
+		models[model] = true
+	}
+	if len(models) > 0 {
+		item.Models = len(models)
+	}
+	item.Chains = len(chains)
+	item.Residues = len(residues)
+	return item
+}
+
+type cifDoc struct {
+	fields    map[string]string
+	loops     map[string][]map[string]string
+	dataBlock string
+}
+
+func parseCIF(body string) cifDoc {
+	tokens := tokenizeCIF(body)
+	doc := cifDoc{
+		fields: make(map[string]string),
+		loops:  make(map[string][]map[string]string),
+	}
+	for i := 0; i < len(tokens); {
+		token := tokens[i]
+		lower := strings.ToLower(token)
+		switch {
+		case strings.HasPrefix(lower, "data_"):
+			doc.dataBlock = strings.TrimSpace(token[5:])
+			i++
+		case lower == "loop_":
+			i++
+			var headers []string
+			for i < len(tokens) && strings.HasPrefix(tokens[i], "_") {
+				headers = append(headers, tokens[i])
+				i++
+			}
+			if len(headers) == 0 {
+				continue
+			}
+			category, attrs := cifHeaderParts(headers)
+			var rows []map[string]string
+			for i < len(tokens) && !cifControlToken(tokens[i]) {
+				row := make(map[string]string, len(headers))
+				complete := true
+				for column := 0; column < len(headers); column++ {
+					if i >= len(tokens) || cifControlToken(tokens[i]) {
+						complete = false
+						break
+					}
+					row[attrs[column]] = tokens[i]
+					i++
+				}
+				if complete {
+					rows = append(rows, row)
+				}
+			}
+			if category != "" && len(rows) > 0 {
+				doc.loops[category] = append(doc.loops[category], rows...)
+			}
+		case strings.HasPrefix(token, "_"):
+			if i+1 < len(tokens) {
+				doc.fields[cifTagKey(token)] = tokens[i+1]
+				i += 2
+			} else {
+				i++
+			}
+		default:
+			i++
+		}
+	}
+	return doc
+}
+
+func tokenizeCIF(text string) []string {
+	var tokens []string
+	for i := 0; i < len(text); {
+		for i < len(text) && isCIFSpace(text[i]) {
+			i++
+		}
+		if i >= len(text) {
+			break
+		}
+		if text[i] == '#' {
+			for i < len(text) && text[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		if text[i] == ';' && (i == 0 || text[i-1] == '\n') {
+			start := i + 1
+			if start < len(text) && text[start] == '\r' {
+				start++
+			}
+			if start < len(text) && text[start] == '\n' {
+				start++
+			}
+			searchFrom := start
+			end := len(text)
+			for searchFrom < len(text) {
+				offset := strings.Index(text[searchFrom:], "\n;")
+				if offset < 0 {
+					break
+				}
+				end = searchFrom + offset
+				i = end + 2
+				for i < len(text) && text[i] != '\n' {
+					i++
+				}
+				if i < len(text) {
+					i++
+				}
+				break
+			}
+			if end == len(text) {
+				i = len(text)
+			}
+			tokens = append(tokens, text[start:end])
+			continue
+		}
+		if text[i] == '\'' || text[i] == '"' {
+			quote := text[i]
+			i++
+			start := i
+			for i < len(text) && text[i] != quote {
+				i++
+			}
+			tokens = append(tokens, text[start:i])
+			if i < len(text) {
+				i++
+			}
+			continue
+		}
+		start := i
+		for i < len(text) && !isCIFSpace(text[i]) {
+			i++
+		}
+		tokens = append(tokens, text[start:i])
+	}
+	return tokens
+}
+
+func cifHeaderParts(headers []string) (string, []string) {
+	attrs := make([]string, len(headers))
+	category := ""
+	for i, header := range headers {
+		cat, attr := cifTagParts(header)
+		if category == "" {
+			category = cat
+		}
+		attrs[i] = attr
+	}
+	return category, attrs
+}
+
+func cifTagParts(tag string) (string, string) {
+	key := cifTagKey(tag)
+	key = strings.TrimPrefix(key, "_")
+	parts := strings.SplitN(key, ".", 2)
+	if len(parts) != 2 {
+		return key, ""
+	}
+	return parts[0], parts[1]
+}
+
+func cifTagKey(tag string) string {
+	return strings.ToLower(strings.TrimSpace(tag))
+}
+
+func cifControlToken(token string) bool {
+	lower := strings.ToLower(token)
+	return strings.HasPrefix(token, "_") ||
+		lower == "loop_" ||
+		lower == "stop_" ||
+		strings.HasPrefix(lower, "data_") ||
+		strings.HasPrefix(lower, "save_")
+}
+
+func isCIFSpace(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
+}
+
+func cifValue(doc cifDoc, tag string) string {
+	if value, ok := doc.fields[cifTagKey(tag)]; ok {
+		return value
+	}
+	category, attr := cifTagParts(tag)
+	for _, row := range doc.loops[category] {
+		if value, ok := row[attr]; ok {
+			return value
+		}
+	}
+	return ""
+}
+
+func cifColumnValues(doc cifDoc, category, attr string) []string {
+	var values []string
+	seen := make(map[string]bool)
+	for _, row := range doc.loops[strings.ToLower(category)] {
+		value := cifClean(row[strings.ToLower(attr)])
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		values = append(values, value)
+	}
+	return values
+}
+
+func cifClean(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "." || value == "?" {
+		return ""
+	}
+	return value
+}
+
+func firstClean(values ...string) string {
+	for _, value := range values {
+		if clean := cifClean(value); clean != "" {
+			return clean
+		}
+	}
+	return ""
+}
+
+func collapseSpace(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func recordName(line string) string {
