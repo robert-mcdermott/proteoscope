@@ -23,9 +23,9 @@ Choose the file for your operating system:
 
 | Platform | Download |
 | --- | --- |
-| macOS, Apple Silicon | [`proteoscope-darwin-arm64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.1/proteoscope-darwin-arm64) |
-| Linux, x64 | [`proteoscope-linux-amd64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.1/proteoscope-linux-amd64) |
-| Windows, x64 | [`proteoscope-windows-amd64.exe`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.1/proteoscope-windows-amd64.exe) |
+| macOS, Apple Silicon | [`proteoscope-darwin-arm64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.2/proteoscope-darwin-arm64) |
+| Linux, x64 | [`proteoscope-linux-amd64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.2/proteoscope-linux-amd64) |
+| Windows, x64 | [`proteoscope-windows-amd64.exe`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.2/proteoscope-windows-amd64.exe) |
 
 When Proteoscope starts, it prints a local URL, usually:
 
