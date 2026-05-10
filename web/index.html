@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#050708" />
     <title>Proteoscope</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=assembly" />
   </head>
   <body>
     <main id="app">
@@ -20,9 +20,20 @@
           </div>
           <span id="gpu-badge" class="status-badge">WebGPU</span>
         </div>
+        <dl class="structure-meta">
+          <div><dt>Format</dt><dd id="meta-format">...</dd></div>
+          <div><dt>Method</dt><dd id="meta-method">...</dd></div>
+          <div><dt>Resolution</dt><dd id="meta-resolution">...</dd></div>
+          <div><dt>Entry</dt><dd id="meta-entry">...</dd></div>
+          <div><dt>Assembly</dt><dd id="meta-assembly">Asymmetric unit</dd></div>
+        </dl>
         <label class="field">
           <span>Bundled structure</span>
           <select id="sample-select"></select>
+        </label>
+        <label id="assembly-field" class="field" hidden>
+          <span>Biological assembly</span>
+          <select id="assembly-select"></select>
         </label>
         <label class="upload-zone" for="file-input">
           <input id="file-input" type="file" accept=".pdb,.cif,.mmcif,chemical/x-pdb,chemical/x-cif,text/plain" />
@@ -128,6 +139,6 @@
         </div>
       </div>
     </main>
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="/app.js?v=assembly"></script>
   </body>
 </html>

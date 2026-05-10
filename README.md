@@ -9,8 +9,8 @@ assets, and bundled structure files, then serves the application on a local URL.
 
 Proteoscope is designed for exploratory structural biology work: load a
 structure, inspect chains and ligands, switch molecular representations, color by
-scientific properties, search atoms or residues, measure distances, and export
-publication-prep screenshots.
+scientific properties, view PDBx/mmCIF biological assemblies, search atoms or
+residues, measure distances, and export publication-prep screenshots.
 
 ## Quick Start: Download A Release
 
@@ -178,6 +178,14 @@ path and can feel slower or less responsive with larger structures.
 ## Structure Summary
 
 The top-left panel shows metadata and counts for the active structure.
+
+The metadata strip reports:
+
+- Coordinate format, such as `PDB` or `PDBx/mmCIF`.
+- Experimental method when present.
+- Resolution when present.
+- Entry ID for deposited structures, or `Local` for files without an entry ID.
+- Active assembly, either the asymmetric unit or a selected biological assembly.
 
 ### Atoms
 
@@ -374,6 +382,25 @@ the bottom of the viewport.
 Proteoscope displays one model at a time. Move the slider to inspect alternate
 conformations in the ensemble.
 
+## Biological Assemblies
+
+PDBx/mmCIF files may define biological assemblies in addition to the deposited
+asymmetric unit. When assembly definitions are present, Proteoscope shows a
+`Biological assembly` selector in the structure panel.
+
+- `Asymmetric unit` shows the deposited coordinate set.
+- Numbered assemblies apply the transformations from the mmCIF assembly records
+  and display the generated biological unit.
+
+Proteoscope reads `_pdbx_struct_assembly`, `_pdbx_struct_assembly_gen`, and
+`_pdbx_struct_oper_list` for assembly definitions. Operation expressions,
+including ranges and Cartesian-product expressions such as `(1-4)(5,6)`, are
+resolved into 3D transforms before rendering.
+
+Assembly generation can multiply atom counts dramatically, so Proteoscope uses a
+300,000 atoms/model safety limit for generated assemblies. Assemblies above that
+limit are shown as unavailable rather than freezing the browser.
+
 ## Chain Panel
 
 The chain panel lists all chains detected in the first model. Each row shows:
@@ -423,6 +450,8 @@ for interactive coordinate viewing:
 - `_struct_conn` for explicit nonstandard links such as ligand, metal,
   disulfide, salt-bridge, or other curated structure connections when those
   records can be matched to rendered atoms.
+- `_pdbx_struct_assembly`, `_pdbx_struct_assembly_gen`, and
+  `_pdbx_struct_oper_list` for biological assembly generation.
 
 For mmCIF chain display, Proteoscope prefers author-provided chain and residue
 identifiers (`auth_*`) when present because they usually match the identifiers
@@ -446,7 +475,8 @@ Alternate locations:
 
 Limitations:
 
-- Biological assembly transformations are not currently expanded.
+- Biological assembly generation is currently implemented for PDBx/mmCIF files,
+  not legacy PDB `REMARK 350` records.
 - Full solvent-accessible surfaces, electrostatics, density maps, and sequence
   annotation tracks are not yet implemented.
 - PDBx/mmCIF coordinate, metadata, secondary-structure, and curated connection

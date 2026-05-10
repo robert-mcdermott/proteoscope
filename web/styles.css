@@ -13,6 +13,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body,
 #app {
@@ -114,6 +118,36 @@ h1 {
   font-size: 0.7rem;
   font-weight: 800;
   max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.structure-meta {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.structure-meta div {
+  min-width: 0;
+  border-top: 1px solid rgba(248, 245, 238, 0.1);
+  padding-top: 6px;
+}
+
+.structure-meta dt {
+  color: rgba(248, 245, 238, 0.5);
+  font-size: 0.58rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.structure-meta dd {
+  margin-top: 2px;
+  color: rgba(248, 245, 238, 0.86);
+  font-size: 0.66rem;
+  font-weight: 760;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -639,7 +673,7 @@ input[type="range"] {
 
 @media (max-width: 1180px) {
   .search-panel {
-    top: 218px;
+    top: 286px;
     left: 18px;
     right: auto;
     width: min(430px, calc(100vw - 36px));
@@ -670,7 +704,7 @@ input[type="range"] {
   }
 
   .search-panel {
-    top: 208px;
+    top: 278px;
   }
 
   .chain-panel {
@@ -701,16 +735,40 @@ input[type="range"] {
 }
 
 @media (max-width: 560px) {
+  :root {
+    --mobile-title-height: min(360px, 42vh);
+    --mobile-controls-height: min(328px, 38vh);
+  }
+
   h1 {
     font-size: 0.95rem;
+  }
+
+  .title-panel {
+    max-height: var(--mobile-title-height);
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   .metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .structure-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .search-panel {
-    top: 278px;
+    top: calc(20px + var(--mobile-title-height));
+  }
+
+  .controls-panel {
+    max-height: var(--mobile-controls-height);
+    overflow: auto;
+  }
+
+  .toolbar {
+    bottom: calc(22px + var(--mobile-controls-height));
   }
 
   .segmented,
