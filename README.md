@@ -17,7 +17,7 @@ residues, measure distances, and export publication-prep screenshots.
 Most users do not need Go installed. Download a prebuilt binary from the
 Proteoscope release page:
 
-[https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.1](https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.2)
+[https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.2](https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.2)
 
 Choose the file for your operating system:
 
