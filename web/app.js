@@ -168,7 +168,7 @@ async function init() {
   populateSamples();
 
   const first = state.samples[0];
-  if (!first) throw new Error('No embedded PDB files were found.');
+  if (!first) throw new Error('No embedded structure files were found.');
   await loadStructureFromURL(first.url, first.name);
 
   setLoading('Rendering');
@@ -537,8 +537,9 @@ async function loadStructureFromURL(url, label) {
 }
 
 async function loadStructureFromText(text, label) {
-  setLoading('Parsing PDB records');
-  const structure = parsePDB(text, label);
+  const format = detectStructureFormat(text, label);
+  setLoading(`Parsing ${format.label} records`);
+  const structure = format.kind === 'mmcif' ? parseMMCIF(text, label) : parsePDB(text, label);
   setLoading('Inferring bonds');
   deriveStructure(structure);
   state.structure = structure;
@@ -554,9 +555,17 @@ async function loadStructureFromText(text, label) {
   els.loading.classList.add('is-hidden');
 }
 
-function parsePDB(text, label) {
-  const structure = {
+function detectStructureFormat(text, label) {
+  const name = String(label || '').toLowerCase();
+  if (name.endsWith('.cif') || name.endsWith('.mmcif')) return { kind: 'mmcif', label: 'PDBx/mmCIF' };
+  if (/^\s*data_/i.test(text) && /_atom_site\./i.test(text)) return { kind: 'mmcif', label: 'PDBx/mmCIF' };
+  return { kind: 'pdb', label: 'PDB' };
+}
+
+function createStructure(label, format) {
+  return {
     label,
+    format,
     meta: {
       title: label,
       code: '',
@@ -564,6 +573,8 @@ function parsePDB(text, label) {
       method: '',
       resolution: '',
       numModels: 0,
+      keywords: '',
+      entities: [],
     },
     helices: [],
     sheets: [],
@@ -572,6 +583,48 @@ function parsePDB(text, label) {
     chains: [],
     residues: [],
   };
+}
+
+function createModel(number) {
+  return {
+    number,
+    atoms: [],
+    bonds: [],
+    serialToIndex: new Map(),
+    atomKeyToIndex: new Map(),
+  };
+}
+
+function addAtomToModel(model, atom) {
+  model.serialToIndex.set(atom.serial, atom.id);
+  registerAtomKeys(model, atom);
+  model.atoms.push(atom);
+}
+
+function registerAtomKeys(model, atom) {
+  const keys = [
+    atomLookupKey(atom.chain, atom.authSeq ?? atom.resSeq, atom.iCode, atom.resName, atom.name),
+    atom.authKey,
+    atom.labelKey,
+  ].filter(Boolean);
+  for (const key of keys) {
+    if (!model.atomKeyToIndex.has(key)) model.atomKeyToIndex.set(key, atom.id);
+  }
+}
+
+function atomLookupKey(chain, seq, iCode, comp, atom) {
+  const parts = [chain, seq, iCode, comp, atom].map((value) => normalizeLookupPart(value));
+  if (!parts[0] || !parts[1] || !parts[4]) return '';
+  return parts.join('|');
+}
+
+function normalizeLookupPart(value) {
+  const clean = cleanCIFValue(value);
+  return clean ? clean.toUpperCase() : '';
+}
+
+function parsePDB(text, label) {
+  const structure = createStructure(label, 'pdb');
   let currentModel = null;
   let implicitModel = null;
   const titleParts = [];
@@ -606,28 +659,20 @@ function parsePDB(text, label) {
         type: 'sheet',
       });
     } else if (record === 'MODEL') {
-      currentModel = {
-        number: parseIntSafe(slice(line, 10, 14)) || structure.models.length + 1,
-        atoms: [],
-        bonds: [],
-        serialToIndex: new Map(),
-      };
+      currentModel = createModel(parseIntSafe(slice(line, 10, 14)) || structure.models.length + 1);
       structure.models.push(currentModel);
     } else if (record === 'ENDMDL') {
       currentModel = null;
     } else if (record === 'ATOM' || record === 'HETATM') {
       if (!currentModel) {
         if (!implicitModel) {
-          implicitModel = { number: 1, atoms: [], bonds: [], serialToIndex: new Map() };
+          implicitModel = createModel(1);
           structure.models.push(implicitModel);
         }
         currentModel = implicitModel;
       }
       const atom = parseAtomLine(line, record, currentModel.atoms.length);
-      if (atom) {
-        currentModel.serialToIndex.set(atom.serial, atom.id);
-        currentModel.atoms.push(atom);
-      }
+      if (atom) addAtomToModel(currentModel, atom);
       if (implicitModel) currentModel = implicitModel;
     } else if (record === 'CONECT') {
       const source = parseIntSafe(slice(line, 6, 11));
@@ -666,6 +711,7 @@ function parseAtomLine(line, record, id) {
   const residueKey = `${chain}:${resSeq}${iCode}:${resName}`;
   const isHet = record === 'HETATM';
   const polymerType = inferPolymerType(resName);
+  const authSeq = String(resSeq || '');
   return {
     id,
     serial,
@@ -674,6 +720,8 @@ function parseAtomLine(line, record, id) {
     resName,
     chain,
     resSeq,
+    authSeq,
+    labelSeq: authSeq,
     iCode,
     x,
     y,
@@ -686,9 +734,362 @@ function parseAtomLine(line, record, id) {
     isWater,
     isHydrogen,
     residueKey,
+    authKey: atomLookupKey(chain, authSeq, iCode, resName, name),
+    labelKey: atomLookupKey(chain, authSeq, iCode, resName, name),
     polymerType,
     ss: 'coil',
   };
+}
+
+function parseMMCIF(text, label) {
+  const cif = parseCIFDocument(text);
+  const structure = createStructure(label, 'mmcif');
+  applyMMCIFMetadata(structure, cif, label);
+  applyMMCIFSecondaryStructure(structure, cif);
+  applyMMCIFConnections(structure, cif);
+
+  const atomRows = getCIFRows(cif, 'atom_site');
+  if (!atomRows.length) throw new Error('No _atom_site records were found in this PDBx/mmCIF file.');
+
+  const modelsByNumber = new Map();
+  for (const row of atomRows) {
+    const group = cleanCIFValue(row.group_pdb).toUpperCase();
+    if (group && group !== 'ATOM' && group !== 'HETATM') continue;
+    const record = group === 'HETATM' ? 'HETATM' : 'ATOM';
+    const altLoc = cleanCIFValue(row.label_alt_id);
+    if (altLoc && altLoc !== 'A' && altLoc !== '1') continue;
+    const modelNumber = parseIntSafe(row.pdbx_pdb_model_num) || 1;
+    let model = modelsByNumber.get(modelNumber);
+    if (!model) {
+      model = createModel(modelNumber);
+      modelsByNumber.set(modelNumber, model);
+      structure.models.push(model);
+    }
+    const atom = parseMMCIFAtom(row, record, model.atoms.length);
+    if (atom) addAtomToModel(model, atom);
+  }
+
+  structure.models.sort((a, b) => a.number - b.number);
+  structure.models = structure.models.filter((model) => model.atoms.length > 0);
+  if (!structure.models.length) throw new Error('No usable atom coordinates were found in this PDBx/mmCIF file.');
+  structure.meta.numModels = structure.models.length;
+  return structure;
+}
+
+function parseMMCIFAtom(row, record, id) {
+  const serial = parseIntSafe(row.id) || id + 1;
+  const name = firstCIFValue(row.auth_atom_id, row.label_atom_id, row.type_symbol) || 'X';
+  const resName = (firstCIFValue(row.auth_comp_id, row.label_comp_id) || 'UNK').toUpperCase();
+  const authChain = firstCIFValue(row.auth_asym_id);
+  const labelChain = firstCIFValue(row.label_asym_id);
+  const chain = authChain || labelChain || '_';
+  const authSeq = firstCIFValue(row.auth_seq_id);
+  const labelSeq = firstCIFValue(row.label_seq_id);
+  const seqText = authSeq || labelSeq || '0';
+  const resSeq = parseIntSafe(seqText);
+  const iCode = firstCIFValue(row.pdbx_pdb_ins_code);
+  const x = parseFloatSafe(row.cartn_x);
+  const y = parseFloatSafe(row.cartn_y);
+  const z = parseFloatSafe(row.cartn_z);
+  if (![x, y, z].every(Number.isFinite)) return null;
+  const occupancy = parseFloatSafe(row.occupancy);
+  const bFactor = parseFloatSafe(row.b_iso_or_equiv);
+  const element = inferElement(firstCIFValue(row.type_symbol), name);
+  const isWater = WATER_RESIDUES.has(resName);
+  const isHydrogen = element === 'H' || name.startsWith('H');
+  const residueID = seqText || String(resSeq || 0);
+  const residueKey = `${chain}:${residueID}${iCode}:${resName}`;
+  const isHet = record === 'HETATM';
+  const polymerType = inferPolymerType(resName);
+  const labelComp = firstCIFValue(row.label_comp_id) || resName;
+  const authComp = firstCIFValue(row.auth_comp_id) || resName;
+  const labelAtom = firstCIFValue(row.label_atom_id) || name;
+  const authAtom = firstCIFValue(row.auth_atom_id) || name;
+  return {
+    id,
+    serial,
+    name,
+    altLoc: firstCIFValue(row.label_alt_id),
+    resName,
+    chain,
+    authChain: authChain || chain,
+    labelChain: labelChain || chain,
+    resSeq,
+    authSeq,
+    labelSeq,
+    iCode,
+    x,
+    y,
+    z,
+    occupancy: Number.isFinite(occupancy) ? occupancy : 0,
+    bFactor: Number.isFinite(bFactor) ? bFactor : 0,
+    element,
+    record,
+    isHet,
+    isWater,
+    isHydrogen,
+    residueKey,
+    authKey: atomLookupKey(authChain || chain, authSeq || seqText, iCode, authComp, authAtom),
+    labelKey: atomLookupKey(labelChain || chain, labelSeq || seqText, iCode, labelComp, labelAtom),
+    polymerType,
+    ss: 'coil',
+  };
+}
+
+function applyMMCIFMetadata(structure, cif, label) {
+  const code = getCIFValue(cif, ['_entry.id']) || cif.dataBlock || '';
+  const title = getCIFValue(cif, ['_struct.title']) || label;
+  const methods = getCIFColumnValues(cif, 'exptl', 'method');
+  const resolution = getCIFValue(cif, [
+    '_refine.ls_d_res_high',
+    '_em_3d_reconstruction.resolution',
+    '_reflns.d_resolution_high',
+  ]);
+  structure.meta.code = code;
+  structure.meta.title = code ? `${code}: ${collapseWhitespace(title)}` : collapseWhitespace(title);
+  structure.meta.classification = getCIFValue(cif, ['_struct_keywords.pdbx_keywords', '_struct_keywords.text']);
+  structure.meta.keywords = getCIFValue(cif, ['_struct_keywords.text', '_struct_keywords.pdbx_keywords']);
+  structure.meta.method = methods.join('; ') || getCIFValue(cif, ['_exptl.method']);
+  structure.meta.resolution = resolution ? formatResolution(resolution) : '';
+  structure.meta.entities = getCIFRows(cif, 'entity').map((row) => ({
+    id: cleanCIFValue(row.id),
+    type: cleanCIFValue(row.type),
+    description: cleanCIFValue(row.pdbx_description),
+  })).filter((entity) => entity.id || entity.description);
+}
+
+function applyMMCIFSecondaryStructure(structure, cif) {
+  for (const row of getCIFRows(cif, 'struct_conf')) {
+    const type = cleanCIFValue(row.conf_type_id).toUpperCase();
+    const range = cifResidueRange(row);
+    if (!range) continue;
+    if (type.startsWith('HELX') || type.includes('HELIX')) {
+      structure.helices.push({ ...range, type: 'helix' });
+    } else if (type.startsWith('STRN') || type.includes('SHEET') || type.includes('BETA')) {
+      structure.sheets.push({ ...range, type: 'sheet' });
+    }
+  }
+  for (const row of getCIFRows(cif, 'struct_sheet_range')) {
+    const range = cifResidueRange(row);
+    if (range) structure.sheets.push({ ...range, type: 'sheet' });
+  }
+}
+
+function cifResidueRange(row) {
+  const chain = firstCIFValue(row.beg_auth_asym_id, row.beg_label_asym_id);
+  const start = parseIntSafe(firstCIFValue(row.beg_auth_seq_id, row.beg_label_seq_id));
+  const end = parseIntSafe(firstCIFValue(row.end_auth_seq_id, row.end_label_seq_id));
+  if (!chain || !start || !end) return null;
+  return { chain, start, end };
+}
+
+function applyMMCIFConnections(structure, cif) {
+  for (const row of getCIFRows(cif, 'struct_conn')) {
+    const aKeys = cifPartnerKeys(row, 'ptnr1');
+    const bKeys = cifPartnerKeys(row, 'ptnr2');
+    if (aKeys.length && bKeys.length) {
+      structure.conect.push({
+        aKeys,
+        bKeys,
+        type: cleanCIFValue(row.conn_type_id),
+      });
+    }
+  }
+}
+
+function cifPartnerKeys(row, prefix) {
+  const keys = [];
+  const ins = firstCIFValue(
+    row[`pdbx_${prefix}_pdb_ins_code`],
+    row[`pdbx_${prefix}_label_pdb_ins_code`],
+    row[`${prefix}_pdb_ins_code`],
+  );
+  const authKey = atomLookupKey(
+    firstCIFValue(row[`${prefix}_auth_asym_id`], row[`pdbx_${prefix}_auth_asym_id`]),
+    firstCIFValue(row[`${prefix}_auth_seq_id`], row[`pdbx_${prefix}_auth_seq_id`]),
+    ins,
+    firstCIFValue(row[`${prefix}_auth_comp_id`], row[`pdbx_${prefix}_auth_comp_id`]),
+    firstCIFValue(row[`${prefix}_auth_atom_id`], row[`pdbx_${prefix}_auth_atom_id`]),
+  );
+  const labelKey = atomLookupKey(
+    firstCIFValue(row[`${prefix}_label_asym_id`]),
+    firstCIFValue(row[`${prefix}_label_seq_id`]),
+    ins,
+    firstCIFValue(row[`${prefix}_label_comp_id`]),
+    firstCIFValue(row[`${prefix}_label_atom_id`]),
+  );
+  if (authKey) keys.push(authKey);
+  if (labelKey && labelKey !== authKey) keys.push(labelKey);
+  return keys;
+}
+
+function parseCIFDocument(text) {
+  const tokens = tokenizeCIF(text);
+  const cif = {
+    dataBlock: '',
+    fields: new Map(),
+    loops: new Map(),
+  };
+  let index = 0;
+  while (index < tokens.length) {
+    const token = tokens[index];
+    const lower = token.toLowerCase();
+    if (lower.startsWith('data_')) {
+      cif.dataBlock = token.slice(5).trim();
+      index += 1;
+    } else if (lower === 'loop_') {
+      index += 1;
+      const headers = [];
+      while (index < tokens.length && tokens[index].startsWith('_')) {
+        headers.push(tokens[index]);
+        index += 1;
+      }
+      if (!headers.length) continue;
+      const parsedHeaders = headers.map(splitCIFTag);
+      const category = parsedHeaders[0]?.category ?? '';
+      const rows = [];
+      while (index < tokens.length && !isCIFControlToken(tokens[index])) {
+        const row = {};
+        let complete = true;
+        for (let column = 0; column < parsedHeaders.length; column += 1) {
+          if (index >= tokens.length || isCIFControlToken(tokens[index])) {
+            complete = false;
+            break;
+          }
+          row[parsedHeaders[column].attribute] = tokens[index];
+          index += 1;
+        }
+        if (complete) rows.push(row);
+      }
+      if (category && rows.length) {
+        if (!cif.loops.has(category)) cif.loops.set(category, []);
+        cif.loops.get(category).push(...rows);
+      }
+    } else if (token.startsWith('_')) {
+      if (index + 1 < tokens.length) cif.fields.set(normalizeCIFTag(token), tokens[index + 1]);
+      index += 2;
+    } else {
+      index += 1;
+    }
+  }
+  return cif;
+}
+
+function tokenizeCIF(text) {
+  const tokens = [];
+  let index = 0;
+  while (index < text.length) {
+    while (index < text.length && /\s/.test(text[index])) index += 1;
+    if (index >= text.length) break;
+    const char = text[index];
+    if (char === '#') {
+      while (index < text.length && text[index] !== '\n') index += 1;
+      continue;
+    }
+    if (char === ';' && (index === 0 || text[index - 1] === '\n')) {
+      let start = index + 1;
+      if (text[start] === '\r') start += 1;
+      if (text[start] === '\n') start += 1;
+      let end = text.length;
+      let cursor = start;
+      while (cursor < text.length) {
+        const next = text.indexOf('\n;', cursor);
+        if (next < 0) break;
+        end = next;
+        index = next + 2;
+        while (index < text.length && text[index] !== '\n') index += 1;
+        if (index < text.length) index += 1;
+        break;
+      }
+      if (end === text.length) index = text.length;
+      tokens.push(text.slice(start, end));
+      continue;
+    }
+    if (char === '\'' || char === '"') {
+      const quote = char;
+      index += 1;
+      const start = index;
+      while (index < text.length && text[index] !== quote) index += 1;
+      tokens.push(text.slice(start, index));
+      if (index < text.length) index += 1;
+      continue;
+    }
+    const start = index;
+    while (index < text.length && !/\s/.test(text[index])) index += 1;
+    tokens.push(text.slice(start, index));
+  }
+  return tokens;
+}
+
+function splitCIFTag(tag) {
+  const key = normalizeCIFTag(tag).replace(/^_/, '');
+  const dot = key.indexOf('.');
+  if (dot < 0) return { category: key, attribute: '' };
+  return {
+    category: key.slice(0, dot),
+    attribute: key.slice(dot + 1),
+  };
+}
+
+function normalizeCIFTag(tag) {
+  return String(tag || '').trim().toLowerCase();
+}
+
+function isCIFControlToken(token) {
+  const lower = token.toLowerCase();
+  return token.startsWith('_') || lower === 'loop_' || lower === 'stop_' || lower.startsWith('data_') || lower.startsWith('save_');
+}
+
+function getCIFRows(cif, category) {
+  return cif.loops.get(String(category).toLowerCase()) ?? [];
+}
+
+function getCIFValue(cif, tags) {
+  for (const tag of tags) {
+    const key = normalizeCIFTag(tag);
+    const direct = cleanCIFValue(cif.fields.get(key));
+    if (direct) return direct;
+    const { category, attribute } = splitCIFTag(key);
+    for (const row of getCIFRows(cif, category)) {
+      const value = cleanCIFValue(row[attribute]);
+      if (value) return value;
+    }
+  }
+  return '';
+}
+
+function getCIFColumnValues(cif, category, attribute) {
+  const values = [];
+  const seen = new Set();
+  for (const row of getCIFRows(cif, category)) {
+    const value = cleanCIFValue(row[String(attribute).toLowerCase()]);
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    values.push(value);
+  }
+  return values;
+}
+
+function firstCIFValue(...values) {
+  for (const value of values) {
+    const clean = cleanCIFValue(value);
+    if (clean) return clean;
+  }
+  return '';
+}
+
+function cleanCIFValue(value) {
+  const clean = String(value ?? '').trim();
+  return clean === '.' || clean === '?' ? '' : clean;
+}
+
+function collapseWhitespace(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function formatResolution(value) {
+  const clean = cleanCIFValue(value);
+  return clean && !/angstrom/i.test(clean) ? `${clean} Angstroms` : clean;
 }
 
 function deriveStructure(structure) {
@@ -761,9 +1162,8 @@ function assignSecondary(model, structure) {
 function buildBonds(model, conectRecords) {
   const bonds = [];
   const seen = new Set();
-  for (const [sourceSerial, targetSerial] of conectRecords) {
-    const a = model.serialToIndex.get(sourceSerial);
-    const b = model.serialToIndex.get(targetSerial);
+  for (const connection of conectRecords) {
+    const [a, b] = resolveConnection(model, connection);
     if (a === undefined || b === undefined || a === b) continue;
     addBond(bonds, seen, a, b, true);
   }
@@ -795,6 +1195,23 @@ function buildBonds(model, conectRecords) {
     }
   }
   return bonds;
+}
+
+function resolveConnection(model, connection) {
+  if (Array.isArray(connection)) {
+    return [model.serialToIndex.get(connection[0]), model.serialToIndex.get(connection[1])];
+  }
+  return [
+    firstMappedIndex(model.atomKeyToIndex, connection.aKeys),
+    firstMappedIndex(model.atomKeyToIndex, connection.bKeys),
+  ];
+}
+
+function firstMappedIndex(map, keys) {
+  for (const key of keys ?? []) {
+    if (map.has(key)) return map.get(key);
+  }
+  return undefined;
 }
 
 function shouldInferBond(a, b) {
