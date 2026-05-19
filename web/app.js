@@ -104,7 +104,7 @@ const state = {
   showWater: false,
   showHydrogen: false,
   autoRotate: true,
-  isolatedChain: null,
+  visibleChains: null,
   selectedAtom: null,
   hoveredAtom: null,
   lastMeasureAtom: null,
@@ -509,7 +509,7 @@ function bindEvents() {
     }
   });
   els.isolateClear.addEventListener('click', () => {
-    state.isolatedChain = null;
+    state.visibleChains = null;
     renderChains();
     rebuildScene();
   });
@@ -562,7 +562,7 @@ async function loadStructureFromText(text, label) {
   state.hoveredAtom = null;
   state.lastMeasureAtom = null;
   state.measurements = [];
-  state.isolatedChain = null;
+  state.visibleChains = null;
   updateStructureUI();
   fitModel(true);
   rebuildScene();
@@ -1337,7 +1337,7 @@ async function activateAssembly(assemblyID) {
     state.hoveredAtom = null;
     state.lastMeasureAtom = null;
     state.measurements = [];
-    state.isolatedChain = null;
+    state.visibleChains = null;
     deriveStructure(structure);
     updateStructureUI();
     fitModel(true);
@@ -1703,7 +1703,7 @@ function computeClipLimit() {
 }
 
 function atomPassesFilters(atom, clipLimit) {
-  if (state.isolatedChain && atom.chain !== state.isolatedChain) return false;
+  if (state.visibleChains && !state.visibleChains.has(atom.chain)) return false;
   if (atom.isWater && !state.showWater) return false;
   if (atom.isHydrogen && !state.showHydrogen) return false;
   if (atom.isHet && !atom.isWater && !state.showHetero) return false;
@@ -2323,22 +2323,50 @@ function sampleSummary(sample) {
 function renderChains() {
   if (!state.structure) return;
   const fragment = document.createDocumentFragment();
+  els.isolateClear.disabled = !state.visibleChains;
+  els.isolateClear.title = state.visibleChains ? 'Show all chains' : 'All chains are visible';
   for (const chain of state.structure.chains) {
+    const visible = chainIsVisible(chain.id);
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = chain.id === state.isolatedChain ? 'chain-button is-active' : 'chain-button';
+    button.className = visible ? 'chain-button is-visible' : 'chain-button is-hidden-chain';
+    button.setAttribute('aria-pressed', visible ? 'true' : 'false');
+    button.title = visible ? `Hide ${displayChain(chain.id)}` : `Show ${displayChain(chain.id)}`;
     button.innerHTML = `
       <span class="chain-swatch" style="--swatch:${rgbCSS(chain.color)}"></span>
-      <span><strong>${escapeHTML(displayChain(chain.id))}</strong><small>${chain.residues} residues · ${chain.atoms} atoms</small></span>
+      <span><strong>${escapeHTML(displayChain(chain.id))}</strong><small>${chain.residues} residues · ${chain.atoms} atoms · ${visible ? 'visible' : 'hidden'}</small></span>
     `;
     button.addEventListener('click', () => {
-      state.isolatedChain = state.isolatedChain === chain.id ? null : chain.id;
-      renderChains();
-      rebuildScene();
+      toggleChainVisibility(chain.id);
     });
     fragment.appendChild(button);
   }
   els.chainList.replaceChildren(fragment);
+}
+
+function chainIsVisible(chainID) {
+  return !state.visibleChains || state.visibleChains.has(chainID);
+}
+
+function toggleChainVisibility(chainID) {
+  if (!state.structure) return;
+  if (!state.visibleChains) {
+    state.visibleChains = new Set(state.structure.chains.map((chain) => chain.id));
+  }
+  if (state.visibleChains.has(chainID)) {
+    state.visibleChains.delete(chainID);
+  } else {
+    state.visibleChains.add(chainID);
+  }
+  if (state.visibleChains.size === state.structure.chains.length) {
+    state.visibleChains = null;
+  }
+  state.selectedAtom = null;
+  state.hoveredAtom = null;
+  state.lastMeasureAtom = null;
+  state.measurements = [];
+  renderChains();
+  rebuildScene();
 }
 
 function updateSelectionPanel() {

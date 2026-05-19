@@ -410,8 +410,10 @@ The chain panel lists all chains detected in the first model. Each row shows:
 - Atom count
 - Chain color
 
-Click a chain to isolate it. Click it again or press `All` to return to the
-full structure.
+Click any chain row to toggle that chain on or off. You can show any arbitrary
+combination of chains, which is useful for comparing interfaces, hiding solvent
+or partner chains, or focusing on selected subunits. Press `All` to restore all
+chains.
 
 ## PNG Export
 
