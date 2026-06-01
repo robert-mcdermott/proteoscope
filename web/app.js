@@ -25,6 +25,8 @@ const els = {
   isolateClear: document.querySelector('#isolate-clear'),
   atomScale: document.querySelector('#atom-scale'),
   bondScale: document.querySelector('#bond-scale'),
+  cartoonWidth: document.querySelector('#cartoon-width'),
+  cartoonQuality: document.querySelector('#cartoon-quality'),
   glowScale: document.querySelector('#glow-scale'),
   clipDepth: document.querySelector('#clip-depth'),
   showHetero: document.querySelector('#show-hetero'),
@@ -89,6 +91,30 @@ const PROTEIN_BACKBONE = new Set(['CA']);
 const NUCLEIC_BACKBONE = new Set(['P', "C4'", "C3'", "C5'"]);
 const ASYMMETRIC_UNIT_ID = 'asym';
 const MAX_ASSEMBLY_ATOMS = 300000;
+const SECONDARY_COLORS = {
+  helix: [0.95, 0.32, 0.42],
+  sheet: [0.98, 0.78, 0.24],
+  turn: [0.32, 0.74, 0.95],
+  coil: [0.72, 0.78, 0.82],
+};
+const SECONDARY_LABELS = {
+  helix: 'Alpha helix',
+  sheet: 'Beta strand',
+  turn: 'Turn',
+  coil: 'Coil',
+};
+const CARTOON_DEFAULTS = {
+  ribbonWidth: 1.0,
+  helixWidth: 1.05,
+  sheetWidth: 1.18,
+  sheetArrowWidth: 1.78,
+  ribbonThickness: 0.16,
+  helixThickness: 0.36,
+  tubeRadius: 0.24,
+  turnRadius: 0.28,
+  maxPeptideDistance: 5.0,
+  tubeSides: 8,
+};
 
 const state = {
   samples: [],
@@ -98,6 +124,8 @@ const state = {
   colorScheme: 'chain',
   atomScale: 0.72,
   bondScale: 0.52,
+  cartoonWidth: 1,
+  cartoonQuality: 5,
   glowScale: 0.36,
   clipDepth: 1,
   showHetero: true,
@@ -111,6 +139,7 @@ const state = {
   measurements: [],
   visibleAtoms: [],
   visibleBonds: [],
+  visibleCartoon: null,
   visibleAtomRecords: [],
   camera: {
     target: [0, 0, 0],
@@ -146,25 +175,31 @@ const gpu = {
   atomBuffer: null,
   glowBuffer: null,
   bondBuffer: null,
+  cartoonBuffer: null,
   atomBindGroup: null,
   glowBindGroup: null,
   bondBindGroup: null,
+  cartoonBindGroup: null,
   atomPipeline: null,
   glowPipeline: null,
   bondPipeline: null,
+  cartoonPipeline: null,
   uniformData: new Float32Array(36),
   atomCount: 0,
   glowCount: 0,
   bondCount: 0,
+  cartoonVertexCount: 0,
   fallback: false,
   ctx2d: null,
 };
 
-init().catch((error) => {
-  console.error(error);
-  els.loading.classList.add('is-error');
-  els.loadingStatus.textContent = error.message;
-});
+if (!globalThis.__PROTEOSCOPE_TEST__) {
+  init().catch((error) => {
+    console.error(error);
+    els.loading.classList.add('is-error');
+    els.loadingStatus.textContent = error.message;
+  });
+}
 
 async function init() {
   setLoading('Starting renderer');
@@ -402,6 +437,54 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 }`,
   });
 
+  const cartoonModule = gpu.device.createShaderModule({
+    label: 'cartoon mesh shader',
+    code: `
+struct Uniforms {
+  viewProj: mat4x4<f32>,
+  cameraRight: vec4<f32>,
+  cameraUp: vec4<f32>,
+  cameraForward: vec4<f32>,
+  lightDir: vec4<f32>,
+  params: vec4<f32>,
+};
+struct CartoonVertex {
+  position: vec4<f32>,
+  normal: vec4<f32>,
+  color: vec4<f32>,
+};
+struct VertexOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) normal: vec3<f32>,
+  @location(1) color: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(0) @binding(1) var<storage, read> vertices: array<CartoonVertex>;
+
+@vertex
+fn vs(@builtin(vertex_index) vertexIndex: u32) -> VertexOut {
+  let vertex = vertices[vertexIndex];
+  var out: VertexOut;
+  out.position = uniforms.viewProj * vec4<f32>(vertex.position.xyz, 1.0);
+  out.normal = normalize(vertex.normal.xyz);
+  out.color = vertex.color;
+  return out;
+}
+
+@fragment
+fn fs(in: VertexOut) -> @location(0) vec4<f32> {
+  let view = normalize(-uniforms.cameraForward.xyz);
+  let light = normalize(uniforms.lightDir.xyz);
+  let normal = normalize(select(in.normal, -in.normal, dot(in.normal, view) < 0.0));
+  let diffuse = max(dot(normal, light), 0.0);
+  let front = max(dot(normal, view), 0.0);
+  let rim = pow(1.0 - front, 2.0);
+  let shade = 0.52 + 0.34 * diffuse + 0.20 * front + 0.08 * rim;
+  let color = in.color.rgb * shade + vec3<f32>(0.018, 0.024, 0.026);
+  return vec4<f32>(color, in.color.a);
+}`,
+  });
+
   const atomLayout = gpu.device.createBindGroupLayout({
     entries: [
       { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
@@ -441,6 +524,14 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     primitive: { topology: 'triangle-list' },
     depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' },
   });
+  gpu.cartoonPipeline = gpu.device.createRenderPipeline({
+    label: 'cartoon mesh',
+    layout: pipelineLayout,
+    vertex: { module: cartoonModule, entryPoint: 'vs' },
+    fragment: { module: cartoonModule, entryPoint: 'fs', targets: [{ format: gpu.format, blend }] },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' },
+  });
   gpu.atomBindLayout = atomLayout;
 }
 
@@ -478,6 +569,8 @@ function bindEvents() {
   for (const [input, key] of [
     [els.atomScale, 'atomScale'],
     [els.bondScale, 'bondScale'],
+    [els.cartoonWidth, 'cartoonWidth'],
+    [els.cartoonQuality, 'cartoonQuality'],
     [els.glowScale, 'glowScale'],
     [els.clipDepth, 'clipDepth'],
   ]) {
@@ -590,8 +683,10 @@ function createStructure(label, format) {
       keywords: '',
       entities: [],
     },
+    secondaryRanges: [],
     helices: [],
     sheets: [],
+    turns: [],
     conect: [],
     assemblies: [],
     baseModels: [],
@@ -606,9 +701,12 @@ function createModel(number) {
   return {
     number,
     atoms: [],
+    residues: [],
+    residueMap: new Map(),
     bonds: [],
     serialToIndex: new Map(),
     atomKeyToIndex: new Map(),
+    cartoonCache: new Map(),
   };
 }
 
@@ -662,18 +760,26 @@ function parsePDB(text, label) {
     } else if (record === 'NUMMDL') {
       structure.meta.numModels = parseIntSafe(slice(line, 10, 14));
     } else if (record === 'HELIX') {
-      structure.helices.push({
+      addSecondaryRange(structure, {
+        kind: 'helix',
         chain: slice(line, 19, 20).trim(),
+        endChain: slice(line, 31, 32).trim(),
         start: parseIntSafe(slice(line, 21, 25)),
         end: parseIntSafe(slice(line, 33, 37)),
-        type: 'helix',
+        startICode: slice(line, 25, 26).trim(),
+        endICode: slice(line, 37, 38).trim(),
+        source: 'file annotation',
       });
     } else if (record === 'SHEET') {
-      structure.sheets.push({
+      addSecondaryRange(structure, {
+        kind: 'sheet',
         chain: slice(line, 21, 22).trim(),
+        endChain: slice(line, 32, 33).trim(),
         start: parseIntSafe(slice(line, 22, 26)),
         end: parseIntSafe(slice(line, 33, 37)),
-        type: 'sheet',
+        startICode: slice(line, 26, 27).trim(),
+        endICode: slice(line, 37, 38).trim(),
+        source: 'file annotation',
       });
     } else if (record === 'MODEL') {
       currentModel = createModel(parseIntSafe(slice(line, 10, 14)) || structure.models.length + 1);
@@ -702,6 +808,7 @@ function parsePDB(text, label) {
 
   if (titleParts.length) structure.meta.title = titleParts.join(' ').replace(/\s+/g, ' ');
   if (structure.meta.code) structure.meta.title = `${structure.meta.code}: ${structure.meta.title}`;
+  for (const model of structure.models) applyAltLocationPolicy(model);
   if (!structure.models.length) throw new Error('No ATOM or HETATM records were found in this PDB file.');
   structure.meta.numModels = structure.models.length;
   return structure;
@@ -711,7 +818,6 @@ function parseAtomLine(line, record, id) {
   const serial = parseIntSafe(slice(line, 6, 11));
   const name = slice(line, 12, 16).trim();
   const altLoc = slice(line, 16, 17).trim();
-  if (altLoc && altLoc !== 'A' && altLoc !== '1') return null;
   const resName = slice(line, 17, 20).trim();
   const chain = slice(line, 21, 22).trim() || '_';
   const resSeq = parseIntSafe(slice(line, 22, 26));
@@ -755,6 +861,7 @@ function parseAtomLine(line, record, id) {
     labelKey: atomLookupKey(chain, authSeq, iCode, resName, name),
     polymerType,
     ss: 'coil',
+    ssSource: 'unknown/coil fallback',
   };
 }
 
@@ -774,8 +881,6 @@ function parseMMCIF(text, label) {
     const group = cleanCIFValue(row.group_pdb).toUpperCase();
     if (group && group !== 'ATOM' && group !== 'HETATM') continue;
     const record = group === 'HETATM' ? 'HETATM' : 'ATOM';
-    const altLoc = cleanCIFValue(row.label_alt_id);
-    if (altLoc && altLoc !== 'A' && altLoc !== '1') continue;
     const modelNumber = parseIntSafe(row.pdbx_pdb_model_num) || 1;
     let model = modelsByNumber.get(modelNumber);
     if (!model) {
@@ -787,6 +892,7 @@ function parseMMCIF(text, label) {
     if (atom) addAtomToModel(model, atom);
   }
 
+  for (const model of structure.models) applyAltLocationPolicy(model);
   structure.models.sort((a, b) => a.number - b.number);
   structure.models = structure.models.filter((model) => model.atoms.length > 0);
   if (!structure.models.length) throw new Error('No usable atom coordinates were found in this PDBx/mmCIF file.');
@@ -851,7 +957,86 @@ function parseMMCIFAtom(row, record, id) {
     labelKey: atomLookupKey(labelChain || chain, labelSeq || seqText, iCode, labelComp, labelAtom),
     polymerType,
     ss: 'coil',
+    ssSource: 'unknown/coil fallback',
   };
+}
+
+function addSecondaryRange(structure, range) {
+  if (!range?.kind || !range.start || !range.end) return;
+  const normalized = {
+    ...range,
+    kind: range.kind === 'strand' ? 'sheet' : range.kind,
+    chain: range.chain || range.authChain || range.labelChain || '_',
+    endChain: range.endChain || range.endAuthChain || range.endLabelChain || range.chain || range.authChain || range.labelChain || '_',
+    source: range.source || 'file annotation',
+  };
+  structure.secondaryRanges.push(normalized);
+  if (normalized.kind === 'helix') structure.helices.push(normalized);
+  if (normalized.kind === 'sheet') structure.sheets.push(normalized);
+  if (normalized.kind === 'turn') structure.turns.push(normalized);
+}
+
+function applyAltLocationPolicy(model) {
+  const groups = new Map();
+  for (const atom of model.atoms) {
+    const key = altLocationGroupKey(atom);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(atom);
+  }
+  if ([...groups.values()].every((group) => group.length === 1)) return;
+
+  const selected = [];
+  const aliases = [];
+  for (const group of groups.values()) {
+    const best = group.slice().sort(compareAltLocationAtoms)[0];
+    selected.push(best);
+    for (const atom of group) {
+      if (atom !== best) aliases.push({ serial: atom.serial, chosen: best });
+    }
+  }
+  selected.sort((a, b) => a.id - b.id);
+  model.atoms = [];
+  model.serialToIndex = new Map();
+  model.atomKeyToIndex = new Map();
+  for (const atom of selected) {
+    atom.id = model.atoms.length;
+    addAtomToModel(model, atom);
+  }
+  const chosenIDs = new Map(selected.map((atom) => [atom, atom.id]));
+  for (const alias of aliases) {
+    const id = chosenIDs.get(alias.chosen);
+    if (id !== undefined) model.serialToIndex.set(alias.serial, id);
+  }
+}
+
+function altLocationGroupKey(atom) {
+  return [
+    atom.record,
+    atom.chain,
+    atom.authChain || '',
+    atom.labelChain || '',
+    atom.authSeq || atom.resSeq || '',
+    atom.labelSeq || '',
+    atom.iCode || '',
+    atom.resName,
+    atom.name,
+  ].join('|').toUpperCase();
+}
+
+function compareAltLocationAtoms(a, b) {
+  const occupancyDelta = (b.occupancy || 0) - (a.occupancy || 0);
+  if (Math.abs(occupancyDelta) > 0.0001) return occupancyDelta;
+  const aRank = altLocationRank(a.altLoc);
+  const bRank = altLocationRank(b.altLoc);
+  if (aRank !== bRank) return aRank - bRank;
+  return a.id - b.id;
+}
+
+function altLocationRank(value) {
+  const alt = String(value || '').trim().toUpperCase();
+  if (alt === 'A' || alt === '1') return 0;
+  if (!alt) return 1;
+  return 2;
 }
 
 function applyMMCIFMetadata(structure, cif, label) {
@@ -882,23 +1067,48 @@ function applyMMCIFSecondaryStructure(structure, cif) {
     const range = cifResidueRange(row);
     if (!range) continue;
     if (type.startsWith('HELX') || type.includes('HELIX')) {
-      structure.helices.push({ ...range, type: 'helix' });
+      addSecondaryRange(structure, { ...range, kind: 'helix', source: 'file annotation' });
     } else if (type.startsWith('STRN') || type.includes('SHEET') || type.includes('BETA')) {
-      structure.sheets.push({ ...range, type: 'sheet' });
+      addSecondaryRange(structure, { ...range, kind: 'sheet', source: 'file annotation' });
+    } else if (type.startsWith('TURN') || type.includes('TURN')) {
+      addSecondaryRange(structure, { ...range, kind: 'turn', source: 'file annotation' });
     }
   }
   for (const row of getCIFRows(cif, 'struct_sheet_range')) {
     const range = cifResidueRange(row);
-    if (range) structure.sheets.push({ ...range, type: 'sheet' });
+    if (range) addSecondaryRange(structure, { ...range, kind: 'sheet', source: 'file annotation' });
   }
 }
 
 function cifResidueRange(row) {
-  const chain = firstCIFValue(row.beg_auth_asym_id, row.beg_label_asym_id);
-  const start = parseIntSafe(firstCIFValue(row.beg_auth_seq_id, row.beg_label_seq_id));
-  const end = parseIntSafe(firstCIFValue(row.end_auth_seq_id, row.end_label_seq_id));
+  const authChain = firstCIFValue(row.beg_auth_asym_id);
+  const labelChain = firstCIFValue(row.beg_label_asym_id);
+  const endAuthChain = firstCIFValue(row.end_auth_asym_id);
+  const endLabelChain = firstCIFValue(row.end_label_asym_id);
+  const authStart = parseIntSafe(firstCIFValue(row.beg_auth_seq_id));
+  const authEnd = parseIntSafe(firstCIFValue(row.end_auth_seq_id));
+  const labelStart = parseIntSafe(firstCIFValue(row.beg_label_seq_id));
+  const labelEnd = parseIntSafe(firstCIFValue(row.end_label_seq_id));
+  const chain = authChain || labelChain;
+  const start = authStart || labelStart;
+  const end = authEnd || labelEnd;
   if (!chain || !start || !end) return null;
-  return { chain, start, end };
+  return {
+    chain,
+    endChain: endAuthChain || endLabelChain || chain,
+    authChain,
+    labelChain,
+    endAuthChain,
+    endLabelChain,
+    start,
+    end,
+    authStart,
+    authEnd,
+    labelStart,
+    labelEnd,
+    startICode: firstCIFValue(row.pdbx_beg_pdb_ins_code, row.beg_pdb_ins_code),
+    endICode: firstCIFValue(row.pdbx_end_pdb_ins_code, row.end_pdb_ins_code),
+  };
 }
 
 function applyMMCIFConnections(structure, cif) {
@@ -1446,12 +1656,65 @@ function transformAssemblyAtom(atom, id, transform, chain) {
   return copy;
 }
 
+function buildModelResidues(model) {
+  const residues = new Map();
+  for (const atom of model.atoms) {
+    if (!residues.has(atom.residueKey)) {
+      residues.set(atom.residueKey, {
+        key: atom.residueKey,
+        modelID: model.number,
+        chain: atom.chain,
+        authChain: atom.authChain || atom.chain,
+        labelChain: atom.labelChain || atom.chain,
+        resName: atom.resName,
+        resSeq: atom.resSeq,
+        authSeq: atom.authSeq || String(atom.resSeq || ''),
+        labelSeq: atom.labelSeq || String(atom.resSeq || ''),
+        iCode: atom.iCode,
+        polymerType: atom.polymerType,
+        isHet: atom.isHet,
+        isWater: atom.isWater,
+        atoms: [],
+        backbone: {},
+        representative: null,
+        ss: 'coil',
+        ssSource: 'unknown/coil fallback',
+        bFactor: 0,
+        occupancy: 0,
+      });
+    }
+    const residue = residues.get(atom.residueKey);
+    residue.atoms.push(atom);
+    residue.bFactor += atom.bFactor;
+    residue.occupancy += atom.occupancy;
+    if (!residue.representative) residue.representative = atom;
+    if (atom.name === 'CA' || atom.name === 'P' || atom.name === "C4'") residue.representative = atom;
+    if (residue.polymerType === 'protein' && ['N', 'CA', 'C', 'O'].includes(atom.name)) {
+      const current = residue.backbone[atom.name];
+      if (!current || compareAltLocationAtoms(atom, current) < 0) residue.backbone[atom.name] = atom;
+    }
+  }
+
+  for (const residue of residues.values()) {
+    const count = Math.max(1, residue.atoms.length);
+    residue.bFactor /= count;
+    residue.occupancy /= count;
+    if (residue.backbone.CA) residue.representative = residue.backbone.CA;
+    residue.normal = residueBackboneNormal(residue);
+  }
+
+  return [...residues.values()].sort(compareResidues);
+}
+
 function deriveStructure(structure) {
   const firstModel = structure.models[0];
   const residueMap = new Map();
   const chainMap = new Map();
 
   for (const model of structure.models) {
+    model.residues = buildModelResidues(model);
+    model.residueMap = new Map(model.residues.map((residue) => [residue.key, residue]));
+    model.cartoonCache = new Map();
     assignSecondary(model, structure);
     model.bonds = buildBonds(model, structure.conect);
     model.bounds = computeBounds(model.atoms);
@@ -1473,16 +1736,27 @@ function deriveStructure(structure) {
     if (atom.isHet && !atom.isWater) chain.ligands.add(atom.resName);
 
     if (!residueMap.has(atom.residueKey)) {
+      const modelResidue = firstModel.residueMap.get(atom.residueKey);
       residueMap.set(atom.residueKey, {
         key: atom.residueKey,
+        modelID: modelResidue?.modelID ?? firstModel.number,
         chain: atom.chain,
+        authChain: atom.authChain || atom.chain,
+        labelChain: atom.labelChain || atom.chain,
         resName: atom.resName,
         resSeq: atom.resSeq,
+        authSeq: atom.authSeq,
+        labelSeq: atom.labelSeq,
         iCode: atom.iCode,
         atoms: [],
         polymerType: atom.polymerType,
         isHet: atom.isHet,
         ss: atom.ss,
+        ssSource: atom.ssSource,
+        backbone: modelResidue?.backbone ?? {},
+        representative: modelResidue?.representative ?? atom,
+        bFactor: modelResidue?.bFactor ?? atom.bFactor,
+        occupancy: modelResidue?.occupancy ?? atom.occupancy,
       });
       chain.residues += 1;
     }
@@ -1495,22 +1769,203 @@ function deriveStructure(structure) {
 }
 
 function assignSecondary(model, structure) {
-  for (const atom of model.atoms) {
-    atom.ss = 'coil';
-    for (const helix of structure.helices) {
-      if (atom.chain === helix.chain && atom.resSeq >= helix.start && atom.resSeq <= helix.end) {
-        atom.ss = 'helix';
-        break;
-      }
-    }
-    if (atom.ss !== 'coil') continue;
-    for (const sheet of structure.sheets) {
-      if (atom.chain === sheet.chain && atom.resSeq >= sheet.start && atom.resSeq <= sheet.end) {
-        atom.ss = 'sheet';
-        break;
-      }
+  for (const residue of model.residues) {
+    residue.ss = 'coil';
+    residue.ssSource = 'unknown/coil fallback';
+  }
+
+  for (const range of structure.secondaryRanges) {
+    for (const residue of model.residues) {
+      if (residue.polymerType !== 'protein') continue;
+      if (!residueInSecondaryRange(residue, range)) continue;
+      residue.ss = range.kind;
+      residue.ssSource = range.source || 'file annotation';
     }
   }
+
+  assignComputedSecondary(model.residues);
+
+  for (const residue of model.residues) {
+    for (const atom of residue.atoms) {
+      atom.ss = residue.ss;
+      atom.ssSource = residue.ssSource;
+    }
+  }
+}
+
+function assignComputedSecondary(residues) {
+  const segments = buildProteinCartoonSegments(residues, null, { ignoreVisibility: true });
+  for (const segment of segments) {
+    const residuesWithCA = segment.residues;
+    const computed = new Map();
+
+    for (let index = 0; index + 3 < residuesWithCA.length; index += 1) {
+      const d03 = distanceAtoms(residuesWithCA[index].backbone.CA, residuesWithCA[index + 3].backbone.CA);
+      const d04 = index + 4 < residuesWithCA.length
+        ? distanceAtoms(residuesWithCA[index].backbone.CA, residuesWithCA[index + 4].backbone.CA)
+        : Infinity;
+      if (d03 >= 4.7 && d03 <= 6.4 && (!Number.isFinite(d04) || d04 <= 7.4)) {
+        for (let offset = 0; offset <= 3; offset += 1) addComputedSS(computed, index + offset, 'helix');
+      }
+    }
+
+    for (let index = 1; index + 1 < residuesWithCA.length; index += 1) {
+      const previous = residuesWithCA[index - 1].backbone.CA;
+      const current = residuesWithCA[index].backbone.CA;
+      const next = residuesWithCA[index + 1].backbone.CA;
+      const angle = angleDegrees(sub(atomPoint(previous), atomPoint(current)), sub(atomPoint(next), atomPoint(current)));
+      const span = distanceAtoms(previous, next);
+      if (angle >= 105 && span >= 5.7) addComputedSS(computed, index, 'sheet');
+      if (angle <= 82 && span <= 5.0) addComputedSS(computed, index, 'turn');
+    }
+
+    commitComputedRuns(residuesWithCA, computed, 'helix', 4);
+    commitComputedRuns(residuesWithCA, computed, 'sheet', 3);
+    commitComputedRuns(residuesWithCA, computed, 'turn', 2);
+  }
+}
+
+function addComputedSS(computed, index, kind) {
+  if (!computed.has(index)) computed.set(index, new Set());
+  computed.get(index).add(kind);
+}
+
+function commitComputedRuns(residues, computed, kind, minLength) {
+  let run = [];
+  const flush = () => {
+    if (run.length >= minLength) {
+      for (const index of run) {
+        const residue = residues[index];
+        if (residue.ssSource !== 'unknown/coil fallback') continue;
+        residue.ss = kind;
+        residue.ssSource = 'computed';
+      }
+    }
+    run = [];
+  };
+  for (let index = 0; index < residues.length; index += 1) {
+    if (computed.get(index)?.has(kind)) {
+      run.push(index);
+    } else {
+      flush();
+    }
+  }
+  flush();
+}
+
+function residueInSecondaryRange(residue, range) {
+  if (!rangeChainMatches(residue, range)) return false;
+  const authStart = range.authStart || range.start;
+  const authEnd = range.authEnd || range.end;
+  if (range.authChain && residue.authChain === range.authChain && residue.authSeq) {
+    return sequenceInRange(parseIntSafe(residue.authSeq), residue.iCode, authStart, range.startICode, authEnd, range.endICode);
+  }
+  const labelStart = range.labelStart || range.start;
+  const labelEnd = range.labelEnd || range.end;
+  if (range.labelChain && residue.labelChain === range.labelChain && residue.labelSeq) {
+    return sequenceInRange(parseIntSafe(residue.labelSeq), residue.iCode, labelStart, range.startICode, labelEnd, range.endICode);
+  }
+  return sequenceInRange(residue.resSeq, residue.iCode, range.start, range.startICode, range.end, range.endICode);
+}
+
+function rangeChainMatches(residue, range) {
+  const starts = new Set([range.chain, range.authChain, range.labelChain].filter(Boolean));
+  const ends = new Set([range.endChain, range.endAuthChain, range.endLabelChain].filter(Boolean));
+  return starts.has(residue.chain) || starts.has(residue.authChain) || starts.has(residue.labelChain) ||
+    ends.has(residue.chain) || ends.has(residue.authChain) || ends.has(residue.labelChain);
+}
+
+function sequenceInRange(seq, iCode, start, startICode, end, endICode) {
+  if (!seq || !start || !end) return false;
+  const low = Math.min(start, end);
+  const high = Math.max(start, end);
+  if (seq < low || seq > high) return false;
+  if (seq === start && compareInsertionCode(iCode, startICode) < 0) return false;
+  if (seq === end && compareInsertionCode(iCode, endICode) > 0) return false;
+  return true;
+}
+
+function compareInsertionCode(a, b) {
+  const left = String(a || '').trim();
+  const right = String(b || '').trim();
+  if (!left && !right) return 0;
+  if (!right) return 0;
+  if (!left) return -1;
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function buildProteinCartoonSegments(residues, clipLimit, options = {}) {
+  const proteinResidues = residues
+    .filter((residue) => residue.polymerType === 'protein')
+    .sort(compareResidues);
+  const segments = [];
+  let current = [];
+  let previous = null;
+
+  const flush = () => {
+    if (current.length >= 2) {
+      segments.push({
+        chain: current[0].chain,
+        modelID: current[0].modelID,
+        residues: current,
+      });
+    }
+    current = [];
+  };
+
+  for (const residue of proteinResidues) {
+    if (!residue.backbone.CA || (!options.ignoreVisibility && !residuePassesCartoonFilters(residue, clipLimit))) {
+      flush();
+      previous = null;
+      continue;
+    }
+    if (previous && !residuesAreCartoonContinuous(previous, residue)) flush();
+    current.push(residue);
+    previous = residue;
+  }
+  flush();
+  return segments;
+}
+
+function residuePassesCartoonFilters(residue, clipLimit) {
+  if (state.visibleChains && !state.visibleChains.has(residue.chain)) return false;
+  if (clipLimit && residue.backbone.CA) {
+    const ca = residue.backbone.CA;
+    const relative = [ca.x - clipLimit.center[0], ca.y - clipLimit.center[1], ca.z - clipLimit.center[2]];
+    if (dot(relative, clipLimit.front) > clipLimit.depth) return false;
+  }
+  return true;
+}
+
+function residuesAreCartoonContinuous(a, b) {
+  if (a.modelID !== b.modelID || a.chain !== b.chain) return false;
+  const seqDelta = b.resSeq - a.resSeq;
+  const sequential = seqDelta === 1 || seqDelta === 0;
+  if (!sequential) return false;
+  return distanceAtoms(a.backbone.CA, b.backbone.CA) <= CARTOON_DEFAULTS.maxPeptideDistance;
+}
+
+function compareResidues(a, b) {
+  return a.chain.localeCompare(b.chain, undefined, { numeric: true, sensitivity: 'base' }) ||
+    a.resSeq - b.resSeq ||
+    compareInsertionCode(a.iCode, b.iCode) ||
+    a.resName.localeCompare(b.resName);
+}
+
+function residueBackboneNormal(residue) {
+  const n = residue.backbone.N;
+  const ca = residue.backbone.CA;
+  const c = residue.backbone.C;
+  if (n && ca && c) {
+    const normal = normalize(cross(sub(atomPoint(n), atomPoint(ca)), sub(atomPoint(c), atomPoint(ca))));
+    if (length(normal) > 0.001) return normal;
+  }
+  const o = residue.backbone.O;
+  if (ca && c && o) {
+    const normal = normalize(cross(sub(atomPoint(c), atomPoint(ca)), sub(atomPoint(o), atomPoint(c))));
+    if (length(normal) > 0.001) return normal;
+  }
+  return null;
 }
 
 function buildBonds(model, conectRecords) {
@@ -1641,10 +2096,12 @@ function rebuildScene() {
   const visibleAtoms = [];
   const atomRecords = [];
   const clipLimit = computeClipLimit();
+  const cartoon = state.representation === 'cartoon' ? buildCartoonScene(model, clipLimit) : null;
 
   for (const atom of model.atoms) {
     if (!atomPassesFilters(atom, clipLimit)) continue;
     if (state.representation === 'backbone' && !isBackboneAtom(atom) && !(atom.isHet && !atom.isWater)) continue;
+    if (state.representation === 'cartoon' && atom.polymerType === 'protein' && !atom.isHet) continue;
     const radius = atomRadius(atom);
     const color = atomColor(atom, model);
     const selected = state.selectedAtom && state.selectedAtom.id === atom.id;
@@ -1668,6 +2125,13 @@ function rebuildScene() {
   let bonds = [];
   if (state.representation === 'backbone') {
     bonds = buildTraceBonds(atomRecords);
+  } else if (state.representation === 'cartoon') {
+    for (const bond of model.bonds) {
+      if (!visibleSet.has(bond.a) || !visibleSet.has(bond.b)) continue;
+      const a = model.atoms[bond.a];
+      const b = model.atoms[bond.b];
+      bonds.push(makeBondInstance(a, b, 0.08 * state.bondScale, midpointColor(atomColor(a, model), atomColor(b, model)), 0.82));
+    }
   } else if (state.representation === 'ball-stick') {
     for (const bond of model.bonds) {
       if (!visibleSet.has(bond.a) || !visibleSet.has(bond.b)) continue;
@@ -1685,6 +2149,8 @@ function rebuildScene() {
 
   state.visibleAtoms = visibleAtoms;
   state.visibleBonds = bonds;
+  state.visibleCartoon = cartoon;
+  if (cartoon) atomRecords.push(...cartoon.pickRecords);
   state.visibleAtomRecords = atomRecords;
   uploadScene();
   updateSelectionPanel();
@@ -1724,6 +2190,7 @@ function atomRadius(atom) {
 function atomColor(atom, model) {
   if (state.colorScheme === 'element') return [...elementInfo(atom.element).color];
   if (state.colorScheme === 'bfactor') return bFactorColor(atom.bFactor, model.bFactorRange);
+  if (state.colorScheme === 'secondary') return secondaryColor(atom.ss);
   if (state.colorScheme === 'residue') return residueColor(atom);
   const chainIndex = state.structure.chains.findIndex((chain) => chain.id === atom.chain);
   return [...CHAIN_PALETTE[(chainIndex < 0 ? 0 : chainIndex) % CHAIN_PALETTE.length]];
@@ -1740,6 +2207,14 @@ function residueColor(atom) {
   if (atom.ss === 'helix') return [0.98, 0.36, 0.48];
   if (atom.ss === 'sheet') return [0.96, 0.75, 0.28];
   return [0.76, 0.82, 0.86];
+}
+
+function secondaryColor(kind) {
+  return [...(SECONDARY_COLORS[kind] ?? SECONDARY_COLORS.coil)];
+}
+
+function secondaryLabel(kind) {
+  return SECONDARY_LABELS[kind] ?? SECONDARY_LABELS.coil;
 }
 
 function bFactorColor(value, range) {
@@ -1796,6 +2271,355 @@ function makeBondInstance(a, b, radius, color, alpha) {
   };
 }
 
+function buildCartoonScene(model, clipLimit) {
+  const key = cartoonCacheKey(model, clipLimit);
+  const cached = model.cartoonCache.get(key);
+  if (cached) return cached;
+
+  const mesh = {
+    data: [],
+    pickRecords: [],
+    canvasShapes: [],
+  };
+  const segments = buildProteinCartoonSegments(model.residues, clipLimit);
+  for (const segment of segments) {
+    const samples = sampleCartoonSegment(segment.residues, model);
+    if (samples.length < 2) continue;
+    resolveCartoonFrames(samples);
+    for (let index = 0; index < samples.length; index += 2) {
+      const sample = samples[index];
+      mesh.pickRecords.push({
+        atom: sample.residue.backbone.CA,
+        residue: sample.residue,
+        center: sample.position,
+        radius: cartoonPickRadius(sample),
+      });
+    }
+    const lastSample = samples[samples.length - 1];
+    mesh.pickRecords.push({
+      atom: lastSample.residue.backbone.CA,
+      residue: lastSample.residue,
+      center: lastSample.position,
+      radius: cartoonPickRadius(lastSample),
+    });
+    for (let index = 0; index + 1 < samples.length; index += 1) {
+      addCartoonSpan(mesh, samples[index], samples[index + 1]);
+    }
+  }
+
+  const result = {
+    vertices: new Float32Array(mesh.data),
+    vertexCount: mesh.data.length / 12,
+    pickRecords: mesh.pickRecords,
+    canvasShapes: mesh.canvasShapes,
+  };
+  if (model.cartoonCache.size > 18) model.cartoonCache.clear();
+  model.cartoonCache.set(key, result);
+  return result;
+}
+
+function cartoonCacheKey(model, clipLimit) {
+  const chains = state.visibleChains ? [...state.visibleChains].sort(naturalCompare).join(',') : '*';
+  const clip = clipLimit
+    ? `${state.clipDepth.toFixed(3)}:${clipLimit.front.map((value) => value.toFixed(2)).join(',')}:${clipLimit.depth.toFixed(2)}`
+    : 'none';
+  const selected = state.selectedAtom?.residueKey ?? '';
+  return [
+    model.number,
+    state.colorScheme,
+    state.cartoonWidth.toFixed(2),
+    Math.round(state.cartoonQuality),
+    chains,
+    clip,
+    selected,
+  ].join('|');
+}
+
+function sampleCartoonSegment(residues, model) {
+  const quality = clamp(Math.round(state.cartoonQuality), 2, 9);
+  const positions = residues.map((residue) => atomPoint(residue.backbone.CA));
+  const sheetBounds = sheetRunBounds(residues);
+  const samples = [];
+
+  for (let index = 0; index + 1 < residues.length; index += 1) {
+    for (let step = 0; step < quality; step += 1) {
+      if (index > 0 && step === 0) continue;
+      const t = step / quality;
+      const residue = t < 0.5 ? residues[index] : residues[index + 1];
+      samples.push(makeCartoonSample({
+        position: catmullRomPoint(
+          positions[Math.max(0, index - 1)],
+          positions[index],
+          positions[index + 1],
+          positions[Math.min(positions.length - 1, index + 2)],
+          t,
+        ),
+        residue,
+        residueIndex: index + t,
+        normal: interpolateResidueNormal(residues[index], residues[index + 1], t),
+        sheetBounds,
+        model,
+      }));
+    }
+  }
+
+  const last = residues[residues.length - 1];
+  samples.push(makeCartoonSample({
+    position: positions[positions.length - 1],
+    residue: last,
+    residueIndex: residues.length - 1,
+    normal: last.normal,
+    sheetBounds,
+    model,
+  }));
+  return samples;
+}
+
+function makeCartoonSample({ position, residue, residueIndex, normal, sheetBounds, model }) {
+  const ss = residue.ss || 'coil';
+  return {
+    position,
+    residue,
+    residueIndex,
+    ss,
+    color: cartoonColor(residue, model),
+    rawNormal: normal,
+    sheetBounds: sheetBounds.get(residue),
+    tangent: [1, 0, 0],
+    side: [0, 1, 0],
+    normal: [0, 0, 1],
+  };
+}
+
+function sheetRunBounds(residues) {
+  const bounds = new Map();
+  let start = -1;
+  const flush = (end) => {
+    if (start < 0) return;
+    for (let index = start; index <= end; index += 1) bounds.set(residues[index], { start, end });
+    start = -1;
+  };
+  for (let index = 0; index < residues.length; index += 1) {
+    if (residues[index].ss === 'sheet') {
+      if (start < 0) start = index;
+    } else {
+      flush(index - 1);
+    }
+  }
+  flush(residues.length - 1);
+  return bounds;
+}
+
+function resolveCartoonFrames(samples) {
+  let previousSide = null;
+  let previousNormal = null;
+  for (let index = 0; index < samples.length; index += 1) {
+    const before = samples[Math.max(0, index - 1)].position;
+    const after = samples[Math.min(samples.length - 1, index + 1)].position;
+    const tangent = normalize(sub(after, before));
+    let normal = samples[index].rawNormal || previousNormal || choosePerpendicular(tangent);
+    normal = sub(normal, scale(tangent, dot(normal, tangent)));
+    if (length(normal) < 0.001) normal = previousNormal || choosePerpendicular(tangent);
+    normal = normalize(normal);
+    let side = normalize(cross(tangent, normal));
+    if (length(side) < 0.001) side = choosePerpendicular(tangent);
+    normal = normalize(cross(side, tangent));
+    if (previousSide && dot(side, previousSide) < 0) {
+      side = scale(side, -1);
+      normal = scale(normal, -1);
+    }
+    samples[index].tangent = tangent;
+    samples[index].side = side;
+    samples[index].normal = normal;
+    previousSide = side;
+    previousNormal = normal;
+  }
+}
+
+function addCartoonSpan(mesh, a, b) {
+  const ss = cartoonSpanSS(a, b);
+  if (ss === 'coil' || ss === 'turn') {
+    addTubeSpan(mesh, a, b, ss);
+  } else {
+    addRibbonSpan(mesh, a, b, ss);
+  }
+  mesh.canvasShapes.push({
+    a: a.position,
+    b: b.position,
+    color: midpointColor(a.color, b.color),
+    alpha: 0.96,
+    width: cartoonCanvasWidth(a, b, ss),
+    ss,
+  });
+}
+
+function cartoonSpanSS(a, b) {
+  if (a.ss === b.ss) return a.ss;
+  if (a.ss === 'sheet' || b.ss === 'sheet') return 'sheet';
+  if (a.ss === 'helix' || b.ss === 'helix') return 'helix';
+  if (a.ss === 'turn' || b.ss === 'turn') return 'turn';
+  return 'coil';
+}
+
+function addRibbonSpan(mesh, a, b, ss) {
+  const dimsA = cartoonRibbonDimensions(a, ss);
+  const dimsB = cartoonRibbonDimensions(b, ss);
+  const aCorners = ribbonCorners(a, dimsA.width, dimsA.thickness);
+  const bCorners = ribbonCorners(b, dimsB.width, dimsB.thickness);
+  const colorA = a.color;
+  const colorB = b.color;
+
+  addQuad(mesh, aCorners.leftTop, bCorners.leftTop, bCorners.rightTop, aCorners.rightTop, a.normal, colorA, colorB, colorB, colorA);
+  addQuad(mesh, aCorners.rightBottom, bCorners.rightBottom, bCorners.leftBottom, aCorners.leftBottom, scale(a.normal, -1), colorA, colorB, colorB, colorA);
+  addQuad(mesh, aCorners.rightTop, bCorners.rightTop, bCorners.rightBottom, aCorners.rightBottom, a.side, colorA, colorB, colorB, colorA);
+  addQuad(mesh, aCorners.leftBottom, bCorners.leftBottom, bCorners.leftTop, aCorners.leftTop, scale(a.side, -1), colorA, colorB, colorB, colorA);
+}
+
+function addTubeSpan(mesh, a, b, ss) {
+  const radiusA = cartoonTubeRadius(a, ss);
+  const radiusB = cartoonTubeRadius(b, ss);
+  const sides = CARTOON_DEFAULTS.tubeSides;
+  for (let sideIndex = 0; sideIndex < sides; sideIndex += 1) {
+    const theta0 = (sideIndex / sides) * Math.PI * 2;
+    const theta1 = ((sideIndex + 1) / sides) * Math.PI * 2;
+    const normalA0 = tubeNormal(a, theta0);
+    const normalA1 = tubeNormal(a, theta1);
+    const normalB0 = tubeNormal(b, theta0);
+    const normalB1 = tubeNormal(b, theta1);
+    const a0 = add(a.position, scale(normalA0, radiusA));
+    const a1 = add(a.position, scale(normalA1, radiusA));
+    const b0 = add(b.position, scale(normalB0, radiusB));
+    const b1 = add(b.position, scale(normalB1, radiusB));
+    addTriangle(mesh, a0, b0, b1, normalA0, a.color, b.color, b.color);
+    addTriangle(mesh, a0, b1, a1, normalA0, a.color, b.color, a.color);
+  }
+}
+
+function ribbonCorners(sample, width, thickness) {
+  const halfWidth = width / 2;
+  const halfThickness = thickness / 2;
+  const side = scale(sample.side, halfWidth);
+  const normal = scale(sample.normal, halfThickness);
+  return {
+    leftTop: add(add(sample.position, scale(side, -1)), normal),
+    rightTop: add(add(sample.position, side), normal),
+    leftBottom: add(add(sample.position, scale(side, -1)), scale(normal, -1)),
+    rightBottom: add(add(sample.position, side), scale(normal, -1)),
+  };
+}
+
+function cartoonRibbonDimensions(sample, ss) {
+  const scaleFactor = state.cartoonWidth;
+  if (ss === 'sheet') {
+    return {
+      width: sheetSampleWidth(sample) * scaleFactor,
+      thickness: CARTOON_DEFAULTS.ribbonThickness * scaleFactor,
+    };
+  }
+  return {
+    width: CARTOON_DEFAULTS.helixWidth * scaleFactor,
+    thickness: CARTOON_DEFAULTS.helixThickness * scaleFactor,
+  };
+}
+
+function sheetSampleWidth(sample) {
+  const base = CARTOON_DEFAULTS.sheetWidth;
+  const bounds = sample.sheetBounds;
+  if (!bounds) return base;
+  const distanceToEnd = bounds.end - sample.residueIndex;
+  if (distanceToEnd <= 0.05) return base * 0.08;
+  if (distanceToEnd < 0.38) {
+    return lerp(CARTOON_DEFAULTS.sheetWidth * 0.08, CARTOON_DEFAULTS.sheetArrowWidth, distanceToEnd / 0.38);
+  }
+  if (distanceToEnd < 1.05) {
+    return lerp(CARTOON_DEFAULTS.sheetArrowWidth, CARTOON_DEFAULTS.sheetWidth, (distanceToEnd - 0.38) / 0.67);
+  }
+  return base;
+}
+
+function cartoonTubeRadius(sample, ss) {
+  const base = ss === 'turn' ? CARTOON_DEFAULTS.turnRadius : CARTOON_DEFAULTS.tubeRadius;
+  return base * state.cartoonWidth;
+}
+
+function cartoonCanvasWidth(a, b, ss) {
+  if (ss === 'coil' || ss === 'turn') return (cartoonTubeRadius(a, ss) + cartoonTubeRadius(b, ss)) * 0.72;
+  const widthA = cartoonRibbonDimensions(a, ss).width;
+  const widthB = cartoonRibbonDimensions(b, ss).width;
+  return Math.max(widthA, widthB) * 0.52;
+}
+
+function cartoonPickRadius(sample) {
+  if (sample.ss === 'coil' || sample.ss === 'turn') return Math.max(0.75, cartoonTubeRadius(sample, sample.ss) * 2.8);
+  return Math.max(0.85, cartoonRibbonDimensions(sample, sample.ss).width * 0.72);
+}
+
+function tubeNormal(sample, theta) {
+  return normalize(add(scale(sample.side, Math.cos(theta)), scale(sample.normal, Math.sin(theta))));
+}
+
+function addQuad(mesh, p0, p1, p2, p3, normal, c0, c1, c2, c3) {
+  addTriangle(mesh, p0, p1, p2, normal, c0, c1, c2);
+  addTriangle(mesh, p0, p2, p3, normal, c0, c2, c3);
+}
+
+function addTriangle(mesh, p0, p1, p2, normal, c0, c1, c2) {
+  const faceNormal = length(normal) > 0.001 ? normalize(normal) : normalize(cross(sub(p1, p0), sub(p2, p0)));
+  pushCartoonVertex(mesh, p0, faceNormal, c0);
+  pushCartoonVertex(mesh, p1, faceNormal, c1);
+  pushCartoonVertex(mesh, p2, faceNormal, c2);
+}
+
+function pushCartoonVertex(mesh, position, normal, color) {
+  mesh.data.push(
+    position[0], position[1], position[2], 0,
+    normal[0], normal[1], normal[2], 0,
+    color[0], color[1], color[2], 0.96,
+  );
+}
+
+function cartoonColor(residue, model) {
+  let color;
+  if (state.colorScheme === 'secondary') {
+    color = secondaryColor(residue.ss);
+  } else if (state.colorScheme === 'bfactor') {
+    color = bFactorColor(residue.bFactor, model.bFactorRange);
+  } else if (state.colorScheme === 'residue') {
+    color = residueColor(residue.representative);
+  } else if (state.colorScheme === 'element') {
+    color = [...elementInfo(residue.representative?.element || 'C').color];
+  } else {
+    const chainIndex = state.structure.chains.findIndex((chain) => chain.id === residue.chain);
+    color = [...CHAIN_PALETTE[(chainIndex < 0 ? 0 : chainIndex) % CHAIN_PALETTE.length]];
+  }
+  if (state.selectedAtom?.residueKey === residue.key) {
+    return [
+      Math.min(1, color[0] * 1.1 + 0.32),
+      Math.min(1, color[1] * 1.1 + 0.32),
+      Math.min(1, color[2] * 1.1 + 0.32),
+    ];
+  }
+  return color;
+}
+
+function interpolateResidueNormal(a, b, t) {
+  if (a.normal && b.normal) {
+    const normal = normalize(add(scale(a.normal, 1 - t), scale(b.normal, t)));
+    if (length(normal) > 0.001) return normal;
+  }
+  return a.normal || b.normal || null;
+}
+
+function catmullRomPoint(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return [
+    0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
+    0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3),
+    0.5 * ((2 * p1[2]) + (-p0[2] + p2[2]) * t + (2 * p0[2] - 5 * p1[2] + 4 * p2[2] - p3[2]) * t2 + (-p0[2] + 3 * p1[2] - 3 * p2[2] + p3[2]) * t3),
+  ];
+}
+
 function uploadScene() {
   if (gpu.fallback) return;
   const atomData = new Float32Array(Math.max(1, state.visibleAtoms.length) * 8);
@@ -1843,12 +2667,15 @@ function uploadScene() {
   gpu.atomCount = state.visibleAtoms.length;
   gpu.glowCount = state.glowScale > 0 ? state.visibleAtoms.length : 0;
   gpu.bondCount = state.visibleBonds.length;
+  gpu.cartoonVertexCount = state.visibleCartoon?.vertexCount ?? 0;
   gpu.atomBuffer = replaceStorageBuffer(gpu.atomBuffer, atomData, 'atoms');
   gpu.glowBuffer = replaceStorageBuffer(gpu.glowBuffer, glowData, 'glow');
   gpu.bondBuffer = replaceStorageBuffer(gpu.bondBuffer, bondData, 'bonds');
+  gpu.cartoonBuffer = replaceStorageBuffer(gpu.cartoonBuffer, state.visibleCartoon?.vertices ?? new Float32Array(12), 'cartoon');
   gpu.atomBindGroup = createBindGroup(gpu.atomBuffer);
   gpu.glowBindGroup = createBindGroup(gpu.glowBuffer);
   gpu.bondBindGroup = createBindGroup(gpu.bondBuffer);
+  gpu.cartoonBindGroup = createBindGroup(gpu.cartoonBuffer);
 }
 
 function replaceStorageBuffer(previous, data, label) {
@@ -1943,6 +2770,11 @@ function render(time) {
     pass.setBindGroup(0, gpu.glowBindGroup);
     pass.draw(6, gpu.glowCount);
   }
+  if (gpu.cartoonVertexCount > 0) {
+    pass.setPipeline(gpu.cartoonPipeline);
+    pass.setBindGroup(0, gpu.cartoonBindGroup);
+    pass.draw(gpu.cartoonVertexCount);
+  }
   if (gpu.bondCount > 0) {
     pass.setPipeline(gpu.bondPipeline);
     pass.setBindGroup(0, gpu.bondBindGroup);
@@ -1970,6 +2802,8 @@ function renderCanvas(time) {
   background.addColorStop(1, '#0b0d0d');
   ctx.fillStyle = background;
   ctx.fillRect(0, 0, width, height);
+
+  renderCanvasCartoon(ctx);
 
   const projectedBonds = [];
   for (const bond of state.visibleBonds) {
@@ -2036,6 +2870,39 @@ function renderCanvas(time) {
     if (highlight) {
       ctx.strokeStyle = 'rgba(255, 245, 220, 0.95)';
       ctx.lineWidth = Math.max(1.5, radius * 0.16);
+      ctx.stroke();
+    }
+  }
+}
+
+function renderCanvasCartoon(ctx) {
+  const shapes = state.visibleCartoon?.canvasShapes ?? [];
+  if (!shapes.length) return;
+  const projected = [];
+  for (const shape of shapes) {
+    const a = projectPoint(shape.a);
+    const b = projectPoint(shape.b);
+    if (!a || !b) continue;
+    projected.push({ ...shape, a, b, z: (a.z + b.z) / 2 });
+  }
+  projected.sort((a, b) => b.z - a.z);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (const shape of projected) {
+    const scaleAtDepth = (shape.a.scale + shape.b.scale) / 2;
+    const lineWidth = Math.max(2.2, shape.width * scaleAtDepth * 2.2);
+    ctx.strokeStyle = rgbaCSS(shape.color, shape.alpha);
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.moveTo(shape.a.x, shape.a.y);
+    ctx.lineTo(shape.b.x, shape.b.y);
+    ctx.stroke();
+    if (shape.ss === 'sheet' && lineWidth > 3.5) {
+      ctx.strokeStyle = rgbaCSS(lerpColor(shape.color, [1, 1, 1], 0.18), 0.35);
+      ctx.lineWidth = Math.max(1, lineWidth * 0.22);
+      ctx.beginPath();
+      ctx.moveTo(shape.a.x, shape.a.y);
+      ctx.lineTo(shape.b.x, shape.b.y);
       ctx.stroke();
     }
   }
@@ -2113,7 +2980,8 @@ function onPointerMove(event) {
   state.hoveredAtom = hit?.atom ?? null;
   if (state.hoveredAtom) {
     const atom = state.hoveredAtom;
-    els.tooltip.innerHTML = `<strong>${escapeHTML(atomLabel(atom))}</strong><span>${escapeHTML(atom.resName)} ${escapeHTML(atom.chain)}${atom.resSeq} · ${escapeHTML(atom.element)} · B ${atom.bFactor.toFixed(2)}</span>`;
+    const ss = atom.polymerType === 'protein' ? ` · ${secondaryLabel(atom.ss)} · ${atom.ssSource}` : '';
+    els.tooltip.innerHTML = `<strong>${escapeHTML(atomLabel(atom))}</strong><span>${escapeHTML(atom.resName)} ${escapeHTML(atom.chain)}${atom.resSeq} · ${escapeHTML(atom.element)} · B ${atom.bFactor.toFixed(2)}${escapeHTML(ss)}</span>`;
     els.tooltip.style.transform = `translate(${event.clientX + 14}px, ${event.clientY + 14}px)`;
     els.tooltip.classList.add('is-visible');
   } else {
@@ -2161,7 +3029,7 @@ function pickAtom(ndcX, ndcY) {
   let best = null;
   for (const record of state.visibleAtomRecords) {
     const atom = record.atom;
-    const center = [atom.x, atom.y, atom.z];
+    const center = record.center ?? [atom.x, atom.y, atom.z];
     const toCenter = sub(center, origin);
     const t = dot(toCenter, rayDirection);
     if (t < 0) continue;
@@ -2376,7 +3244,8 @@ function updateSelectionPanel() {
     els.selectionMeta.textContent = 'Select an atom or residue.';
   } else {
     els.selectionTitle.textContent = atomLabel(atom);
-    els.selectionMeta.textContent = `${atom.resName} ${atom.chain}${atom.resSeq}${atom.iCode} · ${atom.element} · serial ${atom.serial} · occupancy ${atom.occupancy.toFixed(2)} · B ${atom.bFactor.toFixed(2)}`;
+    const ss = atom.polymerType === 'protein' ? ` · ${secondaryLabel(atom.ss)} · ${atom.ssSource}` : '';
+    els.selectionMeta.textContent = `${atom.resName} ${atom.chain}${atom.resSeq}${atom.iCode} · ${atom.element} · serial ${atom.serial} · occupancy ${atom.occupancy.toFixed(2)} · B ${atom.bFactor.toFixed(2)}${ss}`;
   }
   const fragment = document.createDocumentFragment();
   for (const measurement of state.measurements.slice(-6).reverse()) {
@@ -2607,6 +3476,10 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
 function lerpColor(a, b, t) {
   return [
     a[0] + (b[0] - a[0]) * t,
@@ -2617,6 +3490,10 @@ function lerpColor(a, b, t) {
 
 function midpointColor(a, b) {
   return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+}
+
+function atomPoint(atom) {
+  return [atom.x, atom.y, atom.z];
 }
 
 function add(a, b) {
@@ -2657,8 +3534,22 @@ function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
+function distanceAtoms(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
 function distanceVec(a, b) {
   return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
+function angleDegrees(a, b) {
+  const denom = Math.max(0.000001, length(a) * length(b));
+  return Math.acos(clamp(dot(a, b) / denom, -1, 1)) * 180 / Math.PI;
+}
+
+function choosePerpendicular(v) {
+  const reference = Math.abs(v[1]) < 0.85 ? [0, 1, 0] : [1, 0, 0];
+  return normalize(cross(v, reference));
 }
 
 function mat4Perspective(fovy, aspect, near, far) {
@@ -2696,4 +3587,21 @@ function mat4Multiply(a, b) {
     }
   }
   return out;
+}
+
+if (globalThis.__PROTEOSCOPE_TEST__) {
+  globalThis.__proteoscopeTest = {
+    state,
+    createStructure,
+    createModel,
+    parsePDB,
+    parseMMCIF,
+    deriveStructure,
+    buildModelResidues,
+    buildProteinCartoonSegments,
+    buildCartoonScene,
+    applyAltLocationPolicy,
+    assignSecondary,
+    detectStructureFormat,
+  };
 }
