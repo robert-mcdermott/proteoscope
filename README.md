@@ -17,15 +17,15 @@ residues, measure distances, and export publication-prep screenshots.
 Most users do not need Go installed. Download a prebuilt binary from the
 Proteoscope release page:
 
-[https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.2](https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.2)
+[https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.4](https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.4)
 
 Choose the file for your operating system:
 
 | Platform | Download |
 | --- | --- |
-| macOS, Apple Silicon | [`proteoscope-darwin-arm64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.3/proteoscope-darwin-arm64) |
-| Linux, x64 | [`proteoscope-linux-amd64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.3/proteoscope-linux-amd64) |
-| Windows, x64 | [`proteoscope-windows-amd64.exe`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.3/proteoscope-windows-amd64.exe) |
+| macOS, Apple Silicon | [`proteoscope-darwin-arm64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.4/proteoscope-darwin-arm64) |
+| Linux, x64 | [`proteoscope-linux-amd64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.4/proteoscope-linux-amd64) |
+| Windows, x64 | [`proteoscope-windows-amd64.exe`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.4/proteoscope-windows-amd64.exe) |
 
 When Proteoscope starts, it prints a local URL, usually:
 
