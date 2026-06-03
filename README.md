@@ -216,7 +216,7 @@ return to all chains.
 
 ## Representations
 
-Proteoscope provides three molecular representations.
+Proteoscope provides four molecular representations.
 
 ### Ball + Stick
 
@@ -236,6 +236,17 @@ Shows a simplified polymer trace. Proteins are traced through alpha carbons
 (`CA`), while nucleic acids are traced through backbone atoms such as `P` and
 sugar carbons. Ligands remain visible so cofactors and bound molecules are not
 lost.
+
+### Cartoon
+
+Shows proteins as a smooth backbone cartoon generated from residue-level
+polymer chains. Alpha helices, beta strands, turns, and coils are distinguished
+from PDB `HELIX`/`SHEET` records or PDBx/mmCIF `_struct_conf` and
+`_struct_sheet_range` annotations when present. If no annotations are available,
+Proteoscope uses an approximate C-alpha geometry fallback and labels the source
+as computed. Cartoon mode keeps non-protein entities such as ligands, ions,
+waters, and nucleic acids available through the existing atom-level rendering
+controls.
 
 ## Coloring Modes
 
@@ -269,6 +280,13 @@ Colors by residue class:
 - Ligands and solvent
 
 This is useful for quickly reading chemical character across a structure.
+
+### Sec Struct
+
+Colors protein cartoons and protein atoms by secondary-structure assignment:
+alpha helices, beta strands, turns, and coils. Selection details show whether a
+residue's assignment came from file annotation, computed fallback geometry, or
+the default coil fallback.
 
 ## Display Controls
 
@@ -348,6 +366,7 @@ The selection panel reports:
 - Atom serial number
 - Occupancy
 - B-factor
+- Protein secondary-structure type and assignment source, when applicable
 
 Use `Frame` to center the camera on the selected atom.
 
@@ -472,8 +491,8 @@ Bond handling:
 Alternate locations:
 
 - Blank alternate locations are accepted.
-- `A` and `1` conformers are accepted.
-- Other alternate locations are skipped for a cleaner default view.
+- When alternate conformers describe the same atom, Proteoscope chooses the
+  highest-occupancy conformer, then `A`/`1`, then the first available conformer.
 
 Limitations:
 
@@ -534,6 +553,7 @@ GOOS=windows GOARCH=amd64 go build -o dist/proteoscope-windows-amd64.exe .
 
 ```sh
 go test ./...
+node --test web/app.test.mjs
 ```
 
 There is no Node build step. The frontend is plain embedded HTML, CSS, and

@@ -342,12 +342,12 @@ button:focus-visible {
 
 .segmented {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
 }
 
 .segmented + .segmented {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin-top: 8px;
 }
 
@@ -743,16 +743,24 @@ input[type="range"] {
 
   .detail-panel {
     right: 10px;
-    bottom: 244px;
+    bottom: 300px;
     width: min(330px, calc(100vw - 20px));
+    min-height: 132px;
+    padding: 12px;
   }
 
   .toolbar {
     left: auto;
     right: 10px;
-    bottom: 198px;
+    bottom: 254px;
   }
 
+  .control-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
   .control-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

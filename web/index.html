@@ -65,12 +65,14 @@
           <button class="is-active" type="button" data-representation="ball-stick">Ball + Stick</button>
           <button type="button" data-representation="spacefill">Spacefill</button>
           <button type="button" data-representation="backbone">Backbone</button>
+          <button type="button" data-representation="cartoon">Cartoon</button>
         </div>
         <div class="segmented" role="group" aria-label="Coloring">
           <button class="is-active" type="button" data-color-scheme="chain">Chain</button>
           <button type="button" data-color-scheme="element">Element</button>
           <button type="button" data-color-scheme="bfactor">B-factor</button>
           <button type="button" data-color-scheme="residue">Residue</button>
+          <button type="button" data-color-scheme="secondary">Sec Struct</button>
         </div>
         <div class="control-grid">
           <label>
@@ -80,6 +82,14 @@
           <label>
             <span>Bond scale</span>
             <input id="bond-scale" type="range" min="0.14" max="1.4" value="0.52" step="0.01" />
+          </label>
+          <label>
+            <span>Ribbon</span>
+            <input id="cartoon-width" type="range" min="0.55" max="1.8" value="1" step="0.01" />
+          </label>
+          <label>
+            <span>Quality</span>
+            <input id="cartoon-quality" type="range" min="2" max="9" value="5" step="1" />
           </label>
           <label>
             <span>Glow</span>
