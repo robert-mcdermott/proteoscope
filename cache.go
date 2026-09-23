@@ -77,8 +77,17 @@ func (c *diskCache) load(kind, name string) (payload, bool, bool) {
 	if err != nil {
 		return payload{}, false, false
 	}
-	stale := c.maxAge > 0 && time.Since(info.ModTime()) > c.maxAge
+	maxAge := c.maxAgeFor(kind)
+	stale := maxAge > 0 && time.Since(info.ModTime()) > maxAge
 	return payload{body: body, contentType: meta.ContentType, headers: meta.Headers}, true, stale
+}
+
+// Search results go stale within a day, since new entries are released weekly.
+func (c *diskCache) maxAgeFor(kind string) time.Duration {
+	if kind == "search" && (c.maxAge == 0 || c.maxAge > searchCacheAge) {
+		return searchCacheAge
+	}
+	return c.maxAge
 }
 
 func (c *diskCache) store(kind, name string, p payload) {

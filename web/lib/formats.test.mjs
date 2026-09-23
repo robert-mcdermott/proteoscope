@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createZip, isZip, listZip, readZip } from './zip.js';
 import { readNpy, readNpz, squareMatrix, writeNpy } from './npy.js';
 import { binaryCIFToText, decodeData, decodeMessagePack, isBinaryCIF } from './bcif.js';
-import { parseStructure } from './parse.js';
+import { detectStructureFormat, parseStructure } from './parse.js';
 import { combineDepth, depthSummary, msaDepth } from './msa.js';
 import { greedyModularity, paeDomains } from './pae-domains.js';
 
@@ -265,4 +265,18 @@ test('PAE domains separate two rigid blocks joined by a flexible linker', () => 
   assert.equal(new Set([community[0], community[1], community[2]]).size, 1);
   assert.notEqual(community[0], community[3]);
   assert.deepEqual(Array.from(greedyModularity(new Float64Array(4), 2)), [0, 1]);
+});
+
+test('structure format follows the name unless an mmCIF name holds PDB records', () => {
+  const pdb = 'ATOM      1  N   MET A   1      28.179   0.444  24.245  1.00 41.86           N\nEND\n';
+  const cif = '# written by a predictor\ndata_x\nloop_\n_atom_site.id\nATOM   1    N N . MET A 1 1\n';
+  assert.equal(detectStructureFormat(pdb, 'model.pdb').kind, 'pdb');
+  assert.equal(detectStructureFormat(pdb, 'result_seed-1.cif').kind, 'pdb', 'no data block: PDB text under a .cif name');
+  assert.equal(detectStructureFormat(cif, 'model.cif').kind, 'mmcif');
+  assert.equal(detectStructureFormat('', 'empty.cif').kind, 'mmcif', 'nothing to go on: trust the name');
+  assert.equal(detectStructureFormat(cif, 'upload').kind, 'mmcif');
+  assert.equal(parseStructure(pdb, 'model.cif').models[0].atoms.length, 1);
+  // Protenix marks its models in the data block name; their B-factors are pLDDT.
+  const protenix = parseStructure(['data_job_sample_0_predicted_by_protenix', 'loop_', ...['group_PDB', 'id', 'type_symbol', 'label_atom_id', 'label_comp_id', 'label_asym_id', 'label_seq_id', 'Cartn_x', 'Cartn_y', 'Cartn_z', 'B_iso_or_equiv'].map((name) => `_atom_site.${name}`), 'ATOM 1 C CA MET A 1 0.0 0.0 0.0 43.07', ''].join('\n'), 'job_sample_0.cif');
+  assert.equal(protenix.meta.isPredicted, true);
 });

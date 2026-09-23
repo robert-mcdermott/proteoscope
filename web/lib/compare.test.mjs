@@ -1,45 +1,21 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { parsePDB } from './parse.js';
+import { parseStructure } from './parse.js';
+import { editCIF, exampleText } from './test-data.mjs';
 import { deriveStructure, prepareAssemblyEstimates } from './structure.js';
 import { compareStructures, pairChains, polymerChainResidues, principalAtom, superposeEnsemble } from './compare.js';
-import { invertTransform, transformPoint } from './superpose.js';
+import { invertTransform } from './superpose.js';
 
-const DATA_DIR = new URL('../../data/', import.meta.url);
-
-async function loadPDB(name, edit = null) {
-  let text = await readFile(new URL(name, DATA_DIR), 'utf8');
-  if (edit) text = editPDB(text, edit);
-  const structure = parsePDB(text, name);
+// Bundled examples, optionally edited: a rigid transform, chain relabeling, renumbering, a chain
+// filter and a per-chain shift.
+function loadExample(id, edit = null) {
+  let text = exampleText(id);
+  if (edit) text = editCIF(text, edit);
+  const structure = parseStructure(text, `${id}.cif`);
   structure.baseModels = structure.models;
   prepareAssemblyEstimates(structure);
   deriveStructure(structure);
   return { structure, model: structure.models[0] };
-}
-
-// Rewrites coordinate records: optional rigid transform, chain relabeling, renumbering, and a
-// per-chain extra shift.
-function editPDB(text, { transform = null, chains = null, renumber = 0, only = null, shift = null } = {}) {
-  return text.split('\n').filter((line) => {
-    if (!only || !/^(ATOM|HETATM|ANISOU|TER)/.test(line)) return true;
-    return only.includes(line[21]);
-  }).map((line) => {
-    if (!/^(ATOM|HETATM)/.test(line)) return line;
-    let x = Number(line.slice(30, 38));
-    let y = Number(line.slice(38, 46));
-    let z = Number(line.slice(46, 54));
-    if (shift?.[line[21]]) {
-      x += shift[line[21]][0];
-      y += shift[line[21]][1];
-      z += shift[line[21]][2];
-    }
-    if (transform) [x, y, z] = transformPoint(transform, x, y, z);
-    let chain = line[21];
-    if (chains?.[chain]) chain = chains[chain];
-    const resSeq = Number(line.slice(22, 26)) + renumber;
-    return `${line.slice(0, 21)}${chain}${String(resSeq).padStart(4)}${line.slice(26, 30)}${x.toFixed(3).padStart(8)}${y.toFixed(3).padStart(8)}${z.toFixed(3).padStart(8)}${line.slice(54)}`;
-  }).join('\n');
 }
 
 const ROTATION = (() => {
@@ -57,8 +33,8 @@ const ROTATION = (() => {
 })();
 
 test('a rotated copy of hemoglobin superposes exactly, chain for chain', async () => {
-  const ref = await loadPDB('4hhb.pdb');
-  const mob = await loadPDB('4hhb.pdb', { transform: ROTATION });
+  const ref = loadExample('4hhb');
+  const mob = loadExample('4hhb', { transform: ROTATION });
   const result = compareStructures(ref, mob);
   assert.deepEqual(result.chainPairs.map((pair) => `${pair.ref}${pair.mob}`), ['AA', 'BB', 'CC', 'DD']);
   assert.equal(result.stats.pairCount, 141 + 146 + 141 + 146);
@@ -72,15 +48,15 @@ test('a rotated copy of hemoglobin superposes exactly, chain for chain', async (
 });
 
 test('identical subunits under new chain names pair by position, not by name', async () => {
-  const ref = await loadPDB('4hhb.pdb');
-  const mob = await loadPDB('4hhb.pdb', { transform: ROTATION, chains: { A: 'W', B: 'X', C: 'Y', D: 'Z' } });
+  const ref = loadExample('4hhb');
+  const mob = loadExample('4hhb', { transform: ROTATION, chains: { A: 'W', B: 'X', C: 'Y', D: 'Z' } });
   const pairs = pairChains(ref.model, mob.model);
   assert.deepEqual(pairs.map((pair) => `${pair.ref.id}${pair.mob.id}`).sort(), ['AW', 'BX', 'CY', 'DZ']);
   assert.ok(compareStructures(ref, mob).stats.rmsd < 0.01);
 });
 
 test('alpha and beta globin align at about 43% identity with a close structural match', async () => {
-  const hb = await loadPDB('4hhb.pdb');
+  const hb = loadExample('4hhb');
   const result = compareStructures(hb, hb, { refChains: ['A'], mobChains: ['B'] });
   assert.ok(result.stats.identity > 0.38 && result.stats.identity < 0.5, `identity ${result.stats.identity}`);
   assert.ok(result.stats.pairCount > 135);
@@ -94,8 +70,8 @@ test('alpha and beta globin align at about 43% identity with a close structural 
 });
 
 test('fitting on a selection leaves the rest free to deviate', async () => {
-  const ref = await loadPDB('4hhb.pdb');
-  const mob = await loadPDB('4hhb.pdb', { shift: { A: [5, 0, 0] } });
+  const ref = loadExample('4hhb');
+  const mob = loadExample('4hhb', { shift: { A: [5, 0, 0] } });
   const fitKeys = new Set(ref.model.residues.filter((residue) => residue.chain === 'B').map((residue) => residue.key));
   const result = compareStructures(ref, mob, { fitKeys });
   assert.ok(result.stats.rmsd < 0.01);
@@ -119,9 +95,9 @@ test('fitting on a selection leaves the rest free to deviate', async () => {
 });
 
 test('UniProt numbering pairs a PDB chain with an AlphaFold-style model', async () => {
-  const pdb = await loadPDB('4hhb.pdb');
+  const pdb = loadExample('4hhb');
   // An AlphaFold DB model numbers residues by UniProt position: HBA_HUMAN 2-142 = PDB 1-141.
-  const model = await loadPDB('4hhb.pdb', { only: ['A'], renumber: 1, transform: ROTATION });
+  const model = loadExample('4hhb', { only: ['A'], renumber: 1, transform: ROTATION });
   const result = compareStructures(pdb, model, { correspondence: 'uniprot', refChains: ['A'], accession: 'P69905' });
   assert.equal(result.stats.pairCount, 141);
   assert.ok(result.pairs.every((pair) => pair.mob.resSeq === pair.ref.resSeq + 1));
@@ -129,7 +105,7 @@ test('UniProt numbering pairs a PDB chain with an AlphaFold-style model', async 
 });
 
 test('polymer chains use Cα for protein and C4′ for nucleic acids', async () => {
-  const p53 = await loadPDB('1tup.pdb');
+  const p53 = loadExample('1tup');
   const chains = polymerChainResidues(p53.model);
   const kinds = new Set([...chains.values()].map((chain) => chain.kind));
   assert.ok(kinds.has('protein') && kinds.has('nucleic'));
@@ -142,7 +118,7 @@ test('polymer chains use Cα for protein and C4′ for nucleic acids', async () 
 });
 
 test('an NMR ensemble superposes onto its core and reports per-residue RMSF', async () => {
-  const { structure } = await loadPDB('1jm7.pdb');
+  const { structure } = loadExample('1jm7');
   assert.ok(structure.models.length > 5);
   const result = superposeEnsemble(structure.models, 0);
   assert.equal(result.transforms.length, structure.models.length);

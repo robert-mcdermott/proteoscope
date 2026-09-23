@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { examplePDB } from './test-data.mjs';
 import { assignCharges, coulombicPotential, COULOMBIC_RANGE } from './electrostatics.js';
 import { buildSurface } from './surface.js';
 import { residueKindFromName } from './residues.js';
@@ -155,8 +155,7 @@ test('coulombicPotential: positive near a cation, 1/r^2 decay, offset, clamp and
 });
 
 test('1ycr: charges and surface potential are sensible', async (t) => {
-  const text = await readFile(new URL('../../data/1ycr.pdb', import.meta.url), 'utf8');
-  const { atoms, residues } = parseModel(text);
+  const { atoms, residues } = parseModel(examplePDB('1ycr'));
   const charges = assignCharges(atoms, residues);
   const charge = chargeReader(atoms, charges);
   const total = sum(charges);

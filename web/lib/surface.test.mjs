@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { buildSurface, computeSASA } from './surface.js';
+import { examplePDB } from './test-data.mjs';
 
 const PROBE = 1.4;
 const VDW_RADII = { C: 1.7, N: 1.55, O: 1.52, S: 1.8, P: 1.8, SE: 1.9 };
 const WATERS = new Set(['HOH', 'WAT', 'DOD']);
-const dataDirectory = new URL('../../data/', import.meta.url);
 
 test('computeSASA of an isolated atom is 4*pi*(r + probe)^2', () => {
   const areas = computeSASA(new Float32Array([1, 2, 3]), new Float32Array([1.7]));
@@ -117,7 +116,7 @@ test('maxVoxels coarsens the grid', () => {
 });
 
 test('1ycr: SASA is plausible and every surface kind builds quickly', async (t) => {
-  const { positions, radii, count } = parseHeavyAtoms(await readFile(new URL('1ycr.pdb', dataDirectory), 'utf8'));
+  const { positions, radii, count } = parseHeavyAtoms(examplePDB('1ycr'));
   assert.equal(count, 818);
 
   const sasaStart = performance.now();
@@ -145,7 +144,7 @@ test('1ycr: SASA is plausible and every surface kind builds quickly', async (t) 
 });
 
 test('1tup (~5,400 atoms): SES at 0.5 A builds in under a second', async (t) => {
-  const { positions, radii, count } = parseHeavyAtoms(await readFile(new URL('1tup.pdb', dataDirectory), 'utf8'));
+  const { positions, radii, count } = parseHeavyAtoms(examplePDB('1tup'));
   const start = performance.now();
   const surface = buildSurface(positions, radii, { kind: 'ses' });
   const elapsed = performance.now() - start;
@@ -156,8 +155,8 @@ test('1tup (~5,400 atoms): SES at 0.5 A builds in under a second', async (t) => 
 });
 
 test('largest bundled files build with automatic resolution', async (t) => {
-  for (const name of ['1jm7.pdb', '108d.pdb', '7lyb.pdb']) {
-    const { positions, radii, count } = parseHeavyAtoms(await readFile(new URL(name, dataDirectory), 'utf8'));
+  for (const name of ['1jm7', '6vxx', '7lyb']) {
+    const { positions, radii, count } = parseHeavyAtoms(examplePDB(name));
     for (const kind of ['ses', 'gaussian']) {
       const start = performance.now();
       const surface = buildSurface(positions, radii, { kind });
@@ -169,7 +168,7 @@ test('largest bundled files build with automatic resolution', async (t) => {
 });
 
 test('~100,000 atoms (7lyb tiled 7x) auto-coarsen and build within 4 s', async (t) => {
-  const source = parseHeavyAtoms(await readFile(new URL('7lyb.pdb', dataDirectory), 'utf8'));
+  const source = parseHeavyAtoms(examplePDB('7lyb'));
   const copies = 7;
   const positions = new Float32Array(source.positions.length * copies);
   const radii = new Float32Array(source.radii.length * copies);

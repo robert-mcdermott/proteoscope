@@ -7,13 +7,15 @@ protein and nucleic-acid structures. A small Go executable embeds the browser
 application and serves it on `localhost`. Parsing, rendering and analysis all
 happen in your browser, so local files never leave your computer.
 
-It covers the everyday structural biology loop: open a structure by file, PDB
-ID or UniProt accession; style it; find and focus a ligand or residue; see its
-interactions, surface and electrostatics; judge model quality (the wwPDB
-validation report, B-factors, AlphaFold pLDDT and PAE, MolProbity-style
-Ramachandran); triage the models of AlphaFold 3, Boltz, Chai-1 and ColabFold
-runs; compare it with other structures or its AlphaFold prediction; interpret
-variants with AlphaMissense; map proteomics data onto it; and export a
+It covers the everyday structural biology loop: find the structures and models
+of a protein by gene, name, accession or sequence, or open a file; style it;
+find and focus a ligand or residue; see its interactions, surface and
+electrostatics; judge model quality (the wwPDB validation report, B-factors,
+AlphaFold pLDDT and PAE, MolProbity-style Ramachandran); triage the models of
+AlphaFold 3, Boltz, Chai-1, ColabFold, Protenix and OpenFold3 runs; compare it
+with other structures or its AlphaFold prediction; interpret variants with
+AlphaMissense; bring in your own mass spectrometry results (search reports,
+cross-links, HDX-MS) and public proteomics evidence; and export a
 publication-ready figure.
 
 Highlights:
@@ -34,14 +36,25 @@ Highlights:
   - SASA and buried surface area.
   - Ramachandran plot and per-residue profiles.
   - Distance, angle and torsion rulers.
+- **Find structures.** Search by gene, protein name, UniProt accession,
+  keywords or a pasted sequence: the protein's experimental structures ranked
+  by coverage and resolution, with a coverage track along the sequence, and
+  its models from AlphaFold DB, SWISS-MODEL and other 3D-Beacons providers.
+  Open or add any of them, superposed on the active structure. No account or
+  API key.
+- **Bundled examples.** 27 curated structures (drug targets, degraders,
+  antibodies, chromatin, Cas9, conformational changes, a capsid, the spike
+  and an AlphaFold model), each with a description and an opening view that
+  shows its point.
 - **AlphaFold.** Fetch any UniProt accession from AlphaFold DB; view pLDDT
   coloring, an interactive PAE plot linked to the 3D view, rigid domains
   clustered from the PAE, and MSA depth.
 - **Predicted complexes.**
-  - Open AlphaFold 3, AlphaFold Server (.zip), Boltz, Chai-1 and ColabFold
-    outputs, folders included, and rank their models.
+  - Open AlphaFold 3 (including `.zst`-compressed outputs), AlphaFold Server
+    (.zip), Boltz, Chai-1, ColabFold, Protenix and OpenFold3 outputs, folders
+    included, and rank their models.
   - Chain-pair ipTM plus interface scores computed from the PAE: ipSAE,
-    pDockQ, pDockQ2 and LIS, following Dunbrack's reference definitions.
+    pDockQ, pDockQ2 and LIS, reproducing Dunbrack's `ipsae.py`.
   - Contact probabilities, per-atom ligand pLDDT and MSA depth.
   - How many of your cross-links each model satisfies.
 - **Validation.**
@@ -59,14 +72,22 @@ Highlights:
   - One-click comparison of an experimental structure with its AlphaFold
     model, and NMR ensemble overlays with per-residue RMSF.
 - **Proteomics.**
-  - ProtParam-style sequence properties.
-  - Peptide coverage from MaxQuant, DIA-NN, Spectronaut, ProForma or Comet
-    output.
-  - PTM and variant sites, with UniProt numbering, and AlphaMissense
-    pathogenicity for every substitution of human proteins.
-  - Cross-link validation.
-  - Custom per-residue data.
-  - UniProt annotations mapped onto the structure.
+  - Search reports from MaxQuant, DIA-NN (TSV or Parquet), Spectronaut,
+    FragPipe, mzTab and Proteome Discoverer: coverage, localized PTM sites,
+    intensities and fold changes on the structure, filtered by q-value and
+    localization probability. Large reports are streamed.
+  - Public peptides and PTM sites (PeptideAtlas, ProteomicsDB, PRIDE,
+    PTMeXchange) to compare your sites with what is already known.
+  - Structural context of every site: part-sphere exposure (pPSE) and
+    disordered regions as in StructureMap, PAE-aware for predicted models.
+  - Cross-links from xiFDR, xiVIEW, pLink, MeroX, XlinkX, MS Annika and
+    MaxLynx, checked by Cα–Cα and solvent-accessible surface distance.
+  - HDX-MS from DynamX and HDExaminer: uptake and differences with a hybrid
+    significance test, Woods plots, and the result on the structure.
+  - ProtParam-style sequence properties, peptide lists, PTM and variant
+    sites with UniProt numbering, and AlphaMissense pathogenicity for every
+    substitution of human proteins.
+  - UniProt annotations and custom per-residue data.
 - **Selections and commands.** A PyMOL/ChimeraX-style selection language
   and command line in the search box (`show sticks within 5 of resn STI`,
   `color magenta /A:315`, `superpose 1AKE onto 4AKE`), with live previews
@@ -193,27 +214,86 @@ You can also run it from PowerShell:
 | --- | --- |
 | **RCSB PDB** | Type a PDB ID (for example `4HHB`, or an extended ID such as `pdb_00004hhb`) in **Open structure** and press **Fetch**. The PDBx/mmCIF file is downloaded from RCSB. |
 | **AlphaFold DB** | Type a UniProt accession (for example `P04637`). The current AlphaFold DB model and its predicted aligned error (PAE) matrix are downloaded. |
-| **Local file** | Click **Open local file** or drag files onto the window. Accepts `.pdb`, `.ent`, `.cif`, `.mmcif` and BinaryCIF `.bcif`, optionally gzip-compressed (`.gz`). Several files open together. |
-| **Prediction output** | Drop a prediction folder or an AlphaFold Server `.zip`, or click **Open prediction folder…**. AlphaFold 3, AlphaFold Server, Boltz-1/2, Chai-1 and ColabFold layouts are recognized; see [Predicted Complexes](#predicted-complexes). |
+| **Find structures** | Type a gene (`KRAS`), protein name, UniProt accession, keywords or a sequence under **Find structures**, or run `search …`. See [Finding Structures](#finding-structures). |
+| **Local file** | Click **Open local file** or drag files onto the window. Accepts `.pdb`, `.ent`, `.cif`, `.mmcif` and BinaryCIF `.bcif`, optionally compressed with gzip (`.gz`) or Zstandard (`.zst`). Several files open together. |
+| **Prediction output** | Drop a prediction folder or an AlphaFold Server `.zip`, or click **Open prediction folder…**. AlphaFold 3, AlphaFold Server, Boltz-1/2, Chai-1, ColabFold, Protenix and OpenFold3 layouts are recognized; see [Predicted Complexes](#predicted-complexes). |
 | **Command line** | `proteoscope structure.cif model.pdb.gz af3_output/my_job/` opens every file and folder at startup; the first structure is active. |
-| **Examples** | **Bundled examples** lists the structures embedded from `data/`. |
+| **Examples** | **Bundled examples** opens one of 27 curated structures with its opening view; see [Bundled Examples](#bundled-examples). |
 | **Deep link** | `http://127.0.0.1:8765/#fetch=4HHB` fetches on load. `#fetch=4AKE,1AKE&superpose` loads both and superposes the second onto the first. |
 
 A new structure replaces the scene unless **Add to the scene instead of
 replacing** is ticked; see [Comparing Structures](#comparing-structures).
 
 Remote downloads go through the local Proteoscope server, which only contacts
-`files.rcsb.org` (structures and validation reports), `alphafold.ebi.ac.uk`
-(models, PAE, MSAs and AlphaMissense) and `rest.uniprot.org`. Nothing needs an
-API key. Results are cached on disk under your user cache directory, for
-example `~/Library/Caches/proteoscope` on macOS, and refetched after 30 days
-(`--cache-max-age`); the `refresh` command downloads the active structure
-again. Start with `--offline` to disable all network access; cached entries
-are still served.
+a fixed list of public services:
+
+- `files.rcsb.org` (structures and validation reports), `search.rcsb.org` and
+  `data.rcsb.org` (searches and entry summaries);
+- `alphafold.ebi.ac.uk` (models, PAE, MSAs and AlphaMissense);
+- `rest.uniprot.org` (proteins and annotations);
+- `www.ebi.ac.uk` (PDBe structure lists, 3D-Beacons model lists and the
+  Proteins API for public proteomics evidence);
+- for models listed by 3D-Beacons, the providers' own servers (SWISS-MODEL,
+  ModelArchive, AlphaFill, PED, SASBDB, isoform.io and RCSB's model server).
+
+Nothing needs an account or API key. Results are cached on disk under your
+user cache directory, for example `~/Library/Caches/proteoscope` on macOS, and
+refetched after 30 days (`--cache-max-age`; searches after a day); the
+`refresh` command downloads the active structure again. Start with `--offline`
+to disable all network access; cached entries are still served.
 
 PAE files can also be dropped onto a loaded model: AlphaFold DB, AlphaFold 3
 and ColabFold `.json`, or Boltz `.npz`. An `.a3m` alignment colors the model by
 MSA depth.
+
+## Finding Structures
+
+![Find structures for KRAS next to KRAS G12C with sotorasib (6OIM): the proteins UniProt matches, and the 252 PDB entries of human KRAS in PDBe's order, below a track of how many structures cover each residue](docs/images/find-structures.jpg)
+
+**Find structures** (Structure tab) searches public databases without an
+account:
+
+- **A gene or protein name** (`KRAS`, `tumor suppressor p53`) lists the
+  matching UniProt entries, exact gene matches first; choose an organism to
+  narrow it. Picking one lists its structures and models.
+- **A UniProt accession** (`P01116`) goes straight to that protein.
+- **A PDB ID** lists that entry; **keywords** (`sotorasib`) search RCSB's
+  full text.
+- **A sequence** (pasted, FASTA or plain) runs an RCSB sequence search and
+  lists the hits with identity, E-value and the aligned range.
+
+For a protein, the list shows:
+
+- **Experimental structures** from PDBe's best-structures list: method,
+  resolution, year, covered UniProt range, chains, ligands and title. Sort by
+  PDBe's rank, resolution, coverage or release date. A **coverage track** above
+  the list shows how many structures cover each part of the sequence, so the
+  domains nobody has solved stand out.
+- **Models** from 3D-Beacons: AlphaFold DB first, then SWISS-MODEL,
+  ModelArchive, PED and the other providers, with their confidence and range.
+
+**Open** replaces the scene; **Add** adds the structure superposed on the
+active one. **This protein** lists the structures of the active structure's
+protein, and **Similar** searches for sequences like the chain in the sequence
+panel. The `search` command does the same from the command line.
+
+## Bundled Examples
+
+**Bundled examples** (Structure tab, or `example <id>`) opens curated
+structures stored in the binary as gzipped mmCIF (6 MB for all of them), so
+they work offline. Each has a short description and an opening view: the
+ligand focused, the interface shown, or a comparison set up. `example add <id>`
+adds one to the scene without its view; `example` lists them.
+
+| Group | Examples |
+| --- | --- |
+| Drugs and their targets | 1M17 EGFR–erlotinib, 2HYY ABL–imatinib, 3OG7 BRAF V600E–vemurafenib, 6OIM KRAS G12C–sotorasib, 8GUB PI3Kα H1047R–alpelisib, 6VEI IDH1 R132H–vorasidenib, 7KK4 PARP1–olaparib, 8EF5 μ-opioid receptor–fentanyl with its G protein |
+| Targeted protein degradation | 5T35 PROTAC MZ1 bridging BRD4 and VHL, 5FQD lenalidomide gluing CK1α to cereblon |
+| Antibodies and immune recognition | 4ZQK PD-1–PD-L1, 5XXY atezolizumab Fab–PD-L1, 1N8Z trastuzumab Fab–HER2, 7OW6 T-cell receptor with a KRAS G12D neoantigen |
+| DNA, chromatin and gene editing | 1TUP p53 on DNA, 1YCR MDM2–p53 peptide, 1T29 BRCA1 BRCT–phosphopeptide, 7LYB nucleosome with BRCA1–BARD1, 4OO8 Cas9 with guide RNA and target DNA |
+| Conformational change | 4AKE and 1AKE adenylate kinase open and closed (superposed on the CORE domain), 4HHB and 1HHO hemoglobin T and R states, 1JM7 BRCA1–BARD1 NMR ensemble |
+| Predicted structures | AF-P04637-F1, the AlphaFold model of p53 with its PAE |
+| Viruses and assemblies | 6VXX SARS-CoV-2 spike, 1LP3 AAV2 capsid (60 copies, 249,120 atoms) |
 
 ## The Workspace
 
@@ -230,8 +310,9 @@ MSA depth.
   - **Analysis:** structure comparison, the validation report, interactions,
     solvent accessibility, Ramachandran plot, per-residue profile, PAE with
     domains, contact probabilities and MSA depth.
-  - **Proteomics:** sequence properties, UniProt annotations, peptides,
-    sites and variants with AlphaMissense, cross-links, custom data.
+  - **Proteomics:** search reports, public evidence, sequence properties,
+    UniProt annotations, peptides, sites and variants with AlphaMissense,
+    cross-links, HDX-MS, custom data.
 - **Right panel:**
   - Chains: click to show or hide; double-click to show only that chain.
   - Selection details, interactions of the focused residue, and measurements.
@@ -419,20 +500,24 @@ press Enter to select and frame it. Type a command and Enter runs it.
   reach across structures, so `within 5 of (#1 and ligand)` finds residues of a
   superposed structure near another structure's ligand.
 - **Values:** `b > 60`, `q < 1`, `plddt < 70`, `deviation > 2`, `lddt < 0.7`,
-  `rmsf > 2`, `rsa > 0.4` (after **Compute SASA**), `am > 0.564`
-  (AlphaMissense), `msa < 30` (MSA depth), and `rsrz > 2`, `rscc < 0.8` and
-  `qscore < 0.4` (validation report).
+  `rmsf > 2`, `rsa > 0.4` (after **Compute SASA**), `ppse < 6` (part-sphere
+  exposure), `am > 0.564` (AlphaMissense), `msa < 30` (MSA depth), and
+  `rsrz > 2`, `rscc < 0.8` and `qscore < 0.4` (validation report).
 - **Sets:** `sele`, `focus`, `sites` (proteomics), `covered` (peptides),
-  `aligned` (paired in a comparison), `outliers` (validation report).
+  `aligned` (paired in a comparison), `outliers` (validation report), `idr`
+  (disordered regions, after the pPSE analysis).
 
 **Commands.** `select`, `zoom`, `orient`, `focus`, `show`/`hide` (sticks,
 ball-stick, spheres, cartoon, surface, water, hydrogens, labels, everything),
 `color` (a name, a hex value, a scheme, or `default`), `label`/`unlabel`,
-`fetch`/`add`/`remove`/`activate`/`list`/`refresh`, `superpose`,
-`alphafold`, `overlay`, `ranking`, `domains`, `msa`, `validate` (with
-`clashes`, `fit`, `refresh` or `off`), `missense`, `preset`, `lighting`, `bg`,
-`distance`, `turn`, `spin`, `reset`, `save`, `link`, `mvs`, `png` and `help`.
-The help dialog (`?`) lists the syntax of each.
+`fetch`/`add`/`remove`/`activate`/`list`/`refresh`, `search`, `example`,
+`assembly` (build a biological assembly, or `au`), `interface A B` (contacts
+between two chains), `superpose`, `alphafold`, `overlay`, `ranking`,
+`domains`, `msa`, `validate` (with `clashes`, `fit`, `refresh` or `off`),
+`missense`, `exposure` (pPSE and disorder), `evidence` (public peptides and
+PTMs), `preset`, `lighting`, `bg`, `distance`, `turn`, `spin`, `reset`,
+`save`, `link`, `mvs`, `png` and `help`. The help dialog (`?`) lists the
+syntax of each.
 
 Per-residue styling is also on the **Selection** card: **Sticks**, **Color**,
 **Hide** and **Reset** apply to the selected residues. **All** in the Chains
@@ -513,9 +598,13 @@ the AlphaFold Server `.zip`, or name the folder on the command line
 | Boltz-1 / Boltz-2 | `…_model_N.cif` | `confidence_…json`, `pae_…npz` (written with `--write_full_pae`), `plddt_…npz`, Boltz-2 `affinity_…json`, MSAs from `msa/` |
 | Chai-1 | `pred.model_idx_N.cif` | `scores.model_idx_N.npz` (aggregate score, pTM, ipTM, chain-pair ipTM, clashes) |
 | ColabFold | `…_relaxed_rank_…pdb` (else unrelaxed) | `…_scores_rank_…json` (pLDDT, PAE, pTM, ipTM), `.a3m` |
+| Protenix | `seed_*/predictions/…_sample_N.cif` | `…_summary_confidence_sample_N.json` (ranking score, pTM, ipTM, chain-pair ipTM), `…_full_data_sample_N.json` (PAE and contact probabilities, written with `--need_atom_confidence`) |
+| OpenFold3 | `…_seed_S_sample_N_model.cif` or `.pdb` | `…_confidences_aggregated.json` (sample ranking score, pTM, ipTM, chain-pair ipTM), `…_confidences.json` or `.npz` (PAE) |
 
-AlphaFold 3 runs saved with compressed outputs (`.zst`) must be decompressed
-first (`zstd -d`). Chai-1 does not write PAE to disk, so its models get the
+AlphaFold 3 runs saved with `--compress_large_output_files` (`.zst` models
+and confidences) open as they are. Samples from several seeds form one ranked
+set. Other files in a prediction folder (logs, settings, templates, inputs)
+are left alone. Chai-1 does not write PAE to disk, so its models get the
 scores Chai reports but not the PAE-based ones.
 
 **Ranking.** The **Prediction** group (Structure tab) lists the models by the
@@ -539,6 +628,13 @@ pLDDT and coordinates with the definitions of Dunbrack's `ipsae.py`:
   contacting pairs.
 - **LIS** (Kim et al. 2024): the mean of (12 − PAE)/12 over inter-chain pairs
   with PAE below 12 Å.
+
+These scores reproduce `ipsae.py` (version 4) to its printed precision on the
+AlphaFold 3 (Aurora A–TPX2) and AlphaFold 2 multimer (RAF1–KSR1–MEK1) examples
+of the IPSAE repository and on a Boltz-2 prediction, and a unit test pins them
+to `ipsae.py` output at both PAE cutoffs. (The example outputs in that
+repository predate version 4 and count PAE = 12 Å in LIS, so their LIS
+differs in the fourth decimal.)
 
 **More confidence data.**
 
@@ -597,13 +693,22 @@ with a report loaded, the report's classes are shown.
   - It also gives each chain's buried surface area in the complex.
   - After an interface analysis, it adds the buried surface area of that
     interface.
+- **Part-sphere exposure (pPSE)** follows StructureMap (Bludau et al. 2022),
+  which was built to put PTM sites in structural context. It counts the Cα
+  atoms within 12 Å in a 70° cone along each residue's Cα→Cβ direction; with a
+  PAE matrix (AlphaFold and other predictions), a neighbor counts only when
+  its distance plus the PAE is within the radius, so a confidently placed
+  neighbor counts and a floppy one does not. Residues with pPSE ≤ 5 are highly
+  exposed. The same count in a 24 Å sphere, smoothed over ±10 residues, marks
+  intrinsically disordered regions (`idr`). Color by pPSE, plot it in the
+  profile, or select with `ppse < 6`.
 - **Ramachandran plot.** φ/ψ per residue on MolProbity Top8000 contours, with
   favored, allowed (yellow) and outlier (red) residues; choose a residue
   category to see its own contours. Glycine and proline are marked. Click a
   point to select the residue.
-- **Per-residue profile.** B-factor or pLDDT, relative SASA, hydrophobicity
-  (9-residue window), AlphaMissense, MSA depth, fit to density or custom data
-  along the sequence. Click to select.
+- **Per-residue profile.** B-factor or pLDDT, relative SASA, pPSE,
+  hydrophobicity (9-residue window), AlphaMissense, MSA depth, fit to density
+  or custom data along the sequence. Click to select.
 - **Predicted aligned error.** The PAE heatmap for AlphaFold models and
   predictions. Drag a rectangle to select the residues of both ranges in 3D.
   - **Contact probability** switches the heatmap to AlphaFold 3's contact
@@ -619,10 +724,42 @@ with a report loaded, the report's classes are shown.
 
 ## Proteomics Tab
 
-![p53 bound to DNA (1TUP) with the six most frequent cancer hotspot mutations labeled and peptide coverage shown in gold](docs/images/proteomics-sites.jpg)
+Everything in this tab runs in the browser. Your data is never uploaded.
 
-Everything in this tab runs in the browser. Nothing is uploaded.
+![A DIA-NN report of HeLa runs (Parquet) on the AlphaFold model of nucleolin (P19338): peptide coverage on the structure, and three phosphosites in the disordered N-terminal region with localization probability, part-sphere exposure, disorder and public evidence](docs/images/search-report.jpg)
 
+- **Search results.** Open a search engine's report (or drop it on the
+  window). Proteoscope keeps the rows of the active structure's proteins,
+  matched by UniProt accession or by sequence, so a multi-gigabyte report of a
+  whole proteome is streamed rather than loaded.
+
+  | Tool | Files |
+  | --- | --- |
+  | MaxQuant | `evidence.txt`, `peptides.txt`, site tables such as `Phospho (STY)Sites.txt` |
+  | DIA-NN | `report.tsv`, `report.parquet` (1.9 and 2.x), `pr_matrix.tsv`, site reports |
+  | Spectronaut | Normal and PTM site reports |
+  | FragPipe | `psm.tsv`, peptide and site tables |
+  | mzTab | Peptide (PEP) and PSM sections, with modification probabilities |
+  | Proteome Discoverer | PSM and peptide group exports with ptmRS probabilities |
+
+  - Decoys and contaminants are dropped, and q-value and localization
+    thresholds apply as you type. Semicolon-separated exports with decimal
+    commas are read as such. Localization probabilities are read from
+    each tool's notation (MaxQuant `S(0.98)`, DIA-NN, Spectronaut, ptmRS,
+    mzTab).
+  - The structure shows coverage, peptide or PSM counts, log10 intensity over
+    chosen samples, or the log2 fold change between two groups of samples
+    (Spectronaut conditions are grouped automatically).
+  - The sites table lists every localized site with its probability, value,
+    part-sphere exposure and whether it lies in a disordered region; with
+    public evidence loaded, it also says whether the site is already known.
+    Click a site to focus it; export the table as CSV.
+- **Public evidence.** **Load public peptides and PTMs** fetches the peptides
+  observed for the structure's proteins in PeptideAtlas, ProteomicsDB and
+  other resources, and the modification sites from reprocessed PRIDE datasets
+  (PTMeXchange), through the EBI Proteins API. Color the public coverage, mark
+  the sites, filter by modification type, and compare with your own report's
+  sites (✓ known, **new**).
 - **Sequence properties.**
   - Uses ExPASy ProtParam conventions: average and monoisotopic mass, the
     Bjellqvist pI, net charge at pH 7, ε280 with and without cystines,
@@ -637,6 +774,9 @@ Everything in this tab runs in the browser. Nothing is uploaded.
     cross-reference.
   - Filter the list (for example `R175`, `kinase`, `phospho`), click a feature
     to select it, or mark features as sites.
+
+![p53 bound to DNA (1TUP) with the six most frequent cancer hotspot mutations labeled and peptide coverage shown in gold](docs/images/proteomics-sites.jpg)
+
 - **Peptide coverage.**
   - Paste peptides, one per line, with an optional value.
   - Understands MaxQuant, Spectronaut, DIA-NN, ProForma 2.0, Comet/SEQUEST and
@@ -659,12 +799,37 @@ Everything in this tab runs in the browser. Nothing is uploaded.
 
 ![p53 bound to DNA (1TUP) colored by AlphaMissense, with the six most frequent cancer hotspots mapped and scored](docs/images/alphamissense.jpg)
 - **Cross-links (XL-MS).**
-  - Paste links such as `A:K123-B:K45`, or CSV with Protein1, Residue1,
-    Protein2 and Residue2 columns.
+  - Paste links such as `A:K123-B:K45`, CSV with Protein1, Residue1, Protein2
+    and Residue2 columns, or open the export of xiFDR, xiVIEW, pLink 2/3,
+    MeroX, XlinkX (Proteome Discoverer), MS Annika or MaxLynx. Decoys are left
+    out and repeated identifications merge into residue pairs; proteins are
+    matched to chains by chain ID, UniProt accession or name.
   - Cα–Cα distances are checked against the chosen cross-linker's maximum
     (DSS/BS3 30 Å, DSSO 30 Å, PhoX 20 Å, EDC 20 Å, …).
-  - Links are drawn green when satisfied and red when violated. For
-    homo-oligomers the shortest chain pairing is used.
+  - **Surface distance (SASD)** measures the shortest path through solvent
+    around the protein, as Jwalk does (Bullock et al. 2016),
+    which a linker actually has to take; pairs beyond 33 Å are violated.
+  - A histogram shows the distance distribution against the cutoff. Links are
+    drawn green when satisfied and red when violated. For homo-oligomers the
+    shortest chain pairing is used.
+
+![Cross-links on yeast RNA polymerase II (1WCM) from xiVIEW's example data: links drawn on the structure, with the histogram of solvent-accessible surface distances (bars) and Cα–Cα distances (outlines)](docs/images/crosslinks-sasd.jpg)
+
+- **HDX-MS.** Open DynamX state or cluster data, HDExaminer results or uptake
+  summaries, or an HDX data table in the community format (Masson et al.
+  2019).
+  - Peptides are matched to the chain sequences; uptake is corrected for the
+    undeuterated mass, charge states and replicates are combined, and
+    exchangeable amides are counted as DynamX does.
+  - **Difference** compares two states: each peptide's ΔD is tested with the
+    hybrid significance test (Hageman & Weis 2019) when replicates are known,
+    or against a fixed threshold otherwise. The Woods plot shows every peptide
+    over its residues, and the structure shows protection (blue) and
+    deprotection (red), averaged per residue over overlapping peptides.
+  - **Uptake** shows the relative uptake of one state at one or all exposures.
+
+![HDX-MS of CD160 with and without HVEM (HaDeX example data) on the CD160–HVEM complex (6NG3): the Woods plot of significant uptake differences and the protected region on the structure](docs/images/hdx-woods.jpg)
+
 - **Custom residue data.**
   - Paste `chain,residue,value` rows, such as HDX uptake, conservation or DMS
     fitness.
@@ -750,10 +915,15 @@ Interaction tables export as CSV.
   - ModelCIF `_ma_qa_metric_local` for per-residue pLDDT.
 - **BinaryCIF** (`.bcif`, as served by RCSB's and PDBe's model servers) is
   decoded in the browser and read like PDBx/mmCIF.
-- **Predicted models** are recognized from ModelCIF records or the method and
-  software names (AlphaFold, ColabFold, ESMFold, Boltz, Chai-1, OpenFold). The
-  B-factor column is read as pLDDT, rescaled when a predictor writes it on a
-  0–1 scale.
+- **Predicted models** are recognized from ModelCIF records, the method and
+  software names (AlphaFold, ColabFold, ESMFold, Boltz, Chai-1, OpenFold), or
+  Protenix's data block name, and every model opened from a prediction folder
+  is one. The B-factor column is read as pLDDT, rescaled when a predictor
+  writes it on a 0–1 scale; ModelCIF confidences on a 0–1 scale (SWISS-MODEL)
+  are rescaled too.
+- **Format.** The file name decides between PDB and PDBx/mmCIF, except that
+  a file named `.cif` without a data block but with PDB atom records is read
+  as PDB.
 - **Chain and residue identifiers.** Author chain and residue IDs are used for
   display.
 - **Alternate conformers.** The highest-occupancy conformer is kept.
@@ -852,9 +1022,11 @@ go build -o proteoscope .
 ```
 
 The executable embeds `web/index.html`, `web/styles.css`, `web/app.js`,
-`web/favicon.svg`, `web/lib/*.js` and the structures in `data/`. To bundle
-your own example structures, put `.pdb`, `.ent`, `.cif` or `.mmcif` files in
-`data/` and rebuild.
+`web/favicon.svg`, `web/lib/*.js` and the examples in `data/`. To bundle your
+own examples, put `.pdb`, `.ent`, `.cif` or `.mmcif` files (optionally
+gzipped) in `data/` and rebuild. List them in `data/examples.json` to give
+them a label, category, description and opening view (a list of commands);
+files that are not listed appear after the listed ones.
 
 ### Cross Compile
 
@@ -877,10 +1049,15 @@ node --test "web/lib/*.test.mjs"
 | Path | Responsibility |
 | --- | --- |
 | `main.go`, `fetch.go`, `cache.go`, `local.go`, `security.go` | Local server, embedded assets, fetch proxy and cache, command-line files and folders, request hardening |
+| `examples.go` | Bundled examples: the manifest, gzipped files served as they are |
+| `search.go`, `evidence.go` | Structure and model search (RCSB, UniProt, PDBe, 3D-Beacons), model downloads, public proteomics evidence |
 | `validation.go` | wwPDB validation reports, reduced from XML to per-residue JSON |
 | `web/app.js` | Application state, UI wiring, render loop, analysis and proteomics panels |
 | `web/lib/parse.js`, `web/lib/bcif.js` | PDB, PDBx/mmCIF and BinaryCIF parsing, assemblies |
-| `web/lib/predictions.js`, `web/lib/interface-scores.js` | Prediction folders (AlphaFold 3, Boltz, Chai-1, ColabFold), tokens, ipSAE, pDockQ, pDockQ2, LIS |
+| `web/lib/predictions.js`, `web/lib/interface-scores.js` | Prediction folders (AlphaFold 3, Boltz, Chai-1, ColabFold, Protenix, OpenFold3), tokens, ipSAE, pDockQ, pDockQ2, LIS |
+| `web/lib/discover.js` | Search query types, grouping and sorting of structures and models |
+| `web/lib/reports.js`, `web/lib/parquet.js`, `web/lib/zstd.js`, `web/lib/snappy.js` | Search-report import and summaries; Parquet, Zstandard and Snappy decoding |
+| `web/lib/exposure.js`, `web/lib/crosslinks.js`, `web/lib/hdx.js` | Part-sphere exposure and disorder, cross-link report import and surface distances, HDX-MS import and statistics |
 | `web/lib/pae-domains.js`, `web/lib/msa.js`, `web/lib/npy.js` | PAE domain clustering, MSA depth, NumPy arrays |
 | `web/lib/validation.js`, `web/lib/ramachandran.js`, `web/lib/rama-top8000.js` | Validation-report mapping, MolProbity Top8000 Ramachandran classes and data |
 | `web/lib/missense.js` | AlphaMissense tables |
@@ -931,8 +1108,8 @@ printed in the terminal.
 ### My downloaded file does not load
 
 Use a coordinate file ending in `.pdb`, `.ent`, `.cif`, `.mmcif` or `.bcif`,
-optionally gzip-compressed. Validation reports, sequence files and PDFs are
-not coordinate files. For a prediction, open the whole output folder (or the
+optionally compressed with gzip or Zstandard. Validation reports, sequence
+files and PDFs are not coordinate files. For a prediction, open the whole output folder (or the
 AlphaFold Server `.zip`) so the confidence files come along.
 
 ## License
@@ -948,3 +1125,18 @@ for the full license text.
 - AlphaMissense predictions (Cheng et al., *Science* 2023) are fetched from
   AlphaFold DB under CC BY 4.0.
 - Validation reports come from the wwPDB.
+- The bundled examples are PDB entries (wwPDB, CC0) and the AlphaFold DB model
+  of p53 with its PAE (AF-P04637-F1, CC BY 4.0; Jumper et al., *Nature* 2021;
+  Varadi et al., *Nucleic Acids Research* 2024). Each example's citation is in
+  `data/examples.json`.
+- Searches use RCSB PDB, UniProt, PDBe and 3D-Beacons (Varadi et al.,
+  *Protein Science* 2022); models downloaded from a 3D-Beacons provider carry
+  that provider's terms.
+- Public proteomics evidence comes from the EBI Proteins API (Nightingale et
+  al., *Nucleic Acids Research* 2017), which collects PeptideAtlas,
+  ProteomicsDB, PRIDE and PTMeXchange data.
+- Methods implemented from their publications: part-sphere exposure and
+  disorder from StructureMap (Bludau et al., *PLOS Biology* 2022), surface
+  distances after Jwalk (Bullock et al., *Molecular & Cellular Proteomics*
+  2016), the HDX-MS hybrid significance test (Hageman & Weis,
+  *Analytical Chemistry* 2019), and ipSAE (Dunbrack, bioRxiv 2025).

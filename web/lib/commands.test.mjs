@@ -11,6 +11,10 @@ test('commands and aliases are recognized; other text is not a command', () => {
   assert.equal(parseCommand('chain A and resi 10'), null);
   assert.equal(parseCommand('HEM'), null);
   assert.equal(parseCommand(''), null);
+  // Commands without arguments share words with selection keywords; with more words they select.
+  assert.equal(parseCommand('ppse').name, 'exposure');
+  assert.equal(parseCommand('exposure').name, 'exposure');
+  for (const text of ['ppse < 6', 'exposure < 0.2', 'msa < 30']) assert.equal(parseCommand(text), null, text);
 });
 
 test('show and hide take an optional representation and selection', () => {

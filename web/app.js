@@ -29,15 +29,24 @@ import { readNpz, readNpy, squareMatrix } from './lib/npy.js';
 import { interfaceScores } from './lib/interface-scores.js';
 import {
   detectPredictionSets,
+  flatSquare,
+  insidePredictionFolder,
+  MISSING_PAE,
   parseAF3Confidences,
   parseAF3Summary,
   parseBoltzAffinity,
   parseBoltzConfidence,
   parseChaiScores,
   parseColabFoldScores,
+  parseOpenFold3Aggregated,
+  parseOpenFold3Confidences,
+  parsePredictionJSON,
+  parseProtenixFullData,
+  parseProtenixSummary,
   rankModels,
   tokensForPAE,
 } from './lib/predictions.js';
+import { zstdDecompress } from './lib/zstd.js';
 import { buildMolViewSpec, referenceCameraPosition, residueColors, residueSelector } from './lib/mvs.js';
 import { buildCartoon } from './lib/cartoon.js';
 import { COLOR_SCHEMES, computeAtomColors, titleCase } from './lib/coloring.js';
@@ -68,7 +77,9 @@ import {
 } from './lib/camera.js';
 import { add, angleBetween, dihedralAngle, normalize, quatFromAxisAngle, quatMultiply, quatNormalize, scale, sub } from './lib/math3d.js';
 import { createSequenceView } from './lib/sequence-view.js';
-import { drawPAE, drawProfile, drawRamachandran } from './lib/plots.js';
+import { STRUCTURE_SORTS, classifyQuery, coverageDepth, groupStructures, modelConfidence, modelRequest, shortMethod, sortStructures } from './lib/discover.js';
+import { PPSE_EXPOSED, partSphereExposure } from './lib/exposure.js';
+import { drawHistogram, drawPAE, drawProfile, drawRamachandran, drawWoods } from './lib/plots.js';
 import { dsspSummary } from './lib/dssp.js';
 import { KYTE_DOOLITTLE, MAX_ASA } from './lib/residues.js';
 import { elementInfo } from './lib/elements.js';
@@ -89,6 +100,19 @@ const els = {
   fetchForm: document.querySelector('#fetch-form'),
   fetchInput: document.querySelector('#fetch-input'),
   sampleSelect: document.querySelector('#sample-select'),
+  sampleInfo: document.querySelector('#sample-info'),
+  discoverForm: document.querySelector('#discover-form'),
+  discoverInput: document.querySelector('#discover-input'),
+  discoverOrganism: document.querySelector('#discover-organism'),
+  discoverProtein: document.querySelector('#discover-protein'),
+  discoverSimilar: document.querySelector('#discover-similar'),
+  discoverResult: document.querySelector('#discover-result'),
+  reportInput: document.querySelector('#report-input'),
+  reportResult: document.querySelector('#report-result'),
+  ppseRun: document.querySelector('#ppse-run'),
+  evidenceLoad: document.querySelector('#evidence-load'),
+  evidenceResult: document.querySelector('#evidence-result'),
+  ppseResult: document.querySelector('#ppse-result'),
   fileInput: document.querySelector('#file-input'),
   addMode: document.querySelector('#add-mode'),
   structuresGroup: document.querySelector('#structures-group'),
@@ -323,7 +347,7 @@ const DEFAULT_DISPLAY = {
 const STRUCTURE_COLORS = ['#5aa9f0', '#f39c3d', '#5fd08e', '#e8659c', '#a78bfa', '#e8d44d', '#4fd1d9', '#c98b5c'].map(hexColor);
 const MAX_OVERLAY_MODELS = 60;
 const COMPARISON_SCHEMES = new Set(['deviation', 'lddt', 'rmsf']);
-const DATA_SCHEMES = new Set(['coverage', 'data', 'exposure', 'deviation', 'lddt', 'rmsf', 'validation', 'densityfit', 'missense', 'domains', 'msa']);
+const DATA_SCHEMES = new Set(['coverage', 'data', 'exposure', 'ppse', 'deviation', 'lddt', 'rmsf', 'validation', 'densityfit', 'missense', 'domains', 'msa']);
 
 // Everything that belongs to one loaded structure. `state.structure`, `state.display`,
 // `state.selection` and the other per-structure fields below read and write the active entry.
@@ -355,6 +379,16 @@ function entryDefaults() {
     // AlphaFold 3 contact probabilities, and the prediction set and model this entry came from.
     contacts: null,
     prediction: null,
+    // An imported search report (rows of this structure's proteins) and part-sphere exposure.
+    report: null,
+    exposure: null,
+    exposureWithPAE: false,
+    // Public peptides and PTM sites (EBI Proteins API) mapped onto this structure.
+    evidence: null,
+    // Cross-links as entered or imported, before mapping (mapped ones are in proteomics).
+    crosslinkSet: null,
+    // HDX-MS peptides, their chain positions and the comparison shown.
+    hdx: null,
   };
 }
 
@@ -462,6 +496,10 @@ async function init() {
   ]);
   state.samples = manifest.samples ?? [];
   state.startup = startup;
+  if (startup?.offline) {
+    for (const control of [els.discoverInput, els.discoverOrganism, els.discoverProtein, els.discoverSimilar, ...els.discoverForm.querySelectorAll('button')]) control.disabled = true;
+    els.discoverInput.placeholder = 'Search needs network access (started with --offline)';
+  }
   if (startup?.remoteControl) connectRemoteControl();
   populateSamples();
 
@@ -480,8 +518,8 @@ async function init() {
     });
     history.replaceState(null, '', link);
     if (!state.entries.length) {
-      const fallback = state.samples.find((sample) => sample.id.startsWith('1m17')) ?? state.samples[0];
-      if (fallback) await loadStructureFromURL(fallback.url, fallback.name, { origin: { type: 'sample', id: fallback.id } });
+      const fallback = findSample('1m17') ?? state.samples[0];
+      if (fallback) await openSample(fallback);
     }
   } else if (startup?.files?.length) {
     // Files and folders named on the command line open like dropped ones.
@@ -496,10 +534,10 @@ async function init() {
       if (hashRequest.has('superpose')) runSuperposition({ reference: state.entries[0], mobiles: state.entries.slice(1) });
     }
   } else {
-    const preferred = state.samples.find((sample) => sample.id.startsWith('1m17')) ?? state.samples[0];
+    // The first example opens plainly; its description offers the opening view.
+    const preferred = findSample('1m17') ?? state.samples[0];
     if (!preferred) throw new Error('No embedded structure files were found.');
-    els.sampleSelect.value = preferred.id;
-    await loadStructureFromURL(preferred.url, preferred.name, { origin: { type: 'sample', id: preferred.id } });
+    await openSample(preferred);
   }
   hideLoading();
 }
@@ -577,10 +615,45 @@ function bindEvents() {
     });
   });
   els.sampleSelect.addEventListener('change', async () => {
-    const sample = state.samples.find((item) => item.id === els.sampleSelect.value);
+    const sample = findSample(els.sampleSelect.value);
     if (!sample) return;
     history.replaceState(null, '', location.pathname + location.search);
-    await guardedLoad(() => loadStructureFromURL(sample.url, sample.name, { add: els.addMode.checked, origin: { type: 'sample', id: sample.id } }));
+    await guardedLoad(() => openSample(sample, { add: els.addMode.checked, view: !els.addMode.checked }));
+  });
+  // A FASTA record pasted into the one-line field would lose its line breaks and run the header
+  // into the sequence; the field keeps the first record's sequence.
+  els.discoverInput.addEventListener('paste', (event) => {
+    const text = event.clipboardData?.getData('text') ?? '';
+    if (!/^\s*>/.test(text) || !/\n/.test(text)) return;
+    event.preventDefault();
+    let sequence = '';
+    let headers = 0;
+    for (const line of text.split(/\r?\n/)) {
+      if (line.trim().startsWith('>')) {
+        headers += 1;
+        if (headers > 1) break;
+      } else {
+        sequence += line.replace(/[\s\d]/g, '');
+      }
+    }
+    els.discoverInput.value = sequence;
+  });
+  els.discoverForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    runDiscovery(els.discoverInput.value);
+  });
+  els.discoverProtein.addEventListener('click', () => discoverActiveProtein());
+  els.discoverSimilar.addEventListener('click', () => discoverSimilarSequences());
+  els.discoverResult.addEventListener('click', onDiscoveryClick);
+  els.discoverResult.addEventListener('change', (event) => {
+    if (!event.target.matches('[data-discover-sort]') || !state.discovery?.protein) return;
+    state.discovery.protein.sort = event.target.value;
+    renderDiscovery();
+  });
+  els.sampleInfo.addEventListener('click', (event) => {
+    // The view is replayed on a fresh copy, so views that add structures stay idempotent.
+    const sample = findSample(event.target.closest('[data-sample-view]')?.dataset.sampleView);
+    if (sample) guardedLoad(() => openSample(sample, { view: true }));
   });
   els.fileInput.addEventListener('change', async () => {
     const files = [...(els.fileInput.files ?? [])];
@@ -813,8 +886,54 @@ function bindEvents() {
   els.xlCrosslinker.addEventListener('change', () => {
     const preset = lazyModules.proteomics?.CROSSLINKERS?.find((item) => item.id === els.xlCrosslinker.value);
     if (preset?.maxCaCa) els.xlMax.value = String(preset.maxCaCa);
+    if (state.active?.crosslinkSet) mapCrosslinkSet();
+  });
+  els.xlMax.addEventListener('change', () => {
+    if (state.active?.crosslinkSet) mapCrosslinkSet();
+  });
+  els.xlResult.addEventListener('click', onCrosslinkClick);
+  document.querySelector('#hdx-file').addEventListener('change', async (event) => {
+    const [file] = event.target.files ?? [];
+    event.target.value = '';
+    if (!file) return;
+    await guardedLoad(async () => {
+      if (!(await importHDX(fileRef(file)))) throw new Error(`${file.name} is not recognized HDX-MS data (DynamX state or cluster data, HDExaminer results or uptake summary).`);
+    });
+  });
+  document.querySelector('#hdx-result').addEventListener('change', onHDXControl);
+  document.querySelector('#hdx-result').addEventListener('click', onHDXClick);
+  document.querySelector('#xl-file').addEventListener('change', async (event) => {
+    const [file] = event.target.files ?? [];
+    event.target.value = '';
+    if (!file) return;
+    await guardedLoad(async () => {
+      if (!(await importCrosslinkReport(fileRef(file)))) throw new Error(`${file.name} is not a recognized cross-link export (xiFDR, xiVIEW, pLink, MeroX, XlinkX, MS Annika or MaxLynx).`);
+    });
+  });
+  els.xlResult.addEventListener('change', (event) => {
+    const set = state.active?.crosslinkSet;
+    if (!event.target.matches('[data-xl-sasd-cutoff]') || !set) return;
+    set.sasdCutoff = Number(event.target.value) || 33;
+    for (const link of state.active.proteomics.crosslinks) link.satisfied = link.sasd !== null && link.sasd <= set.sasdCutoff;
+    renderCrosslinks();
+    markSceneDirty();
   });
   els.dataApply.addEventListener('click', applyResidueDataFromInput);
+  els.reportInput.addEventListener('change', async () => {
+    const [file] = els.reportInput.files ?? [];
+    els.reportInput.value = '';
+    if (file) await guardedLoad(() => importReport(file));
+  });
+  els.reportResult.addEventListener('change', onReportControl);
+  els.reportResult.addEventListener('click', onReportClick);
+  els.ppseRun.addEventListener('click', () => runCommand('exposure'));
+  els.evidenceLoad.addEventListener('click', () => runCommand('evidence'));
+  els.evidenceResult.addEventListener('click', onEvidenceClick);
+  els.evidenceResult.addEventListener('change', (event) => {
+    if (!event.target.matches('[data-evidence-type]') || !state.active?.evidence) return;
+    state.active.evidence.type = event.target.value;
+    renderEvidence();
+  });
 
   els.canvas.addEventListener('pointerdown', onPointerDown);
   els.canvas.addEventListener('pointermove', onPointerMove);
@@ -891,7 +1010,7 @@ async function fetchStructure(query, options = {}) {
     entry.fetchId = request.id;
     entry.sourceURL = (response.headers.get('X-Proteoscope-Source') || '').replace(/\.gz$/i, '');
     applyRemoteMetadata(response.headers.get('X-Proteoscope-Meta-B64'), entry);
-    els.sampleSelect.value = '';
+    if (!add) setSampleSelection(null);
     updateLocationHash();
     const paeURL = response.headers.get('X-Proteoscope-Pae');
     if (paeURL) loadPAEFromURL(paeURL, entry);
@@ -951,25 +1070,27 @@ function normalizeFetchQuery(query) {
 }
 
 // Opens dropped or chosen files: prediction folders and AlphaFold Server archives become ranked
-// model sets; structures (.pdb, .cif, .bcif, optionally gzipped) open as entries; JSON files are
-// sessions or PAE matrices; .npz PAE, .a3m alignments and AlphaMissense tables annotate the active
-// structure.
+// model sets; structures (.pdb, .cif, .bcif, optionally compressed with gzip or Zstandard) open as
+// entries; JSON files are sessions or PAE matrices; .npz PAE, .a3m alignments, search reports,
+// cross-links and HDX tables annotate the active structure.
 async function openFiles(files) {
   await guardedLoad(async () => {
     let refs = files.map((item) => (item.read ? item : fileRef(item)));
     refs = await expandArchives(refs);
-    const { sets, rest } = detectPredictionSets(refs);
+    const { sets, rest: unclaimed } = detectPredictionSets(refs);
     for (const [index, set] of sets.entries()) await openPredictionSet(set, { add: index > 0 || els.addMode.checked });
+    // The logs, settings, templates and inputs in a prediction folder are left alone.
+    const rest = unclaimed.filter((ref) => !insidePredictionFolder(ref, sets));
     const structures = rest.filter((ref) => STRUCTURE_FILE.test(ref.name));
     let first = null;
     for (const [index, ref] of structures.entries()) {
       showLoading(`Reading ${ref.name}`);
       const text = await structureFileText(ref);
-      const entry = await loadStructureFromText(text, ref.name.replace(/\.gz$/i, '').replace(/\.bcif$/i, '.cif'), { source: 'Local file', add: sets.length > 0 || index > 0 || els.addMode.checked });
+      const entry = await loadStructureFromText(text, ref.name.replace(/\.bcif$/i, '.cif'), { source: 'Local file', add: sets.length > 0 || index > 0 || els.addMode.checked });
       first ??= entry;
     }
     if (structures.length || sets.length) {
-      els.sampleSelect.value = '';
+      if (!els.addMode.checked) setSampleSelection(null);
       history.replaceState(null, '', location.pathname);
       if (structures.length > 1) {
         setActiveEntry(first);
@@ -980,31 +1101,41 @@ async function openFiles(files) {
   });
 }
 
-const STRUCTURE_FILE = /\.(pdb|ent|cif|mmcif|bcif)(\.gz)?$/i;
+const STRUCTURE_FILE = /\.(pdb|ent|cif|mmcif|bcif)$/i;
+
+// Files compressed with gzip or Zstandard (AlphaFold 3's --compress_large_output_files) are read
+// decompressed under their inner name.
+const COMPRESSED_FILE = /\.(gz|zst)$/i;
+
+async function decompressFile(name, raw) {
+  if (/\.gz$/i.test(name)) return decompressBytes(raw);
+  if (/\.zst$/i.test(name)) return zstdDecompress(raw);
+  return raw;
+}
 
 // A uniform view of local files, archive members and server-provided files.
 function fileRef(file, path = file.webkitRelativePath || file.name) {
-  const gzip = /\.gz$/i.test(file.name);
-  const bytes = async () => {
-    const raw = new Uint8Array(await file.arrayBuffer());
-    return gzip ? decompressBytes(raw) : raw;
-  };
+  const bytes = async () => decompressFile(file.name, new Uint8Array(await file.arrayBuffer()));
   return {
-    name: file.name.replace(/\.gz$/i, ''),
-    path: path.replace(/\.gz$/i, ''),
+    name: file.name.replace(COMPRESSED_FILE, ''),
+    path: path.replace(COMPRESSED_FILE, ''),
     size: file.size,
+    // Reports are streamed from the File itself (gzipped ones decompress as they are read).
+    file,
     read: bytes,
     text: async () => new TextDecoder().decode(await bytes()),
   };
 }
 
+// Files named on the command line; the server decompresses gzip but not Zstandard.
 function urlRef(file) {
   const read = async () => {
     const response = await fetch(file.url);
     if (!response.ok) throw new Error(`Could not read ${file.name} (HTTP ${response.status}).`);
-    return new Uint8Array(await response.arrayBuffer());
+    return decompressFile(file.name, new Uint8Array(await response.arrayBuffer()));
   };
-  return { name: file.name, path: file.path || file.name, size: file.size, read, text: async () => new TextDecoder().decode(await read()) };
+  const path = file.path || file.name;
+  return { name: file.name.replace(COMPRESSED_FILE, ''), path: path.replace(COMPRESSED_FILE, ''), size: file.size, read, text: async () => new TextDecoder().decode(await read()) };
 }
 
 function bytesRef(name, path, data) {
@@ -1027,11 +1158,39 @@ async function expandArchives(refs) {
       if (/(^|\/)(__MACOSX|\.)/.test(entry.name)) continue;
       const data = await readZipEntry(bytes, entry);
       const name = entry.name.split('/').pop();
-      const member = bytesRef(name.replace(/\.gz$/i, ''), `${base}/${entry.name}`.replace(/\.gz$/i, ''), /\.gz$/i.test(name) ? await decompressBytes(data) : data);
-      result.push(member);
+      result.push(bytesRef(name.replace(COMPRESSED_FILE, ''), `${base}/${entry.name}`.replace(COMPRESSED_FILE, ''), await decompressFile(name, data)));
     }
   }
   return result;
+}
+
+// The first bytes of a file as text: streamed (and decompressed) from local files, read whole
+// otherwise.
+async function refHead(ref, limit = 65536) {
+  const file = ref.file;
+  if (!file || /\.zst$/i.test(file.name)) return new TextDecoder().decode((await ref.read()).subarray(0, limit));
+  let stream = file.stream();
+  if (/\.gz$/i.test(file.name)) stream = stream.pipeThrough(new DecompressionStream('gzip'));
+  const reader = stream.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (size < limit) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      size += value.length;
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return new TextDecoder().decode(bytes.subarray(0, limit));
 }
 
 async function structureFileText(ref) {
@@ -1044,12 +1203,13 @@ async function structureFileText(ref) {
 async function openAnnotationFile(ref) {
   const name = ref.name.toLowerCase();
   if (name.endsWith('.json')) {
-    const text = await ref.text();
-    if (await openSessionFile(text)) {
+    const json = parsePredictionJSON(await ref.text());
+    if (isSessionDocument(json)) {
+      await restoreSession(json);
       history.replaceState(null, '', location.pathname + location.search);
       return;
     }
-    loadPAEFromJSON(JSON.parse(text), ref.name);
+    loadPAEFromJSON(json, ref.name);
     return;
   }
   if (!state.active) throw new Error(`Open a structure before ${ref.name}.`);
@@ -1063,12 +1223,24 @@ async function openAnnotationFile(ref) {
     applyMSA(state.active, [msaDepth(await ref.text())], ref.name);
     return;
   }
-  if (name.endsWith('.csv') || name.endsWith('.tsv')) {
-    const text = await ref.text();
-    if (parseAlphaMissense(text)) {
+  if (/\.(csv|tsv|txt|parquet|mztab|xls)$/.test(name)) {
+    // The kind of table is decided from its first 64 KB, so a report of gigabytes is not read
+    // whole just to find out that it is a search report (which then streams).
+    const head = await refHead(ref);
+    if (parseAlphaMissense(head.split('\n').slice(0, 3).join('\n'))) {
       showToast('This looks like an AlphaMissense table; use the AlphaMissense button in the Proteomics tab, which maps it by UniProt numbering.', true);
       return;
     }
+    if (!/\.parquet$/.test(name)) {
+      const { parseCrosslinkReport } = await import('./lib/crosslinks.js');
+      if (parseCrosslinkReport(head, ref.name) && await importCrosslinkReport(ref)) return;
+      const { parseHDX } = await import('./lib/hdx.js');
+      if (parseHDX(head, ref.name) && await importHDX(ref)) return;
+    }
+    // Zstandard-compressed reports are decompressed whole; other reports stream from the file.
+    const file = ref.file && !/\.zst$/i.test(ref.file.name) ? ref.file : new File([await ref.read()], ref.name);
+    await importReport(file);
+    return;
   }
   throw new Error(`${ref.name}: unsupported file type.`);
 }
@@ -1123,8 +1295,9 @@ async function loadStructureFromText(text, label, options = {}) {
   await nextFrame();
   deriveStructure(structure, { secondaryMode: state.secondaryMode });
   const add = Boolean(options.add) && state.entries.length > 0;
-  // A new structure inherits the current style, including when it replaces the scene.
-  const template = state.active ?? state.defaults;
+  // A new structure inherits the current style, including when it replaces the scene; examples
+  // opened with their view start from the defaults instead.
+  const template = options.template ?? state.active ?? state.defaults;
   if (!add) removeAllEntries();
   const entry = createEntry(structure, options.source || '', template);
   // Local files keep their text so a saved session can embed them.
@@ -1151,6 +1324,8 @@ async function loadStructureFromText(text, label, options = {}) {
 function createEntry(structure, sourceLabel, template = state.active ?? state.defaults) {
   const color = { ...template.color };
   const first = !state.entries.length;
+  // Data colorings describe one structure; so does the colormap an import picked for them.
+  if (DATA_SCHEMES.has(color.scheme)) color.colormap = '';
   if (DATA_SCHEMES.has(color.scheme) || (color.scheme === 'uniform' && !first)) color.scheme = 'chain';
   if (color.scheme === 'structure' && first) color.scheme = 'chain';
   if (structure.meta.isPredicted && color.scheme === 'chain') color.scheme = 'plddt';
@@ -1288,6 +1463,11 @@ function resetEntryAnalysis(entry) {
   entry.surface.key = '';
   entry.overlay = false;
   entry.rmsf = null;
+  entry.report = null;
+  entry.exposure = null;
+  entry.evidence = null;
+  entry.crosslinkSet = null;
+  entry.hdx = null;
   state.renderer?.setMesh(`surface:${entry.id}`, null);
   state.measurements = state.measurements.filter((measurement) => measurement.atoms.every((item) => item.entry !== entry));
   state.measurePending = [];
@@ -1415,6 +1595,12 @@ function applyRepresentationPreset(name) {
   markSceneDirty();
 }
 
+// Whether a residue is drawn: its chain is shown, and it is neither hidden nor filtered out.
+function residueShown(entry, residue) {
+  const { visibleChains, hiddenResidues, residueFilter } = entry.display;
+  return (!visibleChains || visibleChains.has(residue.chain)) && !hiddenResidues?.has(residue.key) && (!residueFilter || residueFilter.has(residue.key));
+}
+
 function cartoonFor(entry, model) {
   const display = entry.display;
   const chains = display.visibleChains ? [...display.visibleChains].sort().join(',') : '*';
@@ -1422,7 +1608,7 @@ function cartoonFor(entry, model) {
   const cached = model.cartoonCache.get(key);
   if (cached) return cached;
   const cartoon = buildCartoon(model, {
-    include: (residue) => (!display.visibleChains || display.visibleChains.has(residue.chain)) && !display.hiddenResidues?.has(residue.key) && (!display.residueFilter || display.residueFilter.has(residue.key)),
+    include: (residue) => residueShown(entry, residue),
     widthScale: display.cartoonWidth,
     quality: display.cartoonQuality,
   });
@@ -1616,6 +1802,7 @@ function colorExtras(entry = state.active) {
     extras.symmetric = els.dataSymmetric.checked;
   }
   if (scheme === 'exposure' && entry.sasa?.relative) extras.residueValues = entry.sasa.relative;
+  if (scheme === 'ppse' && entry.exposure) extras.residueValues = new Map([...entry.exposure].map(([key, value]) => [key, value.ppse]));
   if (scheme === 'deviation' || scheme === 'lddt') {
     const comparison = comparisonFor(entry);
     if (comparison) {
@@ -2369,7 +2556,9 @@ function selectionContext(entry) {
       qscore: validationOf(entry)?.values.qscore ?? null,
       am: entry.missense?.values ?? null,
       msa: entry.msa?.values ?? null,
+      ppse: entry.exposure ? new Map([...entry.exposure].map(([key, value]) => [key, value.ppse])) : null,
     },
+    idr: entry.exposure ? new Set([...entry.exposure].filter(([, value]) => value.idr).map(([key]) => key)) : null,
     uniprot: (residue) => uniprotNumber(entry, residue),
   };
 }
@@ -2515,10 +2704,11 @@ async function runCommand(text, options = {}) {
       if (!looksLikeSelection(source)) throw new CommandError(`"${source.split(/\s+/)[0]}" is not a command or a selection. Type "help" for the list.`);
       parsed = parseCommand(`select ${source}`);
     }
-    if (!state.structure && !['fetch', 'add', 'help'].includes(parsed.name)) throw new CommandError('Open a structure first.');
+    if (!state.structure && !['fetch', 'add', 'example', 'search', 'help'].includes(parsed.name)) throw new CommandError('Open a structure first.');
     const outcome = await executeCommand(parsed, options);
     const result = typeof outcome === 'object' && outcome ? outcome : { message: outcome ?? '' };
-    rememberCommand(source);
+    // Opening views run their commands quietly and leave the history alone.
+    if (options.history !== false) rememberCommand(source);
     if (!options.quiet && result.message) showToast(result.message);
     return { ok: true, message: result.message ?? '', data: result.data };
   } catch (error) {
@@ -2599,6 +2789,44 @@ async function executeCommand(parsed, options) {
       if (!entry) throw new CommandError(`Could not open ${parsed.id}.`);
       return { message: `Opened ${entry.name}.`, data: { name: entry.name, atoms: activeModelOf(entry).atoms.length, chains: entry.structure.chains.filter((chain) => chain.polymerKind).map((chain) => chain.id) } };
     }
+    case 'example': {
+      if (!parsed.id) {
+        return {
+          message: `Examples: ${state.samples.map((sample) => sample.id).join(', ')}.`,
+          data: state.samples.map((sample) => ({ id: sample.id, name: sample.name, label: sample.label ?? sample.title, category: sample.category ?? '', view: sample.view ?? [] })),
+        };
+      }
+      const sample = findSample(parsed.id);
+      if (!sample) throw new CommandError(`No bundled example "${parsed.id}". Type "example" for the list.`);
+      const entry = await openSample(sample, { add: parsed.add, view: !parsed.add });
+      return { message: `Opened ${entry.name}${parsed.add ? '' : `: ${sample.label ?? sample.title}`}.`, data: { name: entry.name } };
+    }
+    case 'assembly':
+      return assemblyCommand(parsed.assembly);
+    case 'evidence': {
+      const entry = state.active;
+      const summary = await loadEvidence(entry);
+      showEvidenceCoverage(entry);
+      const evidence = entry.evidence;
+      return { message: `Public evidence: ${formatNumber(evidence.peptideCount)} peptides and ${formatNumber(evidence.sites.length)} modification sites on this structure.`, data: summary };
+    }
+    case 'exposure': {
+      const entry = state.active;
+      const exposure = computeExposure(entry);
+      setColorScheme('ppse', [entry]);
+      renderExposureResult(entry);
+      renderReport();
+      if (els.profileMetric.value === 'ppse') renderProfile();
+      const values = [...exposure.values()];
+      return `Part-sphere exposure of ${formatNumber(values.length)} residues${entry.exposureWithPAE ? ' (with PAE)' : ''}: ${pct(values.filter((value) => value.idr).length, values.length)} in disordered regions.`;
+    }
+    case 'search': {
+      const result = await runDiscovery(parsed.query, { show: !options.remote });
+      if (!result) throw new CommandError('Search is unavailable offline.');
+      return result;
+    }
+    case 'interface':
+      return interfaceCommand(parsed.chains);
     case 'remove': {
       const entry = requireEntry(parsed.structure);
       if (state.entries.length < 2) throw new CommandError('The last structure cannot be removed; open another one instead.');
@@ -2752,6 +2980,40 @@ async function executeCommand(parsed, options) {
     default:
       throw new CommandError(`"${parsed.name}" is not available.`);
   }
+}
+
+async function assemblyCommand(id) {
+  const structure = state.structure;
+  const listing = () => [
+    `au: asymmetric unit${structure.activeAssemblyId === ASYMMETRIC_UNIT_ID ? ' (shown)' : ''}`,
+    ...structure.assemblies.map((assembly) => `${assemblyLabel(assembly, true)}${structure.activeAssemblyId === assembly.id ? ' (shown)' : ''}`),
+  ].join('; ');
+  if (!id) {
+    if (!structure.assemblies.length) return `${state.active.name} defines no assemblies; the file is shown as deposited.`;
+    return `Assemblies of ${state.active.name}: ${listing()}.`;
+  }
+  const wanted = /^(au|asu|asym|asymmetric|0)$/i.test(id) ? ASYMMETRIC_UNIT_ID : id;
+  const assembly = structure.assemblies.find((item) => item.id === wanted);
+  if (wanted !== ASYMMETRIC_UNIT_ID && !assembly) throw new CommandError(`${state.active.name} has no assembly "${id}". ${structure.assemblies.length ? `Choose: ${listing()}.` : 'It defines none.'}`);
+  if (assembly?.estimatedAtoms > MAX_ASSEMBLY_ATOMS) throw new CommandError(`Assembly ${id} would have ${formatNumber(assembly.estimatedAtoms)} atoms, above the ${formatNumber(MAX_ASSEMBLY_ATOMS)} atom limit.`);
+  await activateAssembly(wanted);
+  if (structure.activeAssemblyId !== wanted) throw new CommandError(`Assembly ${id} could not be built.`);
+  const model = activeModel();
+  return wanted === ASYMMETRIC_UNIT_ID
+    ? `Showing the asymmetric unit of ${state.active.name}.`
+    : `Built assembly ${assemblyLabel(assembly, false)}: ${formatNumber(model.atoms.length)} atoms in ${new Set(model.atoms.map((atom) => atom.chain)).size} chains.`;
+}
+
+async function interfaceCommand([chainA, chainB]) {
+  const chains = state.structure.chains.map((chain) => chain.id);
+  for (const chain of [chainA, chainB]) {
+    if (!chains.includes(chain)) throw new CommandError(`${state.active.name} has no chain ${chain}. Chains: ${chains.join(', ')}.`);
+  }
+  if (chainA === chainB) throw new CommandError('Choose two different chains, for example "interface A B".');
+  els.interfaceA.value = chainA;
+  els.interfaceB.value = chainB;
+  const count = await runInterfaceAnalysis();
+  return `${count ?? 0} contacts between chains ${chainA} and ${chainB}.`;
 }
 
 function representationCommand({ name, representation, selection }) {
@@ -3398,7 +3660,10 @@ async function compareWithAlphaFold() {
   }
   const results = [];
   for (const [accession, chainId] of [...accessions].slice(0, 4)) {
-    let model = state.entries.find((entry) => entry.fetchId === accession && entry !== reference) ?? null;
+    let model = state.entries.find((entry) => (entry.fetchId === accession || (entry.origin?.type === 'sample' && findSample(entry.origin.id)?.accession === accession)) && entry !== reference) ?? null;
+    // A bundled AlphaFold model (p53) is used as is, which also works offline.
+    const bundled = model ? null : state.samples.find((sample) => sample.accession === accession);
+    if (bundled) model = await openSample(bundled, { add: true, activate: false, select: false });
     if (!model) model = await fetchStructure(accession, { add: true, activate: false });
     if (!model) {
       results.push({ mobile: { name: `AF-${accession}` }, error: new Error('no AlphaFold DB model could be fetched.') });
@@ -3530,6 +3795,8 @@ async function serializeEntry(entry, options) {
   let source;
   if (origin.type === 'fetch' || origin.type === 'sample') {
     source = { type: origin.type, id: origin.id };
+  } else if (origin.type === 'model') {
+    source = { type: 'model', url: origin.url, name: entry.name };
   } else {
     if (options.link) throw new Error(`${entry.name} is a local file, so it cannot travel in a link. Save the session as a file instead.`);
     source = { type: 'file', name: origin.name, encoding: 'gzip-base64', data: bytesToBase64(await compressText(origin.text ?? '')) };
@@ -3569,6 +3836,7 @@ async function serializeEntry(entry, options) {
     },
     // Recomputed or refetched on restore rather than stored.
     sasa: Boolean(entry.sasa),
+    exposure: Boolean(entry.exposure),
     validation: entry.validation ? { clashes: Boolean(entry.validation.showClashes) } : null,
     missense: entry.missense ? { accessions: entry.missense.accessions } : null,
     domains: Boolean(entry.domains),
@@ -3653,6 +3921,8 @@ async function restoreEntryExtras(entry, item, problems) {
     if (item.pae) await restorePAE(entry, item.pae);
     if (item.domains && entry.pae) computePAEDomains(entry);
     if (item.sasa) await runSASA(entry);
+    // After the PAE, which part-sphere exposure uses.
+    if (item.exposure || entry.color.scheme === 'ppse') computeExposure(entry);
     if (item.validation) {
       showLoading(`Loading the validation report for ${entry.name}`);
       await loadValidation(entry);
@@ -3671,6 +3941,37 @@ async function restoreEntryExtras(entry, item, problems) {
 function linkFields(link) {
   const { atomA, atomB, ...fields } = link;
   return fields;
+}
+
+// A cross-link from a session: the known fields only, with their types, because a session file or
+// link can come from anyone. Distances are measured again on the model.
+function restoredCrosslink(link, model) {
+  if (!link || typeof link !== 'object') return null;
+  const atomOf = (ref) => model.residueMap.get(String(ref?.residue))?.atomByName.get(String(ref?.atom)) ?? null;
+  const atomA = atomOf(link.atomA);
+  const atomB = atomOf(link.atomB);
+  if (!atomA || !atomB) return null;
+  const number = (value) => (value !== null && value !== '' && Number.isFinite(Number(value)) ? Number(value) : null);
+  const text = (value) => (value === null || value === undefined ? null : String(value).slice(0, 200));
+  const sasd = number(link.sasd);
+  return {
+    raw: text(link.raw) ?? '',
+    proteinA: text(link.proteinA),
+    residueA: number(link.residueA),
+    proteinB: text(link.proteinB),
+    residueB: number(link.residueB),
+    score: number(link.score),
+    fdr: number(link.fdr),
+    count: number(link.count) ?? 1,
+    atomA,
+    atomB,
+    residueKeyA: atomA.residueKey,
+    residueKeyB: atomB.residueKey,
+    distance: Math.hypot(atomA.x - atomB.x, atomA.y - atomB.y, atomA.z - atomB.z),
+    sasd,
+    sasdStatus: ['ok', 'buried', 'far'].includes(link.sasdStatus) ? link.sasdStatus : '',
+    satisfied: Boolean(link.satisfied),
+  };
 }
 
 function atomRef(atom) {
@@ -3793,9 +4094,14 @@ async function loadSessionSource(source, options) {
     return entry;
   }
   if (source?.type === 'sample') {
-    const sample = state.samples.find((item) => item.id === source.id);
+    const sample = findSample(source.id);
     if (!sample) throw new Error(`the bundled example ${source.id} is not available`);
-    return loadStructureFromURL(sample.url, sample.name, { add: options.add, activate: false, origin: { type: 'sample', id: sample.id } });
+    return openSample(sample, { add: options.add, activate: false, select: false });
+  }
+  if (source?.type === 'model') {
+    const entry = await openModelURL(source.url, { add: options.add, activate: false });
+    if (source.name) entry.name = uniqueName(source.name);
+    return entry;
   }
   if (source?.type === 'file') {
     const text = source.encoding === 'gzip-base64' ? await decompressText(base64ToBytes(source.data)) : source.data;
@@ -3846,15 +4152,17 @@ function applyEntryState(entry, item) {
     data: proteomics.data ? new Map(proteomics.data) : null,
     dataLabel: proteomics.dataLabel ?? '',
     sites: (proteomics.sites ?? []).map((site) => ({ residue: model.residueMap.get(site.residue), label: site.label, mismatch: site.mismatch })).filter((site) => site.residue),
-    crosslinks: (proteomics.crosslinks ?? []).map((link) => ({
-      ...link,
-      atomA: model.residueMap.get(link.atomA?.residue)?.atomByName.get(link.atomA?.atom) ?? null,
-      atomB: model.residueMap.get(link.atomB?.residue)?.atomByName.get(link.atomB?.atom) ?? null,
-    })).filter((link) => link.atomA && link.atomB),
+    crosslinks: (Array.isArray(proteomics.crosslinks) ? proteomics.crosslinks : []).map((link) => restoredCrosslink(link, model)).filter(Boolean),
   };
   const overrides = new Map();
   for (const site of entry.proteomics.sites) overrides.set(site.residue.key, site.mismatch ? [1, 0.7, 0.2] : [1, 0.28, 0.72]);
   entry.proteomics.siteOverrides = overrides.size ? overrides : null;
+  // The cross-link panel comes back with the links (surface distances included when computed).
+  const links = entry.proteomics.crosslinks;
+  if (links.length) {
+    const withSASD = links.some((link) => link.sasd !== null);
+    entry.crosslinkSet = { links: links.map(linkFields), info: { source: 'Saved session' }, missing: 0, maxDistance: Number(els.xlMax.value) || 30, sasd: withSASD, sasdCutoff: withSASD ? 33 : undefined };
+  }
 }
 
 function applySessionView(view) {
@@ -3893,13 +4201,6 @@ function applySessionView(view) {
 async function computeFocusInteractionsFor(entry) {
   if (entry !== state.active || !entry.focus) return;
   await computeFocusInteractions([...entry.focus.residues]);
-}
-
-async function openSessionFile(text) {
-  const parsed = JSON.parse(text);
-  if (!isSessionDocument(parsed)) return false;
-  await restoreSession(parsed);
-  return true;
 }
 
 // MolViewSpec export for Mol*: an .mvsj file when every structure has a public URL, otherwise a
@@ -3955,13 +4256,14 @@ async function buildMolViewSpecExport() {
 async function structureText(entry) {
   if (entry.origin?.text) return entry.origin.text;
   if (entry.origin?.type === 'sample') {
-    const sample = state.samples.find((item) => item.id === entry.origin.id);
+    const sample = findSample(entry.origin.id);
     if (sample) return (await fetch(sample.url)).text();
   }
   if (entry.origin?.type === 'fetch') {
     const request = normalizeFetchQuery(entry.origin.id);
     if (request) return (await fetch(request.url)).text();
   }
+  if (entry.origin?.type === 'model') return (await fetch(`/api/fetch/model?url=${encodeURIComponent(entry.origin.url)}`)).text();
   throw new CommandError(`The file for ${entry.name} is not available.`);
 }
 
@@ -3975,10 +4277,7 @@ function mvsStructure(entry, url) {
   const assembly = entry.structure.activeAssemblyId;
   const colorOf = (atom) => (part && state.atomColors ? colorToHex([...state.atomColors.subarray((part.offset + atom.id) * 4, (part.offset + atom.id) * 4 + 3)]) : '#cccccc');
   const residueInfo = (residue) => ({ chain: residue.authChain ?? residue.chain, seq: residue.resSeq, iCode: residue.iCode || '' });
-  const visibleResidue = (residue) => (!display.visibleChains || display.visibleChains.has(residue.chain))
-    && !display.hiddenResidues?.has(residue.key)
-    && (!display.residueFilter || display.residueFilter.has(residue.key));
-  const polymer = model.residues.filter((residue) => (residue.kind === 'protein' || residue.kind === 'nucleic') && visibleResidue(residue));
+  const polymer = model.residues.filter((residue) => (residue.kind === 'protein' || residue.kind === 'nucleic') && residueShown(entry, residue));
   const complete = polymer.length === model.residues.filter((residue) => residue.kind === 'protein' || residue.kind === 'nucleic').length;
   const components = [];
   if (MVS_POLYMER[display.polymer] && polymer.length) {
@@ -4020,16 +4319,16 @@ function mvsStructure(entry, url) {
     if (!residues.length || !MVS_ATOMIC[style]) return;
     components.push({ selector: residueSelector(residues.map(residueInfo)), representations: [{ type: MVS_ATOMIC[style], colors: atomicColors(residues) }] });
   };
-  const ligands = model.residues.filter((residue) => (residue.kind === 'ligand' || residue.kind === 'ion') && visibleResidue(residue) && !display.residueStyles?.has(residue.key));
+  const ligands = model.residues.filter((residue) => (residue.kind === 'ligand' || residue.kind === 'ion') && residueShown(entry, residue) && !display.residueStyles?.has(residue.key));
   addAtomic(ligands, display.ligand === 'spacefill' ? 'spacefill' : display.ligand === 'none' ? null : 'ball-stick');
-  if (display.showWater) addAtomic(model.residues.filter((residue) => residue.kind === 'water' && visibleResidue(residue)), 'ball-stick');
+  if (display.showWater) addAtomic(model.residues.filter((residue) => residue.kind === 'water' && residueShown(entry, residue)), 'ball-stick');
   for (const style of ['sticks', 'ball-stick', 'spacefill']) {
-    addAtomic(model.residues.filter((residue) => display.residueStyles?.get(residue.key) === style && visibleResidue(residue)), style);
+    addAtomic(model.residues.filter((residue) => display.residueStyles?.get(residue.key) === style && residueShown(entry, residue)), style);
   }
   const focus = entry.focus?.neighborhood;
-  if (focus) addAtomic(model.residues.filter((residue) => focus.has(residue.key) && residue.kind === 'protein' && !display.residueStyles?.has(residue.key) && visibleResidue(residue)), 'sticks');
+  if (focus) addAtomic(model.residues.filter((residue) => focus.has(residue.key) && residue.kind === 'protein' && !display.residueStyles?.has(residue.key) && residueShown(entry, residue)), 'sticks');
   if (entry.surface.kind !== 'off') {
-    const surfaceResidues = model.residues.filter((residue) => residue.kind !== 'water' && visibleResidue(residue) && (!entry.surface.keys || entry.surface.keys.has(residue.key)));
+    const surfaceResidues = model.residues.filter((residue) => residue.kind !== 'water' && residueShown(entry, residue) && (!entry.surface.keys || entry.surface.keys.has(residue.key)));
     components.push({
       selector: residueSelector(surfaceResidues.map(residueInfo)),
       representations: [{
@@ -4063,6 +4362,342 @@ function mvsCamera() {
 }
 
 /* ---------- Structure UI ---------- */
+
+/* ---------- Find structures ---------- */
+
+// Searches public databases through the server (search.go): proteins by gene or name (UniProt),
+// entries by keyword or sequence (RCSB PDB), and every experimental structure (PDBe) and model
+// (3D-Beacons) of a protein. Results open, or join the scene superposed on the active structure.
+
+const DISCOVER_PAGE = 12;
+
+async function getJSON(url, fallback) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(await responseError(response, fallback));
+  return response.json();
+}
+
+async function runDiscovery(text, options = {}) {
+  const query = classifyQuery(text);
+  if (query.kind === 'empty') {
+    showToast('Type a gene, protein, UniProt accession, keywords or a sequence.', true);
+    return null;
+  }
+  if (state.startup?.offline) {
+    showToast('Searching needs network access; Proteoscope was started with --offline.', true);
+    return null;
+  }
+  if (options.show) {
+    activateTab('structure');
+    els.discoverInput.value = text;
+  }
+  const discovery = { query: query.value, kind: query.kind, loading: true, proteins: [], protein: null, search: null, errors: [] };
+  state.discovery = discovery;
+  renderDiscovery();
+  const organism = els.discoverOrganism.value;
+  const settle = async (promise, label) => {
+    try {
+      return await promise;
+    } catch (error) {
+      discovery.errors.push(`${label}: ${error.message}`);
+      return null;
+    }
+  };
+  let kind = query.kind;
+  if (kind === 'accession') {
+    const [proteins] = await Promise.all([
+      settle(getJSON(`/api/search/uniprot?q=${encodeURIComponent(query.value.replace(/-\d+$/, ''))}`, 'UniProt search failed'), 'UniProt'),
+      showDiscoveredProtein(query.value, null, { render: false, discovery }),
+    ]);
+    const exact = (proteins?.results ?? []).filter((item) => item.accession === query.value.replace(/-\d+$/, ''));
+    if (proteins && !exact.length) {
+      // Gene symbols such as P2RY12 or B3GAT1 have the shape of an accession; when UniProt
+      // answers but has no such entry, the query is searched as text.
+      discovery.protein = null;
+      kind = 'text';
+      discovery.kind = kind;
+    } else {
+      discovery.proteins = exact;
+    }
+  }
+  if (kind === 'sequence') {
+    discovery.search = await settle(getJSON(`/api/search/sequence?seq=${encodeURIComponent(query.value)}`, 'Sequence search failed'), 'RCSB sequence search');
+    if (discovery.search) discovery.search.label = 'Similar sequences';
+  } else if (kind === 'pdb') {
+    discovery.search = await settle(getJSON(`/api/search/text?q=${encodeURIComponent(query.value)}&rows=10`, 'Search failed'), 'RCSB search');
+  } else if (kind === 'text') {
+    const [proteins, entries] = await Promise.all([
+      settle(getJSON(`/api/search/uniprot?q=${encodeURIComponent(query.value)}${organism ? `&organism=${organism}` : ''}`, 'UniProt search failed'), 'UniProt'),
+      settle(getJSON(`/api/search/text?q=${encodeURIComponent(query.value)}&rows=25`, 'Search failed'), 'RCSB search'),
+    ]);
+    discovery.proteins = proteins?.results ?? [];
+    discovery.search = entries;
+    // A gene symbol that names the top protein opens that protein's structures right away.
+    const top = discovery.proteins[0];
+    if (top && top.gene && top.gene.toUpperCase() === query.value.toUpperCase()) await showDiscoveredProtein(top.accession, top, { render: false, discovery });
+  }
+  if (state.discovery !== discovery) return null;
+  discovery.loading = false;
+  renderDiscovery();
+  const found = [
+    discovery.proteins.length ? `${discovery.proteins.length} protein${discovery.proteins.length === 1 ? '' : 's'}` : '',
+    discovery.protein ? `${formatNumber(discovery.protein.groups.length)} structures and ${discovery.protein.data.models.length} models of ${discovery.protein.accession}` : '',
+    discovery.search ? `${formatNumber(discovery.search.total)} entries` : '',
+  ].filter(Boolean);
+  return {
+    message: found.length ? `Found ${found.join(', ')}.` : 'Nothing found.',
+    data: {
+      proteins: discovery.proteins,
+      structures: discovery.protein?.groups.map((group) => ({ pdb: group.pdb, chains: group.chains, method: group.method, resolution: group.resolution, coverage: group.coverage, range: [group.unpStart, group.unpEnd] })),
+      models: discovery.protein?.data.models,
+      entries: discovery.search?.entries,
+    },
+  };
+}
+
+// Lists a protein's structures and models in a search (the current one unless options.discovery
+// names the search that asked, which a newer search may have replaced in the meantime).
+async function showDiscoveredProtein(accession, candidate = null, options = {}) {
+  const discovery = options.discovery ?? state.discovery;
+  if (!discovery || state.discovery !== discovery) return;
+  discovery.protein = { accession, candidate, loading: true, data: null, groups: [], sort: 'rank', shown: DISCOVER_PAGE, modelsShown: 6 };
+  if (options.render !== false) renderDiscovery();
+  try {
+    const data = await getJSON(`/api/search/protein/${encodeURIComponent(accession)}`, 'Could not list the structures of this protein');
+    if (discovery.protein?.accession !== accession) return;
+    discovery.protein.data = data;
+    discovery.protein.groups = groupStructures(data.structures, data.entries);
+  } catch (error) {
+    if (discovery.protein?.accession === accession) discovery.protein.error = error.message;
+  }
+  if (discovery.protein?.accession === accession) discovery.protein.loading = false;
+  if (options.render !== false) renderDiscovery();
+}
+
+// The UniProt accession of the active structure: its protein chains' references, or its AlphaFold
+// DB model's accession.
+function activeAccession() {
+  const structure = state.structure;
+  if (!structure) return null;
+  const chain = els.sequenceChain.value;
+  const chains = [structure.sequences.get(chain), ...structure.sequences.values()].filter((info) => info?.kind === 'protein');
+  for (const info of chains) {
+    const reference = uniprotReference(info);
+    if (reference?.accession) return reference.accession.toUpperCase();
+  }
+  return findSample(state.active.origin?.id)?.accession ?? null;
+}
+
+async function discoverActiveProtein() {
+  const accession = activeAccession();
+  if (!accession) {
+    showToast(`${state.active?.name ?? 'This structure'} has no UniProt reference; search by gene or name instead.`, true);
+    return null;
+  }
+  els.discoverInput.value = accession;
+  return runDiscovery(accession);
+}
+
+async function discoverSimilarSequences() {
+  const info = state.structure?.sequences.get(els.sequenceChain.value) ?? polymerSequenceChains()[0];
+  const sequence = info?.kind === 'protein' ? info.sequence.replace(/[^A-Z]/g, '') : '';
+  if (sequence.length < 20) {
+    showToast('Choose a protein chain of at least 20 residues in the sequence panel.', true);
+    return null;
+  }
+  // The header makes even a short chain a sequence query; the one-line field shows the sequence.
+  els.discoverInput.value = sequence;
+  return runDiscovery(`>${state.active.name} chain ${info.chain}\n${sequence}`);
+}
+
+function renderDiscovery() {
+  const discovery = state.discovery;
+  els.discoverResult.hidden = !discovery;
+  if (!discovery) return;
+  const parts = [];
+  if (discovery.loading) parts.push(`<div class="discover-status">Searching for ${escapeHTML(discovery.kind === 'sequence' ? `a ${discovery.query.length}-residue sequence` : `“${discovery.query}”`)}…</div>`);
+  for (const error of discovery.errors) parts.push(`<div class="warn">${escapeHTML(error)}</div>`);
+  if (discovery.proteins.length && discovery.kind !== 'accession') {
+    parts.push(`<section><h4>Proteins <small>UniProt${els.discoverOrganism.value ? ` · ${escapeHTML(els.discoverOrganism.selectedOptions[0]?.textContent ?? '')}` : ''}</small></h4><div class="discover-proteins">${discovery.proteins.slice(0, 6).map((protein) => `
+      <button type="button" data-protein="${escapeHTML(protein.accession)}" class="${discovery.protein?.accession === protein.accession ? 'is-active' : ''}">
+        <span><strong>${escapeHTML(protein.gene || protein.id)}</strong> ${escapeHTML(protein.name)}</span>
+        <em>${escapeHTML([protein.accession, protein.organism, protein.length ? `${protein.length} aa` : '', protein.reviewed ? 'Swiss-Prot' : 'TrEMBL'].filter(Boolean).join(' · '))}</em>
+      </button>`).join('')}</div></section>`);
+  }
+  if (discovery.protein) parts.push(discoveredProteinHTML(discovery));
+  if (discovery.search) parts.push(discoveredEntriesHTML(discovery.search, discovery.kind));
+  if (!discovery.loading && !discovery.proteins.length && !discovery.protein && !discovery.search?.entries?.length && !discovery.errors.length) {
+    parts.push('<div class="discover-status">Nothing found. Try a gene symbol (KRAS), a protein name, a UniProt accession or other keywords.</div>');
+  }
+  els.discoverResult.innerHTML = parts.join('');
+}
+
+function discoveredProteinHTML(discovery) {
+  const view = discovery.protein;
+  const candidate = view.candidate ?? discovery.proteins.find((item) => item.accession === view.accession);
+  const heading = candidate ? `${escapeHTML(candidate.name)}${candidate.gene ? ` (${escapeHTML(candidate.gene)})` : ''}` : escapeHTML(view.accession);
+  const length = view.data?.length || candidate?.length || 0;
+  const header = `<h4>${heading} <small>${escapeHTML([view.accession, candidate?.organism, length ? `${length} aa` : ''].filter(Boolean).join(' · '))}</small></h4>`;
+  if (view.loading) return `<section>${header}<div class="discover-status">Listing structures and models…</div></section>`;
+  if (view.error) return `<section>${header}<div class="warn">${escapeHTML(view.error)}</div></section>`;
+  const groups = sortStructures(view.groups, view.sort);
+  const chainCount = view.data.structures.length;
+  const structures = groups.length
+    ? `${coverageTrackHTML(view.groups, length)}
+      <h4>Experimental structures <small>${formatNumber(groups.length)} entries${chainCount >= 400 ? ' among PDBe’s top 400 chains' : ''}</small>
+        <select data-discover-sort aria-label="Sort structures">${Object.entries(STRUCTURE_SORTS).map(([key, sort]) => `<option value="${key}"${key === view.sort ? ' selected' : ''}>${escapeHTML(sort.label)}</option>`).join('')}</select></h4>
+      <div class="discover-list">${groups.slice(0, view.shown).map((group) => structureRowHTML(group)).join('')}</div>
+      ${groups.length > view.shown ? `<button type="button" class="discover-more" data-more="structures">Show ${Math.min(DISCOVER_PAGE, groups.length - view.shown)} more</button>` : ''}`
+    : '<div class="discover-status">No experimental structures in the PDB.</div>';
+  const models = view.data.models;
+  const modelList = models.length
+    ? `<h4>Models <small>3D-Beacons · ${models.length}</small></h4>
+      <div class="discover-list">${models.slice(0, view.modelsShown).map((model, index) => modelRowHTML(model, index, view.accession)).join('')}</div>
+      ${models.length > view.modelsShown ? `<button type="button" class="discover-more" data-more="models">Show ${models.length - view.modelsShown} more</button>` : ''}`
+    : '<div class="discover-status">No models listed by 3D-Beacons.</div>';
+  const problems = (view.data.problems ?? []).map((problem) => `<div class="warn">${escapeHTML(problem)}</div>`).join('');
+  return `<section>${header}${problems}${structures}</section><section>${modelList}</section>`;
+}
+
+function structureRowHTML(group) {
+  const summary = group.summary;
+  const resolution = Number.isFinite(group.resolution) ? `${group.resolution.toFixed(2)} Å` : '';
+  const range = Number.isFinite(group.unpStart) ? `${group.unpStart}–${group.unpEnd}` : '';
+  const ligands = (summary?.ligands ?? []).map((ligand) => ligand.id).slice(0, 6).join(', ');
+  const meta = [`chain${group.chains.length > 1 ? 's' : ''} ${group.chains.slice(0, 6).join(', ')}${group.chains.length > 6 ? '…' : ''}`, ligands, summary?.molecules?.length > 1 ? `${summary.molecules.length} molecule types` : ''].filter(Boolean).join(' · ');
+  return `<div class="discover-row">
+    <div class="head"><strong>${escapeHTML(group.pdb)}</strong><span>${escapeHTML([shortMethod(group.method), resolution].filter(Boolean).join(' '))}</span>${summary?.released ? `<span>${escapeHTML(summary.released.slice(0, 4))}</span>` : ''}<span title="UniProt residues covered">${escapeHTML(range)}</span></div>
+    <div class="actions"><button type="button" data-open-entry="${escapeHTML(group.pdb)}">Open</button><button type="button" data-add-entry="${escapeHTML(group.pdb)}" title="Add to the scene, superposed on the active structure">Add</button></div>
+    ${summary?.title ? `<div class="title" title="${escapeHTML(summary.title)}">${escapeHTML(summary.title)}</div>` : ''}
+    <div class="meta" title="${escapeHTML(meta)}">${escapeHTML(meta)}</div>
+  </div>`;
+}
+
+function modelRowHTML(model, index, accession) {
+  const request = modelRequest(model, accession);
+  const range = model.unpStart ? `${model.unpStart}–${model.unpEnd}` : '';
+  const meta = [titleCase(String(model.category ?? '').toLowerCase()), model.oligomer ? titleCase(model.oligomer.toLowerCase()) : '', model.created, (model.molecules ?? []).slice(0, 3).join('; ')].filter(Boolean).join(' · ');
+  const actions = request
+    ? `<button type="button" data-open-model="${index}">Open</button><button type="button" data-add-model="${index}" title="Add to the scene, superposed on the active structure">Add</button>`
+    : (model.page ? `<a href="${escapeHTML(model.page)}" target="_blank" rel="noopener noreferrer">Page ↗</a>` : '');
+  return `<div class="discover-row">
+    <div class="head"><strong>${escapeHTML(model.provider)}</strong><span>${escapeHTML(modelConfidence(model))}</span><span>${escapeHTML(range)}</span></div>
+    <div class="actions">${actions}</div>
+    <div class="title" title="${escapeHTML(model.id)}">${escapeHTML(model.id)}</div>
+    ${meta ? `<div class="meta" title="${escapeHTML(meta)}">${escapeHTML(meta)}</div>` : ''}
+  </div>`;
+}
+
+function discoveredEntriesHTML(search, kind) {
+  const entries = search.entries ?? [];
+  const label = search.label ?? (kind === 'pdb' ? 'Entry' : 'Entries');
+  if (!entries.length) return `<section><h4>${escapeHTML(label)} <small>RCSB PDB</small></h4><div class="discover-status">No PDB entries matched.</div></section>`;
+  const rows = entries.map((entry) => {
+    const resolution = Number.isFinite(entry.resolution) ? `${entry.resolution.toFixed(2)} Å` : '';
+    const match = entry.match ? `${Math.round(entry.match.identity * 100)}% identity · E ${entry.match.evalue.toExponential(0)} · query ${entry.match.queryFrom}–${entry.match.queryTo}` : '';
+    const meta = [match, (entry.organisms ?? []).slice(0, 2).join(', '), (entry.ligands ?? []).map((ligand) => ligand.id).slice(0, 5).join(', ')].filter(Boolean).join(' · ');
+    return `<div class="discover-row">
+      <div class="head"><strong>${escapeHTML(entry.id)}</strong><span>${escapeHTML([shortMethod(entry.method), resolution].filter(Boolean).join(' '))}</span>${entry.released ? `<span>${escapeHTML(entry.released.slice(0, 4))}</span>` : ''}</div>
+      <div class="actions"><button type="button" data-open-entry="${escapeHTML(entry.id)}">Open</button><button type="button" data-add-entry="${escapeHTML(entry.id)}" title="Add to the scene, superposed on the active structure">Add</button></div>
+      ${entry.title ? `<div class="title" title="${escapeHTML(entry.title)}">${escapeHTML(entry.title)}</div>` : ''}
+      ${meta ? `<div class="meta" title="${escapeHTML(meta)}">${escapeHTML(meta)}</div>` : ''}
+    </div>`;
+  }).join('');
+  return `<section><h4>${escapeHTML(label)} <small>RCSB PDB · ${entries.length < search.total ? `${entries.length} of ${formatNumber(search.total)}` : formatNumber(search.total)}</small></h4><div class="discover-list">${rows}</div></section>`;
+}
+
+// How many entries cover each residue of the protein: darker gaps are the regions no structure has.
+function coverageTrackHTML(groups, length) {
+  if (!length) return '';
+  const depth = coverageDepth(groups, length);
+  const bands = [];
+  let start = 1;
+  const level = (value) => (value <= 0 ? 0 : value < 3 ? 1 : value < 10 ? 2 : value < 30 ? 3 : 4);
+  for (let position = 2; position <= length + 1; position += 1) {
+    if (position > length || level(depth[position]) !== level(depth[start])) {
+      bands.push({ start, end: position - 1, level: level(depth[start]) });
+      start = position;
+    }
+  }
+  const opacity = [0, 0.3, 0.5, 0.75, 1];
+  const rects = bands.map((band) => `<rect x="${((band.start - 1) / length) * 100}" y="0" width="${((band.end - band.start + 1) / length) * 100}" height="10" fill="${band.level ? 'var(--mint)' : 'rgba(248,245,238,0.08)'}" fill-opacity="${band.level ? opacity[band.level] : 1}"><title>${band.start}–${band.end}: ${band.level ? `${band.level === 4 ? '30 or more' : ['', '1–2', '3–9', '10–29'][band.level]} entries` : 'no structure'}</title></rect>`).join('');
+  // The bar stretches to the panel width; the axis labels are HTML so they keep their shape.
+  return `<div class="coverage-track"><svg viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="Structural coverage of residues 1 to ${length}">${rects}</svg><div class="coverage-axis"><span>1</span><span>${length}</span></div></div>`;
+}
+
+async function onDiscoveryClick(event) {
+  const target = event.target.closest('button');
+  if (!target || !state.discovery) return;
+  const { protein, openEntry, addEntry, openModel, addModel, more } = target.dataset;
+  if (protein) {
+    const candidate = state.discovery.proteins.find((item) => item.accession === protein) ?? null;
+    await showDiscoveredProtein(protein, candidate);
+    return;
+  }
+  if (more) {
+    const view = state.discovery.protein;
+    if (more === 'structures') view.shown += DISCOVER_PAGE;
+    else view.modelsShown = view.data.models.length;
+    renderDiscovery();
+    return;
+  }
+  if (openEntry || addEntry) {
+    await openDiscovered({ kind: 'fetch', id: openEntry || addEntry }, { add: Boolean(addEntry) });
+    return;
+  }
+  const index = Number(openModel ?? addModel);
+  const view = state.discovery.protein;
+  const model = view?.data?.models?.[index];
+  const request = model ? modelRequest(model, view.accession) : null;
+  if (request) await openDiscovered(request, { add: addModel !== undefined, model });
+}
+
+// Opens a search result, or adds it and superposes it on the structure that was active.
+async function openDiscovered(request, options = {}) {
+  const reference = options.add ? state.active : null;
+  let entry = null;
+  if (request.kind === 'fetch') {
+    entry = await fetchStructure(request.id, { add: options.add });
+  } else {
+    await guardedLoad(async () => {
+      entry = await openModelURL(request.url, { add: options.add, model: options.model });
+    });
+  }
+  if (!entry || !reference || reference === entry || !state.entries.includes(reference)) return entry;
+  const [result] = runSuperposition({ reference, mobiles: [entry] });
+  if (result?.result) {
+    const stats = result.result.stats;
+    showToast(`${entry.name} superposed on ${reference.name}: ${stats.rmsd.toFixed(2)} Å over ${stats.keptCount} pairs, TM-score ${stats.tmScore.toFixed(2)}.`);
+  } else {
+    showToast(`${entry.name} was added; it shares no chain with ${reference.name} to superpose on.`);
+  }
+  return entry;
+}
+
+// A model listed by 3D-Beacons (SWISS-MODEL, ModelArchive, PED, AlphaFill …), downloaded through
+// the server's allowlist.
+async function openModelURL(url, options = {}) {
+  const model = options.model;
+  showLoading(`Downloading ${model?.provider ?? 'the'} model`);
+  const response = await fetch(`/api/fetch/model?url=${encodeURIComponent(url)}`);
+  if (!response.ok) throw new Error(await responseError(response, 'Could not download the model'));
+  const text = await response.text();
+  const filename = response.headers.get('X-Proteoscope-Filename') || 'model.cif';
+  const predicted = model ? ['TEMPLATE-BASED', 'AB-INITIO', 'DEEP-LEARNING'].includes(String(model.category ?? '').toUpperCase()) : undefined;
+  const entry = await loadStructureFromText(text, filename, {
+    source: model?.provider ?? 'Model',
+    add: options.add,
+    activate: options.activate,
+    predicted,
+    origin: { type: 'model', url, name: model ? `${model.provider} ${model.id}` : filename },
+  });
+  if (model?.id) {
+    entry.name = uniqueName(model.id.length > 32 ? `${model.id.slice(0, 31)}…` : model.id);
+    renderStructureList();
+  }
+  if (!options.add) setSampleSelection(null);
+  return entry;
+}
 
 function updateStructureUI() {
   const structure = state.structure;
@@ -4120,9 +4755,14 @@ function refreshTabPanels() {
     renderProfile();
     renderPAE();
     renderDomainResult();
+    renderExposureResult();
   } else if (tab === 'proteomics') {
     renderProtParam();
     renderMissense();
+    renderReport();
+    renderEvidence();
+    renderCrosslinks();
+    renderHDX();
   }
 }
 
@@ -4491,6 +5131,7 @@ async function runInterfaceAnalysis() {
   markSceneDirty();
   const atoms = [...residues].flatMap((key) => model.residueMap.get(key)?.atoms ?? []);
   if (atoms.length) fitView(true, false, atoms);
+  return list.length;
 }
 
 function exportInteractionsCSV() {
@@ -4857,6 +5498,14 @@ function profileSeries() {
     if (!state.sasa) return { label: 'Relative SASA', series: [], options: { emptyText: 'Compute SASA first' } };
     return { label: 'Relative SASA', series: residues.map((residue) => ({ residue, value: state.sasa.relative.get(residue.key) ?? NaN })), options: { min: 0 } };
   }
+  if (metric === 'ppse') {
+    if (!state.active.exposure) return { label: 'pPSE', series: [], options: { emptyText: 'Compute part-sphere exposure above' } };
+    return {
+      label: 'Part-sphere exposure (pPSE, 12 Å, 70°)',
+      series: residues.map((residue) => ({ residue, value: state.active.exposure.get(residue.key)?.ppse ?? NaN })),
+      options: { min: 0, bands: [{ from: 0, to: PPSE_EXPOSED, color: 'rgba(76,201,240,0.14)' }] },
+    };
+  }
   if (metric === 'hydrophobicity') {
     const window = 9;
     const values = residues.map((residue) => KYTE_DOOLITTLE[residue.parent]);
@@ -4913,11 +5562,11 @@ function onProfileClick(event) {
 
 /* ---------- PAE ---------- */
 
-async function loadPAEFromURL(url, entry = state.active) {
+async function loadPAEFromURL(url, entry = state.active, source = 'AlphaFold DB') {
   try {
     const response = await fetch(url);
     if (!response.ok) return;
-    loadPAEFromJSON(await response.json(), 'AlphaFold DB', entry);
+    loadPAEFromJSON(await response.json(), source, entry);
   } catch (error) {
     console.warn('PAE fetch failed', error);
   }
@@ -4926,21 +5575,15 @@ async function loadPAEFromURL(url, entry = state.active) {
 function loadPAEFromJSON(json, source, entry = state.active) {
   if (!entry) return;
   const document0 = Array.isArray(json) ? json[0] : json;
-  const matrix = document0?.predicted_aligned_error ?? document0?.pae;
-  if (!Array.isArray(matrix) || !Array.isArray(matrix[0])) {
-    showToast(`${source}: no PAE matrix found (expected predicted_aligned_error or pae).`, true);
+  // AlphaFold and ColabFold, AlphaFold 3 and OpenFold3, and Protenix name the matrix differently.
+  const square = flatSquare(document0?.predicted_aligned_error ?? document0?.pae ?? document0?.token_pair_pae, MISSING_PAE);
+  if (!square) {
+    showToast(`${source}: no square PAE matrix found (expected predicted_aligned_error, pae or token_pair_pae).`, true);
     return;
   }
-  const size = matrix.length;
-  const flat = new Float32Array(size * size);
+  const { size, matrix: flat } = square;
   let max = 0;
-  for (let row = 0; row < size; row += 1) {
-    for (let column = 0; column < size; column += 1) {
-      const value = Number(matrix[row][column]) || 0;
-      flat[row * size + column] = value;
-      if (value > max) max = value;
-    }
-  }
+  for (const value of flat) if (value > max) max = value;
   const residues = paeResidues(size, document0, entry);
   entry.pae = {
     size,
@@ -5062,9 +5705,6 @@ function bindPAEEvents() {
 // Reads the scores of every model, ranks them, computes interface metrics from each model's PAE
 // and coordinates, and opens the top-ranked model. Other models open on demand.
 async function openPredictionSet(set, options = {}) {
-  if (set.models.some((model) => /\.zst$/i.test(model.files.structure?.name ?? '') || /\.zst$/i.test(model.files.confidences?.name ?? ''))) {
-    throw new Error(`${set.name} was saved with compressed AlphaFold 3 outputs (.zst). Decompress them first, for example with "zstd -d --rm *.zst" in each folder.`);
-  }
   set.id = `prediction-${state.predictionSets.length + 1}`;
   showLoading(`Reading ${set.toolLabel} scores for ${set.name}`);
   for (const model of set.models) {
@@ -5099,11 +5739,11 @@ async function openPredictionSet(set, options = {}) {
 }
 
 function rankingScoreLabel(set) {
-  return { af3: 'ranking score', server: 'ranking score', boltz: 'confidence score', chai: 'aggregate score', colabfold: set.models.some((model) => Number.isFinite(model.scores?.iptm)) ? '0.8·ipTM + 0.2·pTM' : 'mean pLDDT' }[set.tool] ?? 'score';
+  return { af3: 'ranking score', server: 'ranking score', boltz: 'confidence score', chai: 'aggregate score', colabfold: set.models.some((model) => Number.isFinite(model.scores?.iptm)) ? '0.8·ipTM + 0.2·pTM' : 'mean pLDDT', protenix: 'ranking score', openfold3: 'sample ranking score' }[set.tool] ?? 'score';
 }
 
 async function readJSONFile(file) {
-  return JSON.parse(await file.text());
+  return parsePredictionJSON(await file.text());
 }
 
 async function readPredictionScores(set, model) {
@@ -5118,6 +5758,10 @@ async function readPredictionScores(set, model) {
       return files.scores ? parseChaiScores(await readNpz(await files.scores.read())) : {};
     case 'colabfold':
       return files.scores ? parseColabFoldScores(await readJSONFile(files.scores)) : {};
+    case 'protenix':
+      return parseProtenixSummary(await readJSONFile(files.summary));
+    case 'openfold3':
+      return parseOpenFold3Aggregated(await readJSONFile(files.summary));
     default:
       return {};
   }
@@ -5139,6 +5783,14 @@ async function readPredictionPAE(set, model) {
   if (set.tool === 'colabfold' && files.scores) {
     const scores = model.scores?.pae ? model.scores : parseColabFoldScores(await readJSONFile(files.scores));
     return { pae: scores.pae, tokenPlddt: scores.plddt };
+  }
+  if (set.tool === 'protenix' && files.confidences) {
+    const parsed = parseProtenixFullData(await readJSONFile(files.confidences));
+    return { pae: parsed.pae, contacts: parsed.contactProbs };
+  }
+  if (set.tool === 'openfold3' && files.confidences) {
+    if (/\.npz$/i.test(files.confidences.name)) return { pae: await readPAEArray(files.confidences) };
+    return { pae: parseOpenFold3Confidences(await readJSONFile(files.confidences)).pae };
   }
   return { pae: null };
 }
@@ -5229,7 +5881,10 @@ async function loadPredictionModel(set, model, options = {}) {
   showLoading(`Opening ${set.name} ${model.label}`);
   const text = await structureFileText(model.files.structure);
   const add = options.add ?? state.entries.length > 0;
-  const entry = await loadStructureFromText(text, `${set.name}_${model.id}.cif`, { source: `${set.toolLabel} · ${model.label}`, add, predicted: true, origin: { type: 'file', name: model.files.structure.name.replace(/\.bcif$/i, '.cif'), text } });
+  // BinaryCIF was converted to mmCIF text; ColabFold, OpenFold3 and some Boltz runs write PDB.
+  const fileName = model.files.structure.name.replace(/\.bcif$/i, '.cif');
+  const extension = /\.(pdb|ent)$/i.test(fileName) ? '.pdb' : '.cif';
+  const entry = await loadStructureFromText(text, `${set.name}_${model.id}${extension}`, { source: `${set.toolLabel} · ${model.label}`, add, predicted: true, origin: { type: 'file', name: fileName, text } });
   entry.name = uniqueName(`${set.name} #${model.rank}`);
   entry.prediction = { setId: set.id, modelId: model.id };
   model.entryId = entry.id;
@@ -5367,7 +6022,8 @@ function renderPredictionPairs(set, model) {
     return;
   }
   const byPair = new Map((metrics?.pairs ?? []).flatMap((pair) => [[`${pair.chainA}|${pair.chainB}`, pair], [`${pair.chainB}|${pair.chainA}`, pair]]));
-  const reportedChains = model.chains ?? chains;
+  // Chain-pair scores follow the chain order of the file unless the predictor names the chains.
+  const reportedChains = model.scores?.chainIds ?? model.chains ?? chains;
   const value = (a, b) => {
     if (state.pairMetric === 'iptm') {
       const ia = reportedChains.indexOf(a);
@@ -5484,7 +6140,7 @@ function exportPredictionCSV() {
     const base = [set.toolLabel, set.name, model.rank, model.label, format(model.scores?.rankingScore), format(model.scores?.ptm), format(model.scores?.iptm), format(model.meanPlddt)];
     const pairs = model.metrics?.pairs.length ? model.metrics.pairs : [null];
     for (const pair of pairs) {
-      const chains = model.chains ?? [];
+      const chains = model.scores?.chainIds ?? model.chains ?? [];
       const reported = pair ? model.scores?.chainPairIptm?.[chains.indexOf(pair.chainA)]?.[chains.indexOf(pair.chainB)] : NaN;
       rows.push([...base, pair?.chainA ?? '', pair?.chainB ?? '', format(reported), format(pair?.ipsae), format(pair?.ipsaeAB), format(pair?.ipsaeBA), format(pair?.iptm), format(pair?.pdockq), format(pair?.pdockq2), format(pair?.lis), pair?.contacts ?? '', xl?.satisfied ?? '', xl?.total ?? '']);
     }
@@ -6165,11 +6821,12 @@ function locateSite(site, numbering) {
   return pool.sort((a, b) => a.rank - b.rank)[0];
 }
 
-function setSites(sites) {
-  state.proteomics.sites = sites;
+// Marks sites on an entry (the active one by default; imports pass the entry they started on).
+function setSites(sites, entry = state.active) {
+  entry.proteomics.sites = sites;
   const overrides = new Map();
   for (const site of sites) overrides.set(site.residue.key, site.mismatch ? [1, 0.7, 0.2] : [1, 0.28, 0.72]);
-  state.proteomics.siteOverrides = overrides.size ? overrides : null;
+  entry.proteomics.siteOverrides = overrides.size ? overrides : null;
   markSceneDirty();
 }
 
@@ -6183,54 +6840,193 @@ async function mapCrosslinksFromInput() {
   const parsed = module.parseCrosslinks(els.xlInput.value);
   const links = parsed.links ?? parsed;
   if (!links.length) {
-    showToast('Enter cross-links such as A:K123-B:K45.', true);
+    showToast('Enter cross-links such as A:K123-B:K45, or open a cross-link report.', true);
     return;
   }
+  applyCrosslinks(state.active, links, { source: 'Entered links', skipped: parsed.skipped });
+}
+
+// A search-engine export of cross-links (xiFDR, xiVIEW, pLink, MeroX, XlinkX, MS Annika, MaxLynx).
+async function importCrosslinkReport(ref) {
+  const { parseCrosslinkReport } = await import('./lib/crosslinks.js');
+  const parsed = parseCrosslinkReport(await ref.text(), ref.name);
+  if (!parsed) return false;
+  if (!state.active) throw new Error(`Open a structure before ${ref.name}.`);
+  await proteomicsModule();
+  applyCrosslinks(state.active, parsed.links, { source: `${parsed.label} · ${ref.name}`, total: parsed.total, decoys: parsed.decoys });
+  activateTab('proteomics');
+  return true;
+}
+
+function applyCrosslinks(entry, links, info) {
+  entry.crosslinkSet = { links, info, sasd: false };
+  mapCrosslinkSet(entry);
+}
+
+// The residues a link end may be on, preferring those drawn: when a crystal holds two copies of a
+// complex and one is hidden, links map onto the one shown.
+function crosslinkCandidates(entry, protein, residueNumber) {
+  const candidates = crosslinkResidues(entry, protein, residueNumber);
+  const shown = candidates.filter((residue) => residueShown(entry, residue));
+  return shown.length ? shown : candidates;
+}
+
+// Resolves a link's protein to chains: a chain ID, a UniProt accession (then UniProt numbering),
+// or part of a molecule name; no protein means any protein chain.
+function crosslinkResidues(entry, protein, residueNumber) {
+  const model = activeModelOf(entry);
+  const structure = entry.structure;
+  const chainIds = structure.chains.filter((chain) => chain.polymerKind === 'protein').map((chain) => chain.id);
+  const byNumber = (chainId) => model.residues.find((item) => item.chain === chainId && item.kind === 'protein' && item.resSeq === residueNumber && !item.iCode);
+  if (!protein) return chainIds.map(byNumber).filter(Boolean);
+  if (chainIds.includes(protein)) return [byNumber(protein)].filter(Boolean);
+  const accession = protein.toUpperCase().replace(/-\d+$/, '');
+  const references = [...chainAccessions(entry)].filter(([chain, reference]) => chainIds.includes(chain) && reference.accession.replace(/-\d+$/, '') === accession);
+  if (references.length) {
+    return references.map(([chain, reference]) => residuesForUniprotRange(structure.sequences.get(chain), residueNumber, residueNumber, reference)[0]).filter(Boolean);
+  }
+  const needle = protein.toLowerCase();
+  return structure.chains.filter((chain) => chainIds.includes(chain.id) && chain.description?.toLowerCase().includes(needle)).map((chain) => byNumber(chain.id)).filter(Boolean);
+}
+
+function mapCrosslinkSet(entry = state.active) {
+  const set = entry.crosslinkSet;
+  if (!set) return;
   const maxDistance = Number(els.xlMax.value) || 30;
-  const model = activeModel();
-  const chainIds = state.structure.chains.filter((chain) => chain.polymerKind === 'protein').map((chain) => chain.id);
-  const resolveChains = (protein) => {
-    if (!protein) return chainIds;
-    if (chainIds.includes(protein)) return [protein];
-    const needle = protein.toLowerCase();
-    const byDescription = state.structure.chains.filter((chain) => chain.description && chain.description.toLowerCase().includes(needle)).map((chain) => chain.id);
-    const byAccession = state.structure.uniprotSegments.filter((segment) => segment.accession?.toLowerCase().startsWith(needle)).map((segment) => segment.chain);
-    const result = [...new Set([...byDescription, ...byAccession])].filter((id) => chainIds.includes(id));
-    return result.length ? result : [];
-  };
-  const caFor = (chainId, residueNumber) => {
-    const residue = model.residues.find((item) => item.chain === chainId && item.resSeq === residueNumber && item.kind === 'protein');
-    return residue?.backbone.CA ?? null;
-  };
   const mapped = [];
   let missing = 0;
-  for (const link of links) {
+  for (const link of set.links) {
     let best = null;
-    for (const chainA of resolveChains(link.proteinA)) {
-      for (const chainB of resolveChains(link.proteinB ?? link.proteinA)) {
-        const a = caFor(chainA, link.residueA);
-        const b = caFor(chainB, link.residueB);
-        if (!a || !b || a === b) continue;
-        const distance = Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-        if (!best || distance < best.distance) best = { atomA: a, atomB: b, distance };
+    for (const a of crosslinkCandidates(entry, link.proteinA, link.residueA)) {
+      for (const b of crosslinkCandidates(entry, link.proteinB ?? link.proteinA, link.residueB)) {
+        const atomA = a.backbone.CA;
+        const atomB = b.backbone.CA;
+        if (!atomA || !atomB || a === b) continue;
+        const distance = Math.hypot(atomA.x - atomB.x, atomA.y - atomB.y, atomA.z - atomB.z);
+        if (!best || distance < best.distance) best = { atomA, atomB, residueKeyA: a.key, residueKeyB: b.key, distance };
       }
     }
     if (!best) {
       missing += 1;
       continue;
     }
-    mapped.push({ ...link, ...best, satisfied: best.distance <= maxDistance });
+    mapped.push({ ...link, ...best, sasd: null, sasdStatus: '', satisfied: best.distance <= maxDistance });
   }
-  state.proteomics.crosslinks = mapped;
+  set.missing = missing;
+  set.maxDistance = maxDistance;
+  set.sasd = false;
+  entry.proteomics.crosslinks = mapped;
   // Kept for ranking the models of an opened prediction by cross-link satisfaction.
-  state.crosslinkRequest = { links, maxDistance };
+  state.crosslinkRequest = { links: set.links, maxDistance };
   renderPrediction();
-  const satisfied = mapped.filter((link) => link.satisfied).length;
-  els.xlResult.hidden = false;
-  els.xlResult.innerHTML = `<strong>${mapped.length}</strong> of ${links.length} cross-links mapped · <span class="good">${satisfied} within ${maxDistance} Å</span> · <span class="bad">${mapped.length - satisfied} violated</span>${missing ? ` · <span class="warn">${missing} not in structure</span>` : ''}${parsed.skipped ? ` · ${parsed.skipped} monolinks skipped` : ''}
-    <div class="hint">Cα–Cα distances; for homo-oligomers the shortest chain pairing is used.</div>
-    <table><thead><tr><th>Link</th><th>Cα–Cα</th></tr></thead><tbody>${mapped.slice().sort((a, b) => b.distance - a.distance).slice(0, 40).map((link) => `<tr><td>${escapeHTML(`${link.atomA.chain}:${link.atomA.resName}${link.atomA.resSeq} – ${link.atomB.chain}:${link.atomB.resName}${link.atomB.resSeq}`)}</td><td class="${link.satisfied ? 'good' : 'bad'}">${link.distance.toFixed(1)} Å</td></tr>`).join('')}</tbody></table>`;
+  renderCrosslinks();
   markSceneDirty();
+}
+
+// Surface distances for the mapped links, in slices so the page stays responsive.
+async function computeCrosslinkSASD(entry = state.active) {
+  const set = entry.crosslinkSet;
+  const links = entry.proteomics.crosslinks;
+  if (!set || !links.length) return;
+  const { SASD_CUTOFF, surfaceGrid } = await import('./lib/crosslinks.js');
+  const model = activeModelOf(entry);
+  const chains = new Set(links.flatMap((link) => [link.atomA.chain, link.atomB.chain]));
+  const atoms = model.atoms.filter((atom) => !atom.isHydrogen && atom.kind !== 'water' && chains.has(atom.chain));
+  showLoading(`Surface distances for ${links.length} cross-links`);
+  await nextFrame();
+  try {
+    const pairs = links.map((link) => ({ a: { key: link.residueKeyA, ca: link.atomA }, b: { key: link.residueKeyB, ca: link.atomB } }));
+    const grid = surfaceGrid(atoms, pairs.flatMap((pair) => [pair.a.key, pair.b.key]));
+    const results = [];
+    for (const [index, pair] of pairs.entries()) {
+      results.push(grid.distance(pair));
+      if (index % 10 === 9) {
+        setLoading(`Surface distances · ${index + 1} of ${links.length}`);
+        await nextFrame();
+      }
+    }
+    set.sasdCutoff ??= SASD_CUTOFF;
+    links.forEach((link, index) => {
+      link.sasd = results[index].sasd;
+      link.sasdStatus = results[index].status;
+      link.satisfied = link.sasd !== null && link.sasd <= set.sasdCutoff;
+    });
+    set.sasd = true;
+  } finally {
+    hideLoading();
+  }
+  renderCrosslinks();
+  markSceneDirty();
+}
+
+function renderCrosslinks() {
+  const entry = state.active;
+  const set = entry?.crosslinkSet;
+  const links = entry?.proteomics.crosslinks ?? [];
+  els.xlResult.hidden = !set;
+  if (!set) {
+    els.xlResult.replaceChildren();
+    return;
+  }
+  const withinCa = links.filter((link) => link.distance <= set.maxDistance).length;
+  const withinSASD = links.filter((link) => link.sasd !== null && link.sasd <= (set.sasdCutoff ?? 33)).length;
+  const buried = links.filter((link) => link.sasdStatus === 'buried').length;
+  const sorted = links.slice().sort((a, b) => (b.sasd ?? b.distance) - (a.sasd ?? a.distance));
+  const label = (link) => `${link.atomA.chain}:${link.atomA.resName}${link.atomA.resSeq} – ${link.atomB.chain}:${link.atomB.resName}${link.atomB.resSeq}`;
+  const info = set.info ?? {};
+  els.xlResult.innerHTML = `
+    <div>${escapeHTML(info.source ?? '')}${info.total ? ` · ${formatNumber(info.total)} matches` : ''}${info.decoys ? ` · ${formatNumber(info.decoys)} decoys left out` : ''}${info.skipped ? ` · ${formatNumber(info.skipped)} lines skipped` : ''}</div>
+    <div><strong>${links.length}</strong> of ${set.links.length} residue pairs mapped${set.missing ? ` · <span class="warn">${set.missing} not in the structure</span>` : ''}</div>
+    <div>Cα–Cα: <span class="good">${withinCa} within ${set.maxDistance} Å</span> · <span class="bad">${links.length - withinCa} beyond</span>${set.sasd ? `<br>Surface (SASD): <span class="good">${withinSASD} within ${set.sasdCutoff} Å</span> · <span class="bad">${links.length - withinSASD - buried} beyond</span>${buried ? ` · ${buried} buried` : ''}` : ''}</div>
+    <canvas class="plot wide xl-histogram" width="640" height="200" aria-label="Distance histogram"></canvas>
+    <div class="hint">${set.sasd ? 'Bars: SASD; outlines: Cα–Cα. Lines are colored by the SASD cutoff.' : 'Cα–Cα distances; for homo-oligomers the shortest chain pairing is used.'}</div>
+    <div class="button-row">
+      ${set.sasd ? `<label class="mini">SASD ≤ <input type="number" data-xl-sasd-cutoff min="5" max="80" step="1" value="${set.sasdCutoff}" /> Å</label>` : `<button type="button" data-xl-action="sasd" title="Solvent-accessible surface distance (Jwalk): the shortest path around the protein between the Cα atoms">Surface distances (SASD)</button>`}
+      <button type="button" data-xl-action="export">Export CSV</button>
+      <button type="button" data-xl-action="clear">Clear</button>
+    </div>
+    <table><thead><tr><th>Link</th><th>Cα–Cα</th>${set.sasd ? '<th>SASD</th>' : ''}<th title="Matches reported for the pair">n</th></tr></thead><tbody>${sorted.slice(0, 60).map((link) => `<tr class="clickable" data-xl-link="${links.indexOf(link)}"><td>${escapeHTML(label(link))}</td><td class="${link.distance <= set.maxDistance ? 'good' : 'bad'}">${link.distance.toFixed(1)} Å</td>${set.sasd ? `<td class="${link.satisfied ? 'good' : 'bad'}">${link.sasd !== null ? `${link.sasd.toFixed(1)} Å` : escapeHTML(link.sasdStatus === 'buried' ? 'buried' : `> 60 Å`)}</td>` : ''}<td>${Number.isFinite(link.count) ? formatNumber(link.count) : ''}</td></tr>`).join('')}</tbody></table>
+    ${links.length > 60 ? `<div class="hint">Showing the 60 longest of ${links.length}.</div>` : ''}`;
+  const canvas = els.xlResult.querySelector('.xl-histogram');
+  import('./lib/crosslinks.js').then(({ distanceHistogram }) => {
+    const ca = distanceHistogram(links.map((link) => link.distance));
+    if (set.sasd) drawHistogram(canvas, distanceHistogram(links.map((link) => link.sasd ?? 60)), { cutoff: set.sasdCutoff, overlay: ca, label: 'SASD (bars) and Cα–Cα (outlines), Å' });
+    else drawHistogram(canvas, ca, { cutoff: set.maxDistance, label: 'Cα–Cα distance (Å)' });
+  });
+}
+
+async function onCrosslinkClick(event) {
+  const entry = state.active;
+  const set = entry?.crosslinkSet;
+  if (!set) return;
+  const action = event.target.closest('[data-xl-action]')?.dataset.xlAction;
+  if (action === 'sasd') {
+    await guardedLoad(() => computeCrosslinkSASD(entry));
+    return;
+  }
+  if (action === 'clear') {
+    entry.crosslinkSet = null;
+    entry.proteomics.crosslinks = [];
+    state.crosslinkRequest = null;
+    renderPrediction();
+    renderCrosslinks();
+    markSceneDirty();
+    return;
+  }
+  if (action === 'export') {
+    const rows = [['residue_a', 'residue_b', 'protein_a', 'position_a', 'protein_b', 'position_b', 'ca_ca', 'sasd', 'count', 'score']];
+    for (const link of entry.proteomics.crosslinks) {
+      rows.push([`${link.atomA.chain}:${link.atomA.resName}${link.atomA.resSeq}`, `${link.atomB.chain}:${link.atomB.resName}${link.atomB.resSeq}`, link.proteinA ?? '', link.residueA, link.proteinB ?? '', link.residueB,
+        link.distance.toFixed(2), link.sasd !== null && link.sasd !== undefined ? link.sasd.toFixed(2) : link.sasdStatus ?? '', link.count ?? '', link.score ?? '']);
+    }
+    downloadText(`${fileStem()}-crosslinks.csv`, rows.map((row) => row.join(',')).join('\n'), 'text/csv');
+    return;
+  }
+  const row = event.target.closest('[data-xl-link]');
+  if (row) {
+    const link = entry.proteomics.crosslinks[Number(row.dataset.xlLink)];
+    if (link) selectResidues([link.residueKeyA ?? link.atomA.residueKey, link.residueKeyB ?? link.atomB.residueKey], { frame: true });
+  }
 }
 
 async function applyResidueDataFromInput() {
@@ -6263,6 +7059,624 @@ async function applyResidueDataFromInput() {
   els.dataResult.innerHTML = `<strong>${values.size}</strong> residues colored${unmatched ? ` · <span class="warn">${unmatched} rows did not match a residue</span>` : ''}${parsed.skipped ? ` · ${parsed.skipped} lines skipped` : ''}.`;
   setColorScheme('data', [state.active]);
   renderProfile();
+}
+
+/* ---------- Search reports ---------- */
+
+// A report keeps the rows of this structure's proteins with the entry, so thresholds, the value
+// shown and the sample groups can change without reading the file again.
+
+async function reportsModule() {
+  lazyModules.reports ??= await import('./lib/reports.js');
+  await proteomicsModule();
+  return lazyModules.reports;
+}
+
+async function importReport(file, entry = state.active) {
+  if (!entry) throw new Error('Open a structure before a search report.');
+  const { readReport, summarizeReport } = await reportsModule();
+  const accessions = [...new Set([...chainAccessions(entry).values()].map((item) => item.accession))];
+  const sequences = [...entry.structure.sequences.values()].filter((info) => info.kind === 'protein').map((info) => info.sequence.replace(/[^A-Z]/g, ''));
+  showLoading(`Reading ${file.name}`);
+  const size = file.size || 1;
+  let lastUpdate = 0;
+  const report = await readReport(file, {
+    accessions,
+    sequences,
+    onProgress: (read) => {
+      const now = performance.now();
+      if (now - lastUpdate < 250) return;
+      lastUpdate = now;
+      setLoading(`Reading ${file.name} · ${Math.min(99, Math.round((read / size) * 100))}%`);
+    },
+  });
+  hideLoading();
+  const settings = { qValue: 0.01, localization: 0.75, mode: report.kind === 'sites' ? 'intensity' : 'count', groupA: [], groupB: [] };
+  entry.report = { ...report, size: file.size, accessions, settings };
+  const summary = summarizeReport(report, settings);
+  // Two conditions (Spectronaut R.Condition) make the default comparison.
+  const conditions = [...new Set(summary.samples.map((sample) => summary.conditions.get(sample)).filter(Boolean))];
+  if (conditions.length === 2) {
+    settings.groupA = summary.samples.filter((sample) => summary.conditions.get(sample) === conditions[0]);
+    settings.groupB = summary.samples.filter((sample) => summary.conditions.get(sample) === conditions[1]);
+  }
+  applyReport(entry);
+  activateTab('proteomics');
+  if (!report.rows.length) {
+    showToast(`${file.name}: none of its ${formatNumber(report.total)} rows belong to ${accessions.length ? accessions.join(', ') : 'this structure'}.`, true);
+  }
+}
+
+// Peptide reports map by sequence (coverage, per-residue values, localized sites); site tables
+// map by UniProt position.
+function applyReport(entry = state.active) {
+  const report = entry.report;
+  if (!report) return;
+  const { summarizeReport, quantValue } = lazyModules.reports;
+  const settings = report.settings;
+  const summary = summarizeReport(report, settings);
+  report.summary = summary;
+  const { groupA, groupB, mode } = settings;
+  const sites = [];
+  const values = new Map();
+  const coverage = new Map();
+  const chainSummaries = [];
+  const proteomics = lazyModules.proteomics;
+  if (report.kind === 'peptides' && proteomics?.mapPeptides) {
+    const peptides = summary.peptides.map((peptide) => ({ sequence: peptide.sequence, modifications: [], value: mode === 'count' ? peptide.count : quantValue(peptide, mode, groupA, groupB) }));
+    const chains = [...entry.structure.sequences.values()].filter((info) => info.kind === 'protein');
+    const result = proteomics.mapPeptides(peptides, chains.map((info) => ({ id: info.chain, sequence: info.sequence })), { ilEquivalent: true });
+    const siteMap = new Map();
+    for (const chainResult of result.chains) {
+      const info = entry.structure.sequences.get(chainResult.id);
+      const items = info.items.filter((item) => !item.gap);
+      items.forEach((item, index) => {
+        if (!item.residue) return;
+        const count = chainResult.coverage[index] ?? 0;
+        if (!count) return;
+        coverage.set(item.residue.key, count);
+        const value = chainResult.values[index];
+        if (Number.isFinite(value)) values.set(item.residue.key, value);
+      });
+      chainSummaries.push({ id: chainResult.id, fraction: chainResult.coverageFraction, coverage: chainResult.coverage, matches: chainResult.matches.length });
+      for (const match of chainResult.matches) {
+        const peptide = summary.peptides[match.peptide];
+        const trim = peptide.sequence.length - (match.end - match.start + 1);
+        for (const site of peptide.sites) {
+          // N-terminal modifications (−1) sit on the first residue, C-terminal ones (the peptide
+          // length) on the last.
+          const offset = Math.min(Math.max(site.position, 0), peptide.sequence.length - 1) - trim;
+          if (offset < 0 && site.position >= 0) continue;
+          const residue = items[match.start + Math.max(offset, 0)]?.residue;
+          if (!residue) continue;
+          const key = `${residue.key}|${site.label}`;
+          let merged = siteMap.get(key);
+          if (!merged) {
+            merged = { residue, label: site.label, terminal: site.position < 0, probability: NaN, count: 0, quantities: {}, peptides: [] };
+            siteMap.set(key, merged);
+          }
+          if (Number.isFinite(site.probability) && !(site.probability <= merged.probability)) merged.probability = site.probability;
+          merged.count += site.localized;
+          if (!merged.peptides.includes(peptide.sequence)) merged.peptides.push(peptide.sequence);
+          for (const [sample, value] of Object.entries(site.quantities)) merged.quantities[sample] = (merged.quantities[sample] ?? 0) + value;
+        }
+      }
+    }
+    sites.push(...siteMap.values());
+  } else if (report.kind === 'sites') {
+    const accessions = chainAccessions(entry);
+    for (const site of summary.sites) {
+      for (const [chain, reference] of accessions) {
+        if (reference.accession.replace(/-\d+$/, '') !== site.protein.replace(/-\d+$/, '')) continue;
+        if (site.protein.includes('-') && site.protein !== reference.accession) continue;
+        const info = entry.structure.sequences.get(chain);
+        const [residue] = residuesForUniprotRange(info, site.position, site.position, reference);
+        if (!residue) continue;
+        sites.push({ residue, label: site.label, probability: site.probability, count: site.count, quantities: site.quantities, peptides: [], uniprot: site.position, mismatch: Boolean(site.residue) && residue.code !== site.residue });
+      }
+    }
+  }
+  for (const site of sites) {
+    site.value = mode === 'count' ? site.count : quantValue(site, mode, groupA, groupB);
+    if (report.kind === 'sites' && Number.isFinite(site.value)) values.set(site.residue.key, site.value);
+  }
+  sites.sort((a, b) => a.residue.chain.localeCompare(b.residue.chain) || a.residue.resSeq - b.residue.resSeq);
+  const previousMarks = report.mapped?.marks ?? null;
+  report.mapped = { sites, chains: chainSummaries, coverage, values };
+
+  entry.proteomics.coverage = coverage.size ? coverage : null;
+  entry.proteomics.data = values.size && mode !== 'count' ? values : null;
+  entry.proteomics.dataLabel = mode === 'ratio' ? 'log2 fold change (B / A)' : mode === 'intensity' ? 'log10 intensity' : '';
+  const labelFor = (site) => `${site.residue.code}${uniprotNumber(entry, site.residue) ?? site.residue.resSeq} ${site.label}`;
+  report.mapped.marks = sites.map((site) => ({ residue: site.residue, label: labelFor(site), mismatch: site.mismatch }));
+  // A report without sites leaves the sites entered by hand alone.
+  if (report.mapped.marks.length || entry.proteomics.sites === previousMarks) setSites(report.mapped.marks, entry);
+  // Fold changes read best on a diverging map centered on 0; counts and intensities keep the
+  // scheme's own map.
+  entry.color.colormap = mode === 'ratio' ? 'bwr' : '';
+  const scheme = mode === 'count' ? (coverage.size ? 'coverage' : entry.color.scheme) : entry.proteomics.data ? 'data' : entry.color.scheme;
+  if (entry === state.active) {
+    els.dataSymmetric.checked = mode === 'ratio';
+    setColorScheme(scheme, [entry]);
+    renderReport();
+    renderProfile();
+  }
+}
+
+function reportSampleOptions(samples, chosen) {
+  return samples.map((sample) => `<option value="${escapeHTML(sample)}"${chosen.includes(sample) ? ' selected' : ''}>${escapeHTML(sample)}</option>`).join('');
+}
+
+function renderReport() {
+  const entry = state.active;
+  const report = entry?.report?.mapped ? entry.report : null;
+  els.reportResult.hidden = !report;
+  if (!report) {
+    els.reportResult.replaceChildren();
+    return;
+  }
+  const { settings, summary, mapped } = report;
+  const peptides = report.kind === 'peptides';
+  const quantified = summary.samples.length > 0 && (peptides ? summary.peptides.some((peptide) => Object.keys(peptide.quantities).length) : summary.sites.some((site) => Object.keys(site.quantities).length));
+  const exposure = entry.exposure;
+  const siteRows = mapped.sites.slice(0, 150).map((site, index) => {
+    const context = exposure?.get(site.residue.key);
+    const value = Number.isFinite(site.value) ? (settings.mode === 'count' ? String(site.value) : site.value.toFixed(2)) : '–';
+    const position = uniprotNumber(entry, site.residue) ?? site.residue.resSeq;
+    return `<tr data-report-site="${index}" class="clickable">
+      <td>${escapeHTML(`${site.residue.code}${position}`)}${state.structure.chains.length > 1 ? ` <small>${escapeHTML(site.residue.chain)}</small>` : ''}</td>
+      <td>${escapeHTML(site.label)}</td>
+      <td class="${site.mismatch ? 'bad' : ''}">${Number.isFinite(site.probability) ? site.probability.toFixed(2) : '–'}</td>
+      <td>${escapeHTML(value)}</td>
+      <td>${context ? `${context.ppse}${context.exposed ? ' ◦' : ''}` : '–'}</td>
+      <td>${context ? (context.idr ? 'IDR' : '') : '–'}</td>
+      ${entry.evidence ? `<td>${publicCell(entry, site)}</td>` : ''}
+    </tr>`;
+  }).join('');
+  const idrShare = exposure && mapped.sites.length ? mapped.sites.filter((site) => exposure.get(site.residue.key)?.idr).length : null;
+  const exposedShare = exposure && mapped.sites.length ? mapped.sites.filter((site) => exposure.get(site.residue.key)?.exposed).length : null;
+  const modeButton = (mode, label, disabled = false) => `<button type="button" data-report-mode="${mode}" class="${settings.mode === mode ? 'is-active' : ''}"${disabled ? ' disabled' : ''}>${label}</button>`;
+  els.reportResult.innerHTML = `
+    <div><strong>${escapeHTML(report.label)}</strong> · ${escapeHTML(report.name)}</div>
+    <div>${formatNumber(report.total)} rows · ${formatNumber(report.rows.length)} for ${escapeHTML(report.accessions.join(', ') || 'this structure')}${summary.filtered ? ` · ${formatNumber(summary.filtered)} filtered (decoy, contaminant or q-value)` : ''}</div>
+    <div>${peptides ? `<strong>${formatNumber(summary.peptides.length)}</strong> peptides · ` : ''}<strong>${formatNumber(mapped.sites.length)}</strong> localized sites${summary.samples.length ? ` · ${summary.samples.length} sample${summary.samples.length === 1 ? '' : 's'}` : ''}</div>
+    ${mapped.chains.filter((chain) => chain.matches).map((chain) => `<div>Chain ${escapeHTML(chain.id)}: <strong>${(chain.fraction * 100).toFixed(1)}%</strong> sequence coverage${coverageBar(chain.coverage)}</div>`).join('')}
+    <div class="field-grid report-thresholds">
+      ${peptides ? `<label class="field"><span>q-value ≤</span><input type="number" data-report-setting="qValue" min="0" max="1" step="0.005" value="${settings.qValue}" /></label>` : ''}
+      <label class="field"><span>Localization ≥</span><input type="number" data-report-setting="localization" min="0" max="1" step="0.05" value="${settings.localization}" /></label>
+    </div>
+    <div class="segmented three report-modes" role="group" aria-label="Value shown">
+      ${modeButton('count', peptides ? 'Peptides' : 'Sites')}${modeButton('intensity', 'Intensity', !quantified)}${modeButton('ratio', 'Fold change', summary.samples.length < 2)}
+    </div>
+    ${settings.mode !== 'count' && summary.samples.length ? `<div class="field-grid report-groups">
+      <label class="field"><span>${settings.mode === 'ratio' ? 'Group A (reference)' : 'Samples'}</span><select multiple size="4" data-report-group="groupA">${reportSampleOptions(summary.samples, settings.groupA)}</select></label>
+      ${settings.mode === 'ratio' ? `<label class="field"><span>Group B</span><select multiple size="4" data-report-group="groupB">${reportSampleOptions(summary.samples, settings.groupB)}</select></label>` : ''}
+    </div>
+    <p class="hint">${settings.mode === 'ratio' ? 'log2 of mean B over mean A per peptide, averaged per residue; blue lower in B, red higher.' : 'log10 of the mean intensity over the chosen samples (all when none is chosen).'}</p>` : ''}
+    ${mapped.sites.length ? `<table class="report-sites"><thead><tr><th>Site</th><th>Modification</th><th title="Best localization probability">Loc.</th><th>${settings.mode === 'ratio' ? 'log2 FC' : settings.mode === 'intensity' ? 'log10 int.' : 'PSMs'}</th><th title="Part-sphere exposure (StructureMap): Cα neighbors in a 12 Å, 70° cone; ◦ marks 5 or fewer (highly exposed)">pPSE</th><th title="Intrinsically disordered region from smoothed full-sphere exposure">IDR</th>${entry.evidence ? '<th title="Reported in public data (PTMeXchange confidence when known); new: not in public data">Public</th>' : ''}</tr></thead><tbody>${siteRows}</tbody></table>
+      ${mapped.sites.length > 150 ? `<div class="hint">Showing 150 of ${formatNumber(mapped.sites.length)} sites.</div>` : ''}
+      ${exposure ? `<div class="hint">${idrShare} of ${mapped.sites.length} sites lie in disordered regions and ${exposedShare} are highly exposed (pPSE ≤ ${PPSE_EXPOSED}).</div>` : '<div class="button-row"><button type="button" data-report-action="exposure" title="Compute part-sphere exposure and disorder (StructureMap) for the sites">Add structural context</button></div>'}` : ''}
+    <div class="button-row"><button type="button" data-report-action="export">Export sites CSV</button><button type="button" data-report-action="clear">Clear</button></div>`;
+}
+
+// Removes a report and what it put on the structure (coverage, values and site marks), leaving
+// cross-links, HDX, custom data and hand-entered sites alone.
+function clearReport(entry) {
+  const mapped = entry.report?.mapped;
+  const proteomics = entry.proteomics;
+  if (mapped) {
+    if (proteomics.coverage && proteomics.coverage === mapped.coverage) proteomics.coverage = null;
+    if (proteomics.data && proteomics.data === mapped.values) {
+      proteomics.data = null;
+      proteomics.dataLabel = '';
+    }
+    if (proteomics.sites === mapped.marks) setSites([], entry);
+  }
+  entry.report = null;
+  resetImportedColors(entry);
+  markSceneDirty();
+  if (entry === state.active) {
+    renderReport();
+    renderProfile();
+  }
+}
+
+// After an import is cleared: the colormap it chose goes back to the scheme's own, and a coverage
+// or data scheme with nothing left to show goes back to the default.
+function resetImportedColors(entry) {
+  entry.color.colormap = '';
+  const empty = (entry.color.scheme === 'coverage' && !entry.proteomics.coverage) || (entry.color.scheme === 'data' && !entry.proteomics.data);
+  if (empty) setColorScheme(entry.structure.meta.isPredicted ? 'plddt' : 'chain', [entry]);
+  else markColorsDirty();
+  if (entry === state.active) {
+    els.dataSymmetric.checked = false;
+    syncStyleControls();
+  }
+}
+
+function publicCell(entry, site) {
+  const known = publicSiteFor(entry, site.residue, site.label);
+  if (known === undefined) return '';
+  return known ? `✓${known.confidence ? ` ${escapeHTML(known.confidence)}` : ''}` : '<span class="good">new</span>';
+}
+
+function onReportControl(event) {
+  const report = state.active?.report;
+  if (!report) return;
+  const target = event.target;
+  if (target.dataset.reportSetting) {
+    const value = Number(target.value);
+    if (!Number.isFinite(value)) return;
+    report.settings[target.dataset.reportSetting] = Math.min(1, Math.max(0, value));
+  } else if (target.dataset.reportGroup) {
+    report.settings[target.dataset.reportGroup] = [...target.selectedOptions].map((option) => option.value);
+  } else return;
+  applyReport(state.active);
+}
+
+async function onReportClick(event) {
+  const entry = state.active;
+  const report = entry?.report;
+  if (!report) return;
+  const mode = event.target.closest('[data-report-mode]')?.dataset.reportMode;
+  if (mode) {
+    report.settings.mode = mode;
+    if (mode === 'ratio' && (!report.settings.groupA.length || !report.settings.groupB.length)) {
+      const samples = report.summary.samples;
+      const half = Math.ceil(samples.length / 2);
+      if (!report.settings.groupA.length) report.settings.groupA = samples.slice(0, half);
+      if (!report.settings.groupB.length) report.settings.groupB = samples.slice(half);
+    }
+    applyReport(entry);
+    return;
+  }
+  const action = event.target.closest('[data-report-action]')?.dataset.reportAction;
+  if (action === 'exposure') {
+    await runCommand('exposure', { quiet: true });
+    renderReport();
+    return;
+  }
+  if (action === 'clear') {
+    clearReport(entry);
+    return;
+  }
+  if (action === 'export') {
+    const rows = [['chain', 'residue', 'uniprot', 'modification', 'localization', 'value', 'ppse', 'idr', 'peptides', ...report.summary.samples]];
+    for (const site of report.mapped.sites) {
+      const context = entry.exposure?.get(site.residue.key);
+      rows.push([site.residue.chain, `${site.residue.resName}${site.residue.resSeq}${site.residue.iCode}`, uniprotNumber(entry, site.residue) ?? '', site.label,
+        Number.isFinite(site.probability) ? site.probability : '', Number.isFinite(site.value) ? site.value : '', context?.ppse ?? '', context ? (context.idr ? 1 : 0) : '',
+        site.peptides.join(';'), ...report.summary.samples.map((sample) => site.quantities[sample] ?? '')]);
+    }
+    downloadText(`${fileStem()}-sites.csv`, rows.map((row) => row.map((cell) => (/[",\n]/.test(String(cell)) ? `"${String(cell).replace(/"/g, '""')}"` : cell)).join(',')).join('\n'), 'text/csv');
+    return;
+  }
+  const row = event.target.closest('[data-report-site]');
+  if (row) {
+    const site = report.mapped.sites[Number(row.dataset.reportSite)];
+    if (site) focusResidues([site.residue.key]);
+  }
+}
+
+/* ---------- HDX-MS ---------- */
+
+// HDX peptides are matched to the chain sequences (so their numbering can differ from the
+// structure's); every chain that contains them gets the values.
+async function importHDX(ref) {
+  const hdx = await import('./lib/hdx.js');
+  const data = hdx.parseHDX(await ref.text(), ref.name);
+  if (!data) return false;
+  const entry = state.active;
+  if (!entry) throw new Error(`Open a structure before ${ref.name}.`);
+  lazyModules.hdx = hdx;
+  const module = await proteomicsModule();
+  const sequences = [...new Set(data.peptides.map((peptide) => peptide.sequence.toUpperCase()))];
+  const chains = [...entry.structure.sequences.values()].filter((info) => info.kind === 'protein');
+  const result = module.mapPeptides(sequences, chains.map((info) => ({ id: info.chain, sequence: info.sequence })), { ilEquivalent: false });
+  const positions = new Map();
+  for (const chainResult of result.chains) {
+    const map = new Map();
+    for (const match of chainResult.matches) if (!map.has(sequences[match.peptide])) map.set(sequences[match.peptide], { start: match.start, end: match.end });
+    if (map.size) positions.set(chainResult.id, { map, coverage: chainResult.coverageFraction });
+  }
+  if (!positions.size) throw new Error(`${ref.name}: none of its ${sequences.length} peptides occur in the chains of ${entry.name}.`);
+  const states = data.states.filter((name) => !/full[- ]?deut|^fd$|^max$/i.test(name));
+  const difference = states.length > 1;
+  entry.hdx = {
+    data,
+    positions,
+    unmatched: sequences.filter((sequence) => ![...positions.values()].some((chain) => chain.map.has(sequence))).length,
+    settings: { view: difference ? 'difference' : 'uptake', reference: states[0] ?? data.states[0], state: states[1] ?? states[0] ?? data.states[0], exposure: 'all', alpha: 0.01, threshold: null },
+  };
+  applyHDX(entry);
+  activateTab('proteomics');
+  return true;
+}
+
+function applyHDX(entry = state.active) {
+  const hdx = entry.hdx;
+  if (!hdx) return;
+  const { peptideDifferences, residueValues } = lazyModules.hdx;
+  const settings = hdx.settings;
+  const difference = settings.view === 'difference';
+  const result = peptideDifferences(hdx.data, {
+    state: settings.state,
+    reference: difference ? settings.reference : null,
+    exposure: settings.exposure,
+    alpha: settings.alpha,
+    threshold: settings.threshold,
+  });
+  hdx.result = result;
+  const values = new Map();
+  for (const [chain, mapped] of hdx.positions) {
+    const info = entry.structure.sequences.get(chain);
+    const items = info.items.filter((item) => !item.gap);
+    const rowPositions = new Map();
+    result.rows.forEach((row, index) => {
+      const position = mapped.map.get(row.sequence.toUpperCase());
+      if (position) rowPositions.set(index, position);
+    });
+    const chainValues = residueValues(result.rows, rowPositions, info.sequence.toUpperCase(), { value: 'relative', significantOnly: difference });
+    for (const [index, value] of chainValues) {
+      const residue = items[index]?.residue;
+      if (residue) values.set(residue.key, value * 100);
+    }
+  }
+  hdx.values = values.size ? values : null;
+  entry.proteomics.data = hdx.values;
+  entry.proteomics.dataLabel = difference ? `ΔD ${settings.state} − ${settings.reference} (% of max)` : `D uptake, ${settings.state} (% of max)`;
+  entry.color.colormap = difference ? 'bwr' : 'viridis';
+  if (entry === state.active) {
+    els.dataSymmetric.checked = difference;
+    setColorScheme('data', [entry]);
+    renderHDX();
+    renderProfile();
+  }
+}
+
+function hdxExposureLabel(seconds) {
+  if (seconds >= 3600) return `${Number((seconds / 3600).toFixed(2))} h`;
+  if (seconds >= 60) return `${Number((seconds / 60).toFixed(2))} min`;
+  return `${Number(seconds.toFixed(2))} s`;
+}
+
+function renderHDX() {
+  const box = document.querySelector('#hdx-result');
+  const hdx = state.active?.hdx;
+  box.hidden = !hdx?.result;
+  if (!hdx?.result) {
+    box.replaceChildren();
+    return;
+  }
+  const { data, settings, result } = hdx;
+  const difference = settings.view === 'difference';
+  const peptides = new Set(data.peptides.map((peptide) => `${peptide.start}-${peptide.end}-${peptide.sequence}`)).size;
+  const significant = result.rows.filter((row) => row.significant);
+  const protectedCount = significant.filter((row) => row.delta < 0).length;
+  const stateOptions = (chosen) => data.states.map((name) => `<option value="${escapeHTML(name)}"${name === chosen ? ' selected' : ''}>${escapeHTML(name)}</option>`).join('');
+  const exposures = data.exposures.filter((value) => value > 0);
+  box.innerHTML = `
+    <div><strong>${escapeHTML(data.label)}</strong> · ${escapeHTML(data.name)}</div>
+    <div>${formatNumber(peptides)} peptides · ${data.states.length} state${data.states.length === 1 ? '' : 's'} · ${exposures.length} exposures (${exposures.length ? `${hdxExposureLabel(exposures[0])} – ${hdxExposureLabel(exposures.at(-1))}` : '–'})${hdx.unmatched ? ` · <span class="warn">${hdx.unmatched} peptide${hdx.unmatched === 1 ? '' : 's'} not in the structure</span>` : ''}</div>
+    ${[...hdx.positions].map(([chain, mapped]) => `<div>Chain ${escapeHTML(chain)}: <strong>${(mapped.coverage * 100).toFixed(1)}%</strong> of the sequence covered</div>`).join('')}
+    <div class="segmented two" role="group" aria-label="HDX view">
+      <button type="button" data-hdx-view="difference" class="${difference ? 'is-active' : ''}"${data.states.length < 2 ? ' disabled' : ''}>Difference</button>
+      <button type="button" data-hdx-view="uptake" class="${difference ? '' : 'is-active'}">Uptake</button>
+    </div>
+    <div class="field-grid">
+      <label class="field"><span>${difference ? 'State' : 'State'}</span><select data-hdx-setting="state">${stateOptions(settings.state)}</select></label>
+      ${difference ? `<label class="field"><span>Reference</span><select data-hdx-setting="reference">${stateOptions(settings.reference)}</select></label>` : ''}
+      <label class="field"><span>Exposure</span><select data-hdx-setting="exposure"><option value="all"${settings.exposure === 'all' ? ' selected' : ''}>All (summed)</option>${exposures.map((value) => `<option value="${value}"${settings.exposure === value ? ' selected' : ''}>${escapeHTML(hdxExposureLabel(value))}</option>`).join('')}</select></label>
+      ${difference ? `<label class="field"><span>${result.test === 'hybrid' ? 'Hybrid test <span class="keep-case">α</span>' : 'Threshold (D)'}</span><input type="number" data-hdx-setting="${result.test === 'hybrid' ? 'alpha' : 'threshold'}" min="0" step="${result.test === 'hybrid' ? 0.005 : 0.1}" value="${result.test === 'hybrid' ? settings.alpha : Number(result.limit.toFixed(2))}" /></label>` : ''}
+    </div>
+    <canvas class="plot wide hdx-woods" width="640" height="220" aria-label="Woods plot"></canvas>
+    <div class="hint">${difference
+      ? `Woods plot: each peptide's ΔD over its residues; dashed: ±${result.limit.toFixed(2)} D (${result.test === 'hybrid' ? `hybrid test, α = ${settings.alpha}` : 'fixed threshold, no replicate statistics'}). <strong>${significant.length}</strong> of ${result.rows.length} peptides differ: ${protectedCount} protected (blue), ${significant.length - protectedCount} deprotected (red). Only significant peptides color the structure.`
+      : 'Relative uptake per peptide (fraction of exchangeable amides); the structure shows it per residue.'}</div>
+    <div class="button-row"><button type="button" data-hdx-action="clear">Clear</button></div>`;
+  drawWoods(box.querySelector('.hdx-woods'), result.rows, difference ? { value: 'delta', limit: result.limit, label: 'ΔD (D)' } : { value: 'relative', limit: 0, range: [0, 1], label: 'Relative uptake' });
+}
+
+function onHDXControl(event) {
+  const hdx = state.active?.hdx;
+  const key = event.target.dataset.hdxSetting;
+  if (!hdx || !key) return;
+  const value = event.target.value;
+  if (key === 'exposure') hdx.settings.exposure = value === 'all' ? 'all' : Number(value);
+  else if (key === 'alpha') hdx.settings.alpha = Math.min(0.5, Math.max(1e-6, Number(value) || 0.01));
+  else if (key === 'threshold') hdx.settings.threshold = Math.max(0, Number(value) || 0.5);
+  else hdx.settings[key] = value;
+  applyHDX(state.active);
+}
+
+function onHDXClick(event) {
+  const entry = state.active;
+  const hdx = entry?.hdx;
+  if (!hdx) return;
+  const view = event.target.closest('[data-hdx-view]')?.dataset.hdxView;
+  if (view) {
+    hdx.settings.view = view;
+    applyHDX(entry);
+    return;
+  }
+  if (event.target.closest('[data-hdx-action="clear"]')) {
+    if (entry.proteomics.data && entry.proteomics.data === hdx.values) {
+      entry.proteomics.data = null;
+      entry.proteomics.dataLabel = '';
+    }
+    entry.hdx = null;
+    resetImportedColors(entry);
+    renderHDX();
+  }
+}
+
+/* ---------- Public evidence ---------- */
+
+// Proteins API modification names, and the names search engines use for the same chemistry.
+const EVIDENCE_NAMES = {
+  Phosphorylation: ['Phospho'],
+  Acetylation: ['Acetyl'],
+  Ubiquitinylation: ['GlyGly'],
+  Methylation: ['Methyl', 'Dimethyl', 'Trimethyl'],
+  SUMOylation: [],
+};
+
+async function loadEvidence(entry = state.active) {
+  const accessions = [...new Set([...chainAccessions(entry).values()].map((item) => item.accession))];
+  if (!accessions.length) throw new CommandError(`${entry.name} has no UniProt reference, so its public evidence cannot be found.`);
+  if (state.startup?.offline) throw new CommandError('Public evidence needs network access; Proteoscope was started with --offline.');
+  showLoading('Loading public proteomics evidence');
+  try {
+    const results = await Promise.all(accessions.slice(0, 6).map(async (accession) => {
+      const response = await fetch(`/api/fetch/proteomics/${encodeURIComponent(accession)}`);
+      if (!response.ok) return { accession, error: await responseError(response, 'Could not load evidence') };
+      return response.json();
+    }));
+    mapEvidence(entry, results);
+  } finally {
+    hideLoading();
+  }
+  if (entry === state.active) {
+    activateTab('proteomics');
+    renderEvidence();
+    renderReport();
+  }
+  return { accessions, peptides: entry.evidence.peptideCount, sites: entry.evidence.sites.length };
+}
+
+function mapEvidence(entry, results) {
+  const coverage = new Map();
+  const sites = [];
+  const summaries = [];
+  let peptideCount = 0;
+  const references = chainAccessions(entry);
+  for (const result of results) {
+    if (result.error) {
+      summaries.push({ accession: result.accession, error: result.error });
+      continue;
+    }
+    const chains = [...references].filter(([, reference]) => reference.accession === result.accession);
+    const covered = new Set();
+    for (const [chain, reference] of chains) {
+      const info = entry.structure.sequences.get(chain);
+      for (const peptide of result.peptides) {
+        for (const residue of residuesForUniprotRange(info, peptide.begin, peptide.end, reference)) coverage.set(residue.key, (coverage.get(residue.key) ?? 0) + 1);
+        for (let position = peptide.begin; position <= peptide.end; position += 1) covered.add(position);
+      }
+      for (const site of result.sites) {
+        const [residue] = residuesForUniprotRange(info, site.position, site.position, reference);
+        if (residue) sites.push({ ...site, residue, accession: result.accession, mismatch: Boolean(site.residue) && residue.code !== site.residue });
+      }
+    }
+    peptideCount += result.peptides.length;
+    summaries.push({ accession: result.accession, length: result.length, peptides: result.peptides.length, covered: covered.size, sites: result.sites.length, problems: result.problems ?? [] });
+  }
+  entry.evidence = { coverage, sites, summaries, peptideCount, type: entry.evidence?.type ?? 'all' };
+}
+
+function evidenceSitesOfType(evidence) {
+  return evidence.type === 'all' ? evidence.sites : evidence.sites.filter((site) => site.name === evidence.type);
+}
+
+// The public site matching a site of the imported report, if any: same residue, same chemistry.
+function publicSiteFor(entry, residue, label) {
+  const evidence = entry.evidence;
+  if (!evidence) return undefined;
+  return evidence.sites.find((site) => site.residue.key === residue.key && (EVIDENCE_NAMES[site.name]?.includes(label) || site.name.toLowerCase().startsWith(String(label).toLowerCase()))) ?? null;
+}
+
+function renderEvidence() {
+  const entry = state.active;
+  const evidence = entry?.evidence;
+  els.evidenceResult.hidden = !evidence;
+  if (!evidence) {
+    els.evidenceResult.replaceChildren();
+    return;
+  }
+  const types = new Map();
+  for (const site of evidence.sites) types.set(site.name, (types.get(site.name) ?? 0) + 1);
+  const shown = evidenceSitesOfType(evidence);
+  const rows = shown.slice(0, 120).map((site, index) => `<tr class="clickable" data-evidence-site="${evidence.sites.indexOf(site)}">
+      <td>${escapeHTML(`${site.residue.code}${site.position}`)}${state.structure.chains.length > 1 ? ` <small>${escapeHTML(site.residue.chain)}</small>` : ''}</td>
+      <td>${escapeHTML(site.name)}</td>
+      <td>${Number.isFinite(site.probability) ? site.probability.toFixed(2) : '–'}</td>
+      <td>${escapeHTML(site.confidence || '')}</td>
+      <td title="${escapeHTML(site.datasets.join(', '))}">${site.datasets.length}</td>
+    </tr>`).join('');
+  els.evidenceResult.innerHTML = `
+    ${evidence.summaries.map((summary) => (summary.error
+      ? `<div class="warn">${escapeHTML(summary.accession)}: ${escapeHTML(summary.error)}</div>`
+      : `<div><strong>${escapeHTML(summary.accession)}</strong> · ${formatNumber(summary.peptides)} public peptides cover ${summary.length ? pct(summary.covered, summary.length) : '–'} · ${formatNumber(summary.sites)} modification sites${summary.problems.length ? ` <span class="warn">(${escapeHTML(summary.problems.join('; '))})</span>` : ''}</div>`)).join('')}
+    <div class="inline-form compact">
+      <select data-evidence-type aria-label="Modification type"><option value="all">All modifications (${evidence.sites.length})</option>${[...types].sort((a, b) => b[1] - a[1]).map(([name, count]) => `<option value="${escapeHTML(name)}"${evidence.type === name ? ' selected' : ''}>${escapeHTML(name)} (${count})</option>`).join('')}</select>
+    </div>
+    <div class="button-row">
+      <button type="button" data-evidence-action="coverage">Color public coverage</button>
+      <button type="button" data-evidence-action="sites">Mark ${formatNumber(Math.min(shown.length, 300))} sites</button>
+    </div>
+    ${shown.length ? `<table><thead><tr><th>Site</th><th>Modification</th><th title="Best site probability">Prob.</th><th title="PTMeXchange confidence">Conf.</th><th title="PRIDE datasets">Sets</th></tr></thead><tbody>${rows}</tbody></table>${shown.length > 120 ? `<div class="hint">Showing 120 of ${formatNumber(shown.length)}.</div>` : ''}` : '<div class="hint">No public modification sites of this type on the modeled residues.</div>'}
+    <div class="hint">Sources: PeptideAtlas, ProteomicsDB, PRIDE and PTMeXchange through the EBI Proteins API.</div>`;
+}
+
+function showEvidenceCoverage(entry = state.active) {
+  if (!entry.evidence) return;
+  entry.proteomics.coverage = entry.evidence.coverage.size ? entry.evidence.coverage : null;
+  setColorScheme('coverage', [entry]);
+}
+
+function onEvidenceClick(event) {
+  const entry = state.active;
+  const evidence = entry?.evidence;
+  if (!evidence) return;
+  const action = event.target.closest('[data-evidence-action]')?.dataset.evidenceAction;
+  if (action === 'coverage') {
+    showEvidenceCoverage(entry);
+    return;
+  }
+  if (action === 'sites') {
+    const sites = evidenceSitesOfType(evidence).slice(0, 300);
+    setSites(sites.map((site) => ({ residue: site.residue, label: `${site.residue.code}${site.position} ${site.name}`, mismatch: site.mismatch })));
+    focusResidues(sites.map((site) => site.residue.key));
+    return;
+  }
+  const row = event.target.closest('[data-evidence-site]');
+  if (row) {
+    const site = evidence.sites[Number(row.dataset.evidenceSite)];
+    if (site) focusResidues([site.residue.key]);
+  }
+}
+
+/* ---------- Part-sphere exposure ---------- */
+
+// StructureMap's pPSE and disorder for the active model, with its PAE when there is one.
+function computeExposure(entry = state.active) {
+  const model = activeModelOf(entry);
+  const atom = (residue, name) => residue.atoms.find((item) => item.name === name) ?? null;
+  const residues = model.residues.filter((residue) => residue.kind === 'protein').map((residue) => ({
+    key: residue.key, chain: residue.chain, ca: atom(residue, 'CA'), cb: atom(residue, 'CB'), n: atom(residue, 'N'), c: atom(residue, 'C'),
+  }));
+  let pae = null;
+  if (entry.pae?.residues?.length) {
+    const index = new Map();
+    entry.pae.residues.forEach((residue, row) => {
+      if (residue && !index.has(residue.key)) index.set(residue.key, row);
+    });
+    pae = { matrix: entry.pae.matrix, size: entry.pae.size, index };
+  }
+  entry.exposure = partSphereExposure(residues, { pae });
+  entry.exposureWithPAE = Boolean(pae);
+  return entry.exposure;
+}
+
+function renderExposureResult(entry = state.active) {
+  const exposure = entry?.exposure;
+  els.ppseResult.hidden = !exposure;
+  if (!exposure) return;
+  const values = [...exposure.values()];
+  const idr = values.filter((value) => value.idr).length;
+  const exposed = values.filter((value) => value.exposed).length;
+  els.ppseResult.innerHTML = `<strong>${formatNumber(values.length)}</strong> residues · ${pct(exposed, values.length)} highly exposed (pPSE ≤ ${PPSE_EXPOSED}) · ${pct(idr, values.length)} in disordered regions${entry.exposureWithPAE ? ' · PAE-aware' : ' · no PAE (structure taken as rigid)'}
+    <div class="hint">Select with <code>ppse &lt; 6</code> or <code>idr</code>; the profile plot shows pPSE.</div>`;
 }
 
 /* ---------- Color scheme and legend ---------- */
@@ -6421,6 +7835,13 @@ function setActiveModel(index) {
     els.sasaColor.disabled = true;
     els.sasaResult.hidden = true;
     if (entry.color.scheme === 'exposure') markColorsDirty();
+  }
+  // Part-sphere exposure is quick, so it follows the model rather than going stale.
+  if (entry.exposure) {
+    computeExposure(entry);
+    renderExposureResult(entry);
+    renderReport();
+    if (entry.color.scheme === 'ppse') markColorsDirty();
   }
   // Measurements on the previous model are dropped when the scene layout is rebuilt.
   layoutParts();
@@ -6842,19 +8263,75 @@ function setActiveButton(selector, active) {
   document.querySelectorAll(selector).forEach((button) => button.classList.toggle('is-active', button === active));
 }
 
+// Bundled examples, grouped by the manifest's categories.
 function populateSamples() {
   els.sampleSelect.replaceChildren(new Option('Choose an example…', ''));
+  const groups = new Map();
   for (const sample of state.samples) {
+    const category = sample.category || 'Other files';
+    if (!groups.has(category)) {
+      const group = document.createElement('optgroup');
+      group.label = category;
+      groups.set(category, group);
+      els.sampleSelect.appendChild(group);
+    }
     const option = new Option(sampleSummary(sample), sample.id);
-    option.title = sample.title;
-    els.sampleSelect.appendChild(option);
+    option.title = sample.description || sample.title;
+    groups.get(category).appendChild(option);
   }
 }
 
 function sampleSummary(sample) {
+  if (sample.label) return `${sample.name} · ${sample.label}`;
   const title = (sample.title || '').replace(/^[0-9A-Z]{4}:\s*/, '');
   const short = title.length > 46 ? `${title.slice(0, 45)}…` : title;
   return `${sample.name} · ${titleCase(short)}`;
+}
+
+// Finds an example by id; sessions and links saved when the examples were PDB files name them
+// "1m17.pdb", which resolves through the stem.
+function findSample(id) {
+  const value = String(id ?? '').trim().toLowerCase();
+  if (!value) return null;
+  const stem = value.replace(/\.gz$/, '').replace(/\.(pdb|ent|cif|mmcif|bcif)$/, '');
+  return state.samples.find((sample) => sample.id === value) ?? state.samples.find((sample) => sample.id === stem) ?? null;
+}
+
+// Opens an example (with its PAE, when it has one). options.view runs its opening view;
+// options.select (default: unless adding) shows it in the menu with its description.
+async function openSample(sample, options = {}) {
+  const template = options.view && !options.add ? state.defaults : undefined;
+  const entry = await loadStructureFromURL(sample.url, sample.name, { add: options.add, activate: options.activate, template, origin: { type: 'sample', id: sample.id } });
+  if (sample.pae) await loadPAEFromURL(sample.pae, entry, 'AlphaFold DB');
+  if (options.select ?? !options.add) setSampleSelection(sample);
+  if (options.view) await runSampleView(sample);
+  return entry;
+}
+
+async function runSampleView(sample) {
+  for (const command of sample.view ?? []) {
+    const result = await runCommand(command, { quiet: true, history: false });
+    if (!result.ok) throw new Error(`${sample.name}: "${command}" failed: ${result.message}`);
+  }
+}
+
+function setSampleSelection(sample) {
+  els.sampleSelect.value = sample?.id ?? '';
+  els.sampleInfo.hidden = !sample?.description;
+  if (!sample?.description) {
+    els.sampleInfo.replaceChildren();
+    return;
+  }
+  const source = sampleSourceURL(sample);
+  els.sampleInfo.innerHTML = `<p>${escapeHTML(sample.description)}</p>
+    <p class="sample-credit">${escapeHTML(sample.credit ?? '')}</p>
+    <div class="button-row">${sample.view?.length ? `<button type="button" data-sample-view="${escapeHTML(sample.id)}" title="${escapeHTML(sample.view.join('; '))}">Show view</button>` : ''}${source ? `<a href="${escapeHTML(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(source.label)} ↗</a>` : ''}</div>`;
+}
+
+function sampleSourceURL(sample) {
+  if (sample.accession) return { url: `https://alphafold.ebi.ac.uk/entry/${encodeURIComponent(sample.accession)}`, label: 'AlphaFold DB' };
+  if (/^[0-9][A-Z0-9]{3}$/i.test(sample.name)) return { url: `https://www.rcsb.org/structure/${encodeURIComponent(sample.name.toUpperCase())}`, label: 'RCSB PDB' };
+  return null;
 }
 
 function setLoading(message) {

@@ -35,6 +35,7 @@ const CLASS_KEYWORDS = {
   sele: 'selected', selected: 'selected', selection: 'selected',
   focus: 'focus', sites: 'sites', site: 'sites', covered: 'covered', aligned: 'aligned',
   outliers: 'outliers', outlier: 'outliers',
+  idr: 'idr', disordered: 'idr', disorder: 'idr',
 };
 
 const LIST_KEYWORDS = {
@@ -62,6 +63,7 @@ const NUMERIC_KEYWORDS = {
   rsrz: 'rsrz', rscc: 'rscc', qscore: 'qscore',
   am: 'am', missense: 'am', alphamissense: 'am',
   msa: 'msa', depth: 'msa',
+  ppse: 'ppse', pse: 'ppse',
 };
 
 const DISTANCE_KEYWORDS = { within: 'within', around: 'around', beyond: 'beyond' };
@@ -265,6 +267,18 @@ function parseList(key, token) {
   }
 }
 
+// A ":" item is a residue number ("315", "100A", "40-80"), a residue name ("STI", "HEM"), or,
+// for chemical component codes that begin with a digit, either. Codes such as 1LT, 7V7 or 9UO are
+// not numbers; a leading zero (032, 09L) marks a code, since residue numbers do not have one; a
+// number with one letter (15P, 100A) may be an insertion code or a code, so it matches both.
+function residueItemKind(item) {
+  if (/^-?\d+[A-Za-z]?[-:]-?\d+[A-Za-z]?$/.test(item)) return 'number';
+  if (/^0\d/.test(item)) return 'name';
+  if (/^-?\d+$/.test(item) || /^-\d+[A-Za-z]$/.test(item)) return 'number';
+  if (/^\d+[A-Za-z]$/.test(item)) return 'either';
+  return 'name';
+}
+
 // ChimeraX-style atom spec: #structure/chain:residue@atom, each part optional, lists with commas.
 function parseSpec(token) {
   const parts = [...token.value.matchAll(/([#/:@])([^#/:@]*)/g)];
@@ -277,8 +291,13 @@ function parseSpec(token) {
     else if (marker === '/') clauses.push({ type: 'list', key: 'chain', values: items.map((item) => globPattern(item, true)) });
     else if (marker === '@') clauses.push({ type: 'list', key: 'name', values: items.map((item) => globPattern(item, false)) });
     else {
-      const numbers = items.filter((item) => /^-?\d/.test(item));
-      const names = items.filter((item) => !/^-?\d/.test(item));
+      const numbers = [];
+      const names = [];
+      for (const item of items) {
+        const kind = residueItemKind(item);
+        if (kind !== 'name') numbers.push(item);
+        if (kind !== 'number') names.push(item);
+      }
       const options = [];
       if (numbers.length) options.push({ type: 'list', key: 'resi', values: numbers.map((item) => parseResidueRange(item, token.start)) });
       if (names.length) options.push({ type: 'list', key: 'resn', values: names.map((item) => globPattern(item, false)) });
@@ -291,8 +310,8 @@ function parseSpec(token) {
 /* ---------- Evaluation ---------- */
 
 // targets: [{ id, index (1-based), name, model, structure, context }] where context may hold
-//   selected, focus, sites, covered, aligned, outliers: Set of residue keys
-//   values: { deviation, lddt, rmsf, rsa, rsrz, rscc, qscore, am, msa }: Map of residue key → number
+//   selected, focus, sites, covered, aligned, outliers, idr: Set of residue keys
+//   values: { deviation, lddt, rmsf, rsa, rsrz, rscc, qscore, am, msa, ppse }: Map of residue key → number
 //   uniprot(residue): UniProt position or null
 // Returns Map(target id → Uint8Array atom mask over target.model.atoms).
 export function evaluateSelection(ast, targets) {

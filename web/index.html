@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#050708" />
     <title>Proteoscope</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=wave4" />
+    <link rel="stylesheet" href="/styles.css?v=wave5" />
   </head>
   <body>
     <main id="app" class="left-open right-open sequence-open">
@@ -62,18 +62,45 @@
                 <span>Bundled examples</span>
                 <select id="sample-select"></select>
               </label>
+              <div id="sample-info" class="sample-info" hidden></div>
               <label class="upload-zone" for="file-input">
-                <input id="file-input" type="file" accept=".pdb,.ent,.cif,.mmcif,.bcif,.gz,.json,.zip,.npz,.a3m,.csv,chemical/x-pdb,chemical/x-cif,text/plain" multiple />
+                <input id="file-input" type="file" accept=".pdb,.ent,.cif,.mmcif,.bcif,.gz,.zst,.json,.zip,.npz,.npy,.a3m,.csv,chemical/x-pdb,chemical/x-cif,text/plain" multiple />
                 <span class="upload-icon" aria-hidden="true">+</span>
                 <span>
                   <strong>Open local file</strong>
-                  <small>.pdb, .cif, .bcif (optionally .gz), a PAE .json, or an AlphaFold Server .zip. Drop several files to compare them, or a prediction folder. Files stay on this computer.</small>
+                  <small>.pdb, .cif, .bcif (optionally .gz or .zst), a PAE .json, or an AlphaFold Server .zip. Drop several files to compare them, or a prediction folder. Files stay on this computer.</small>
                 </span>
               </label>
               <label class="folder-button" for="folder-input" title="Open an AlphaFold 3, Boltz, Chai-1 or ColabFold output folder">
                 <input id="folder-input" type="file" webkitdirectory multiple />
                 Open prediction folder…
               </label>
+            </div>
+
+            <div class="group" id="discover-group">
+              <h3>Find structures</h3>
+              <form id="discover-form" class="inline-form">
+                <input id="discover-input" type="search" autocomplete="off" spellcheck="false" placeholder="Gene, protein, UniProt, keywords or a sequence" aria-label="Search public structure databases" />
+                <button type="submit" class="primary">Search</button>
+              </form>
+              <div class="inline-form compact discover-options">
+                <select id="discover-organism" aria-label="Organism for gene and protein names" title="Organism for gene and protein names">
+                  <option value="9606">Human</option>
+                  <option value="10090">Mouse</option>
+                  <option value="10116">Rat</option>
+                  <option value="7955">Zebrafish</option>
+                  <option value="7227">Fruit fly</option>
+                  <option value="6239">C. elegans</option>
+                  <option value="559292">Yeast</option>
+                  <option value="83333">E. coli K-12</option>
+                  <option value="3702">Arabidopsis</option>
+                  <option value="">Any organism</option>
+                </select>
+                <button id="discover-protein" type="button" title="Experimental structures and models of the active structure's protein (through its UniProt reference)">This protein</button>
+                <button id="discover-similar" type="button" title="PDB entries with sequences similar to the chain shown in the sequence panel (RCSB sequence search; the sequence is sent to RCSB)">Similar</button>
+              </div>
+              <p class="hint">Searches RCSB PDB, UniProt, PDBe and 3D-Beacons, which need no account. The query, or a pasted sequence, is sent to those services.</p>
+              <div id="discover-result" class="discover-result" hidden></div>
             </div>
 
             <div class="group" id="prediction-group" hidden>
@@ -348,6 +375,10 @@
                 <button id="sasa-color" type="button" disabled>Color by exposure</button>
               </div>
               <div id="sasa-result" class="result-box" hidden></div>
+              <div class="button-row">
+                <button id="ppse-run" type="button" title="Part-sphere exposure and disorder as in StructureMap (Bludau et al. 2022): Cα neighbors within 12 Å in a 70° cone along Cα→Cβ, discounted by PAE when the model has one">Part-sphere exposure (pPSE)</button>
+              </div>
+              <div id="ppse-result" class="result-box" hidden></div>
             </div>
 
             <div class="group">
@@ -378,6 +409,7 @@
                   <select id="profile-metric">
                     <option value="bfactor">B-factor / pLDDT</option>
                     <option value="sasa">Relative SASA</option>
+                    <option value="ppse">Part-sphere exposure (pPSE)</option>
                     <option value="hydrophobicity">Hydrophobicity (9-residue window)</option>
                     <option value="missense">AlphaMissense (mean pathogenicity)</option>
                     <option value="msa">MSA depth</option>
@@ -408,6 +440,28 @@
 
           <section data-panel="proteomics" class="panel-section" hidden>
             <p class="privacy-note">Everything here runs locally in your browser. Proteomics data is never uploaded.</p>
+            <div class="group" id="report-group">
+              <h3>Search results</h3>
+              <label class="upload-zone compact" for="report-input">
+                <input id="report-input" type="file" accept=".txt,.tsv,.csv,.parquet,.mztab,.gz,.xls" />
+                <span class="upload-icon" aria-hidden="true">+</span>
+                <span>
+                  <strong>Open a search report</strong>
+                  <small>MaxQuant (evidence, peptides, site tables), DIA-NN (.tsv or .parquet), Spectronaut, FragPipe, mzTab or Proteome Discoverer. Only this structure's proteins are kept; large files are streamed.</small>
+                </span>
+              </label>
+              <div id="report-result" class="result-box report-result" hidden></div>
+            </div>
+
+            <div class="group" id="evidence-group">
+              <h3>Public evidence</h3>
+              <p class="hint">Peptides observed in PeptideAtlas, ProteomicsDB and other resources, and modification sites from reprocessed PRIDE datasets (EBI Proteins API, PTMeXchange). Requires network access.</p>
+              <div class="button-row">
+                <button id="evidence-load" type="button">Load public peptides and PTMs</button>
+              </div>
+              <div id="evidence-result" class="result-box" hidden></div>
+            </div>
+
             <div class="group">
               <h3>Sequence properties</h3>
               <label class="field"><span>Chain</span><select id="protparam-chain"></select></label>
@@ -460,13 +514,28 @@
 
             <div class="group">
               <h3>Cross-links (XL-MS)</h3>
+              <p class="hint">Enter links, or open a xiFDR, xiVIEW, pLink, MeroX, XlinkX, MS Annika or MaxLynx export (or drop it on the window); proteins are matched by chain, UniProt accession or name.</p>
               <textarea id="xl-input" rows="3" spellcheck="false" placeholder="A:K123-B:K45 (one per line), or CSV with Protein1, Residue1, Protein2, Residue2"></textarea>
               <div class="inline-form compact">
                 <select id="xl-crosslinker" aria-label="Cross-linker"></select>
                 <label class="mini">Max Cα–Cα <input id="xl-max" type="number" min="1" max="80" step="0.5" value="30" /> Å</label>
                 <button id="xl-map" type="button" class="primary">Map</button>
               </div>
+              <label class="folder-button" for="xl-file">
+                <input id="xl-file" type="file" accept=".csv,.tsv,.txt" />
+                Open a cross-link report…
+              </label>
               <div id="xl-result" class="result-box" hidden></div>
+            </div>
+
+            <div class="group" id="hdx-group">
+              <h3>HDX-MS</h3>
+              <p class="hint">DynamX (state or cluster data), HDExaminer (all results or uptake summary) or an HDX data table (Masson et al. 2019). Peptides are matched to the chain sequences; differences are tested with the hybrid test when replicates are known.</p>
+              <label class="folder-button" for="hdx-file">
+                <input id="hdx-file" type="file" accept=".csv,.tsv,.txt" />
+                Open HDX-MS data…
+              </label>
+              <div id="hdx-result" class="result-box hdx-result" hidden></div>
             </div>
 
             <div class="group">
@@ -668,6 +737,6 @@
         </form>
       </dialog>
     </main>
-    <script type="module" src="/app.js?v=wave4"></script>
+    <script type="module" src="/app.js?v=wave5"></script>
   </body>
 </html>

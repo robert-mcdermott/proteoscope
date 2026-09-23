@@ -15,7 +15,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -34,11 +33,20 @@ type sample struct {
 	Classification string `json:"classification"`
 	Method         string `json:"method"`
 	Resolution     string `json:"resolution"`
-	Atoms          int    `json:"atoms"`
-	Residues       int    `json:"residues"`
-	Chains         int    `json:"chains"`
-	Models         int    `json:"models"`
-	SizeBytes      int    `json:"sizeBytes"`
+	// Counted only for files the manifest does not list.
+	Atoms     int `json:"atoms,omitempty"`
+	Residues  int `json:"residues,omitempty"`
+	Chains    int `json:"chains,omitempty"`
+	Models    int `json:"models,omitempty"`
+	SizeBytes int `json:"sizeBytes"`
+	// From data/examples.json.
+	Label       string   `json:"label,omitempty"`
+	Category    string   `json:"category,omitempty"`
+	Description string   `json:"description,omitempty"`
+	View        []string `json:"view,omitempty"`
+	Credit      string   `json:"credit,omitempty"`
+	PAE         string   `json:"pae,omitempty"`
+	Accession   string   `json:"accession,omitempty"`
 }
 
 type config struct {
@@ -244,7 +252,7 @@ func (a *app) handler() (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	a.registerAPI(mux, samples)
-	mux.Handle("/data/", cacheControl(dataCache, http.StripPrefix("/data", http.FileServer(http.FS(dataFS)))))
+	mux.Handle("/data/", cacheControl(dataCache, http.StripPrefix("/data", dataHandler(dataFS))))
 	mux.Handle("/", cacheControl(webCache, spaFileServer(webFS)))
 	return mux, nil
 }
@@ -273,6 +281,12 @@ func (a *app) registerAPI(mux *http.ServeMux, samples func() ([]sample, error)) 
 	mux.HandleFunc("GET /api/fetch/afdb/{accession}/msa", a.fetchAlphaFoldMSA)
 	mux.HandleFunc("GET /api/fetch/uniprot/{accession}", a.fetchUniProt)
 	mux.HandleFunc("GET /api/fetch/validation/{id}", a.fetchValidation)
+	mux.HandleFunc("GET /api/fetch/model", a.fetchModel)
+	mux.HandleFunc("GET /api/fetch/proteomics/{accession}", a.fetchProteomicsEvidence)
+	mux.HandleFunc("GET /api/search/text", a.searchText)
+	mux.HandleFunc("GET /api/search/sequence", a.searchSequence)
+	mux.HandleFunc("GET /api/search/uniprot", a.searchUniProt)
+	mux.HandleFunc("GET /api/search/protein/{accession}", a.searchProtein)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Unknown API endpoint.")
 	})
@@ -287,32 +301,6 @@ func (a *app) sampleSource() (func() ([]sample, error), error) {
 		return nil, err
 	}
 	return func() ([]sample, error) { return samples, nil }, nil
-}
-
-func loadSamples(fsys fs.FS) ([]sample, error) {
-	entries, err := fs.ReadDir(fsys, "data")
-	if err != nil {
-		return nil, err
-	}
-	var samples []sample
-	for _, entry := range entries {
-		if entry.IsDir() || !isStructureFile(entry.Name()) {
-			continue
-		}
-		path := "data/" + entry.Name()
-		body, err := fs.ReadFile(fsys, path)
-		if err != nil {
-			return nil, err
-		}
-		item := parseSample(entry.Name(), string(body))
-		item.URL = "/" + path
-		item.SizeBytes = len(body)
-		samples = append(samples, item)
-	}
-	sort.Slice(samples, func(i, j int) bool {
-		return samples[i].ID < samples[j].ID
-	})
-	return samples, nil
 }
 
 func isStructureFile(filename string) bool {

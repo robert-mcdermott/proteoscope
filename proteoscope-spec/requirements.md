@@ -377,7 +377,7 @@ selection, distance measurement, and PNG export.
 
 #### Acceptance Criteria
 
-1. WHEN a prediction folder, an AlphaFold Server archive or a folder named on the command line is opened, THE System SHALL recognize AlphaFold 3, AlphaFold Server, Boltz, Chai-1 and ColabFold layouts and list the models ranked by the tool's score
+1. WHEN a prediction folder, an AlphaFold Server archive or a folder named on the command line is opened, THE System SHALL recognize AlphaFold 3 (including Zstandard-compressed output), AlphaFold Server, Boltz, Chai-1, ColabFold, Protenix and OpenFold3 layouts and list the models ranked by the tool's score
 2. WHEN a model has a PAE matrix, THE System SHALL report ipSAE, ipTM from PAE, pDockQ, pDockQ2 and LIS for every chain pair, following the reference definitions
 3. WHEN the predictor reports chain-pair ipTM, THE System SHALL show it as a chain-pair matrix, switchable to ipSAE and pDockQ2
 4. WHEN contact probabilities, per-atom ligand pLDDT or MSAs are present, THE System SHALL show them
@@ -414,3 +414,67 @@ selection, distance measurement, and PNG export.
 1. WHEN a BinaryCIF file is opened, THE System SHALL read it like PDBx/mmCIF
 2. WHEN a cached download is older than the maximum age, THE System SHALL fetch it again, and SHALL serve the cached copy if the fetch fails
 3. WHEN a session is saved, THE System SHALL include PAE matrices and contact probabilities opened by hand, prediction scores and MSA depth, and SHALL recompute SASA, PAE domains, validation and AlphaMissense on restore
+
+## Wave 5 Requirements
+
+### Requirement 32: Finding Structures
+
+**User Story:** As a researcher starting from a gene, I want to find every experimental structure and model of my protein, so that I can choose the best one to work with without visiting several websites.
+
+#### Acceptance Criteria
+
+1. WHEN a gene, protein name, UniProt accession, PDB ID, keywords or a sequence is searched, THE System SHALL query public services that need no account and list matching proteins, PDB entries or sequence hits
+2. WHEN a protein is chosen, THE System SHALL list its experimental structures with method, resolution, covered range and ligands, sortable, with a coverage track along the sequence, and its models from 3D-Beacons providers
+3. WHEN a listed structure or model is opened or added, THE System SHALL load it, superposing an added one onto the active structure
+4. THE System SHALL download models only from known provider hosts, cache search answers, and refuse to search when started offline
+
+### Requirement 33: Bundled Examples
+
+**User Story:** As a new user or teacher, I want curated examples that open with a view that shows their point, so that I can learn the tool and the biology offline.
+
+#### Acceptance Criteria
+
+1. THE System SHALL embed the examples as gzipped mmCIF and list them by category with a description and credit
+2. WHEN an example is opened, THE System SHALL run its opening view, starting from the default style
+3. WHEN the examples are compared (open and closed adenylate kinase, T and R hemoglobin), THE System SHALL set up the comparison offline
+
+### Requirement 34: Search-Engine Reports
+
+**User Story:** As a proteomics scientist, I want to open my search engine's report directly, so that my peptides, PTM sites and quantities appear on the structure without reformatting.
+
+#### Acceptance Criteria
+
+1. WHEN a MaxQuant, DIA-NN (TSV or Parquet), Spectronaut, FragPipe, mzTab or Proteome Discoverer report is opened, THE System SHALL recognize it, keep the rows of the structure's proteins and stream large files
+2. THE System SHALL read localization probabilities in each tool's notation, drop decoys and contaminants, and filter by q-value and localization thresholds
+3. THE System SHALL show coverage, counts, intensities or fold changes between sample groups on the structure, and list localized sites with CSV export
+4. WHEN public evidence is loaded, THE System SHALL mark each reported site as known or new
+
+### Requirement 35: Public Proteomics Evidence and Structural Context
+
+**User Story:** As a researcher interpreting PTM sites, I want public evidence and each site's structural context, so that I can judge whether a site is known, accessible and in an ordered region.
+
+#### Acceptance Criteria
+
+1. WHEN public evidence is requested, THE System SHALL fetch public peptides and modification sites for the structure's proteins and show coverage and sites by type
+2. WHEN exposure is computed, THE System SHALL report part-sphere exposure and disordered regions as StructureMap defines them, using the PAE when the model has one
+3. THE System SHALL expose exposure and disorder to coloring, the profile plot and the selection language
+
+### Requirement 36: Cross-Linking MS
+
+**User Story:** As a structural proteomics scientist, I want to open my cross-link search results and check them against the structure by the path a linker can take, so that I can tell real violations from artifacts of straight-line distances.
+
+#### Acceptance Criteria
+
+1. WHEN an export of xiFDR, xiVIEW, pLink, MeroX, XlinkX, MS Annika or MaxLynx is opened, THE System SHALL read unique residue pairs, leave out decoys and match proteins to chains
+2. WHEN surface distances are requested, THE System SHALL compute the solvent-accessible surface distance of every pair and report buried and out-of-range pairs
+3. THE System SHALL show the distance distribution against the cutoff and color links by it
+
+### Requirement 37: HDX-MS
+
+**User Story:** As an HDX-MS scientist, I want to open my uptake data and see significant differences on the structure, so that I can locate binding and conformational changes.
+
+#### Acceptance Criteria
+
+1. WHEN DynamX, HDExaminer or community-format HDX data is opened, THE System SHALL match peptides to the chain sequences and compute uptake per state and exposure
+2. WHEN two states are compared, THE System SHALL test each peptide's difference with the hybrid significance test when replicates are known, or with fixed thresholds otherwise
+3. THE System SHALL draw a Woods plot and color residues by the difference or uptake

@@ -33,6 +33,7 @@ export const COLOR_SCHEMES = [
   { id: 'densityfit', label: 'Fit to density (RSRZ / Q-score)', group: 'Quality' },
   { id: 'missense', label: 'AlphaMissense pathogenicity', group: 'Variants' },
   { id: 'exposure', label: 'Solvent exposure (relative SASA)', group: 'Analysis' },
+  { id: 'ppse', label: 'Part-sphere exposure (pPSE)', group: 'Analysis' },
   { id: 'coverage', label: 'Peptide coverage', group: 'Proteomics' },
   { id: 'data', label: 'Custom residue data', group: 'Proteomics' },
   { id: 'structure', label: 'Structure (one color each)', group: 'Comparison' },
@@ -165,6 +166,11 @@ function schemeColor(scheme, atom, residue, context) {
       if (!Number.isFinite(value)) return [...NEUTRAL];
       // Log scale: 1 sequence → red, about 30 → yellow, ≥ 1000 → blue.
       return sampleColormap('depth', Math.min(1, Math.log10(Math.max(1, value)) / 3));
+    }
+    case 'ppse': {
+      // Few neighbors in the side-chain cone: exposed (yellow); many: buried (purple).
+      const value = context.residueValues?.get(residue?.key);
+      return Number.isFinite(value) ? sampleColormap('viridis', 1 - Math.min(1, value / 25)) : [...NEUTRAL];
     }
     case 'exposure':
     case 'coverage':
@@ -357,6 +363,10 @@ function buildLegend(scheme, structure, settings, extras, range) {
         : { type: 'note', title: 'MSA depth', text: 'Open a prediction folder that includes its MSA.' };
     case 'exposure':
       return { type: 'gradient', title: 'Relative SASA', colormap: settings.colormap || 'viridis', minLabel: 'Buried', maxLabel: 'Exposed' };
+    case 'ppse':
+      return extras.residueValues
+        ? { type: 'gradient', title: 'Part-sphere exposure (pPSE)', colormap: 'viridis', minLabel: '≥ 25 buried', maxLabel: '0 exposed', note: 'Cα neighbors in a 12 Å, 70° cone · ≤ 5 highly exposed' }
+        : { type: 'note', title: 'pPSE', text: 'Compute part-sphere exposure in the Analysis tab.' };
     case 'coverage':
       return extras.residueValues
         ? { type: 'gradient', title: 'Peptides per residue', colormap: settings.colormap || 'heat', minLabel: String(Math.round(range.min)), maxLabel: String(Math.round(range.max)), note: 'Gray: not covered' }

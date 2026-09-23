@@ -353,3 +353,32 @@ the completed v0.1 application.
 
 - [x] 56. Documentation: README sections and screenshots, design, requirements, roadmap (wave 4, examples review, keyless databases)
   - _Requirements: 15, 28, 29, 30, 31_
+
+## Wave 5: bring your data, find public data
+
+- [x] 57. Bundled examples: 27 gzipped mmCIF entries, manifest with descriptions and opening views, gzip passthrough, grouped menu, `example` command, test data helper
+  - _Requirements: 33_
+
+- [x] 58. Discovery: RCSB text and sequence search, UniProt search, PDBe best structures and 3D-Beacons routes; Find structures panel with coverage track, sorting, Open and Add; model downloads from known providers; `search` command
+  - _Requirements: 32_
+
+- [x] 59. Search-report importers for MaxQuant, DIA-NN, Spectronaut, FragPipe, mzTab and Proteome Discoverer; Parquet, Zstandard and Snappy decoders; streaming; summaries, quantification modes and site table
+  - _Requirements: 34_
+
+- [x] 60. Public evidence route and panel (EBI Proteins API); known and new sites in reports; `evidence` command
+  - _Requirements: 34, 35_
+
+- [x] 61. Part-sphere exposure and disorder (StructureMap), PAE-aware; `ppse` scheme, profile and selection keywords; `exposure` command
+  - _Requirements: 35_
+
+- [x] 62. Cross-link importers for seven tools; solvent-accessible surface distances; distance histogram
+  - _Requirements: 36_
+
+- [x] 63. HDX-MS importers (DynamX, HDExaminer, community format), hybrid significance test, residue values, Woods plot
+  - _Requirements: 37_
+
+- [x] 64. Protenix and OpenFold3 prediction layouts, Zstandard-compressed AlphaFold 3 output, prediction folders' bookkeeping files, PDB-format prediction models; interface scores checked against `ipsae.py` on real outputs
+  - _Requirements: 28_
+
+- [x] 65. Documentation: README sections and screenshots, design, requirements, roadmap (wave 5)
+  - _Requirements: 15, 32, 33, 34, 35, 36, 37_

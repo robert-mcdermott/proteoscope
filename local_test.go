@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -127,8 +128,12 @@ func TestLoadLocalFolders(t *testing.T) {
 	writeTestFile(t, job, "job_model.cif", []byte("data_job\n"))
 	writeTestFile(t, job, "job_summary_confidences.json", []byte("{}"))
 	writeTestFile(t, filepath.Join(job, "seed-1_sample-0"), "model.cif.gz", gzipBytes(t, "data_s\n"))
+	// AlphaFold 3 --compress_large_output_files: served compressed, decompressed by the page.
+	zstd := []byte{0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x00}
+	writeTestFile(t, filepath.Join(job, "seed-1_sample-1"), "confidences.json.zst", zstd)
 	writeTestFile(t, filepath.Join(job, ".cache"), "hidden.cif", []byte("data_h\n"))
 	writeTestFile(t, job, "notes.txt", []byte("skip"))
+	writeTestFile(t, job, "notes.txt.zst", []byte("skip"))
 	single := writeTestFile(t, dir, "fold_x.zip", []byte("PK"))
 
 	files := loadLocalFiles([]string{job, single})
@@ -140,7 +145,8 @@ func TestLoadLocalFolders(t *testing.T) {
 		"job/job_model.cif|job_model.cif|/api/local/0",
 		"job/job_summary_confidences.json|job_summary_confidences.json|/api/local/1",
 		"job/seed-1_sample-0/model.cif|model.cif|/api/local/2",
-		"|fold_x.zip|/api/local/3",
+		"job/seed-1_sample-1/confidences.json.zst|confidences.json.zst|/api/local/3",
+		"|fold_x.zip|/api/local/4",
 	}
 	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("files:\n%s\nwant:\n%s", strings.Join(paths, "\n"), strings.Join(want, "\n"))
@@ -148,5 +154,8 @@ func TestLoadLocalFolders(t *testing.T) {
 	h := testHandler(t, &app{files: files})
 	if rec := get(h, "/api/local/2"); rec.Code != http.StatusOK || rec.Body.String() != "data_s\n" {
 		t.Fatalf("gzipped folder member: status %d body %q", rec.Code, rec.Body)
+	}
+	if rec := get(h, "/api/local/3"); rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), zstd) {
+		t.Fatalf("zstd folder member: status %d body %q", rec.Code, rec.Body)
 	}
 }

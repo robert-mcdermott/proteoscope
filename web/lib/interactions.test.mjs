@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { INTERACTION_TYPES, findInteractions, findInterfaceInteractions, perceiveRings } from './interactions.js';
 import { residueKindFromName } from './residues.js';
+import { examplePDB } from './test-data.mjs';
 
-const DATA = new URL('../../data/', import.meta.url);
 const COVALENT_RADII = {
   H: 0.31, D: 0.31, C: 0.76, N: 0.71, O: 0.66, S: 1.05, P: 1.07, SE: 1.2, F: 0.57, CL: 1.02, BR: 1.2, I: 1.39,
   FE: 1.32, ZN: 1.22, MG: 1.41, CA: 1.76, NA: 1.66, K: 2.03, MN: 1.39, CU: 1.32, CO: 1.26, NI: 1.24,
@@ -465,7 +464,7 @@ function inferBonds(atoms) {
 }
 
 function loadPDB(name) {
-  return parsePDB(readFileSync(new URL(`${name}.pdb`, DATA), 'utf8'));
+  return parsePDB(examplePDB(name));
 }
 
 function residue(resName, resSeq, chain, atoms) {

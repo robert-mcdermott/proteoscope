@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { parseMMCIF, parsePDB, parseStructure, tokenizeCIF } from './parse.js';
 import {
@@ -15,8 +14,8 @@ import { buildCartoon } from './cartoon.js';
 import { buildScene, focusNeighborhood } from './scene.js';
 import { computeAtomColors } from './coloring.js';
 import { inferElement } from './elements.js';
+import { exampleFiles, exampleText } from './test-data.mjs';
 
-const DATA_DIR = new URL('../../data/', import.meta.url);
 
 function derive(structure) {
   structure.baseModels = structure.models;
@@ -315,8 +314,7 @@ test('scene shows ligands in cartoon mode and side chains only around the focus'
 });
 
 test('per-residue styles add side-chain sticks on the cartoon and hidden residues disappear', async () => {
-  const text = await readFile(new URL('4hhb.pdb', DATA_DIR), 'utf8');
-  const structure = derive(parsePDB(text, '4hhb.pdb'));
+  const structure = derive(parseStructure(exampleText('4hhb'), '4hhb.cif'));
   const model = structure.models[0];
   const his = model.residueMap.get('A:87:HIS');
   const display = { polymer: 'cartoon', ligand: 'ball-stick', sidechains: 'none', showWater: false, showHydrogen: false, atomScale: 1, bondScale: 1, cartoonWidth: 1, cartoonQuality: 6, visibleChains: null };
@@ -337,11 +335,10 @@ test('per-residue styles add side-chain sticks on the cartoon and hidden residue
 });
 
 test('every bundled structure parses, derives and builds a cartoon', async () => {
-  const files = (await readdir(DATA_DIR)).filter((name) => /\.(pdb|cif)$/i.test(name));
-  assert.ok(files.length >= 10);
+  const files = exampleFiles();
+  assert.ok(files.length >= 20);
   for (const file of files) {
-    const text = await readFile(new URL(file, DATA_DIR), 'utf8');
-    const structure = derive(parseStructure(text, file));
+    const structure = derive(parseStructure(exampleText(file), file.replace(/\.gz$/, '')));
     const model = structure.models[0];
     assert.ok(model.atoms.length > 0, file);
     assert.ok(model.bonds.length > 0, file);
@@ -422,3 +419,29 @@ function blankPDBLine() {
 function writePDB(line, start, value) {
   for (let index = 0; index < value.length; index += 1) line[start + index] = value[index];
 }
+
+test('ModelCIF confidence on a 0–1 scale (SWISS-MODEL QMEANDisCo) is read as 0–100', () => {
+  const cif = [
+    'data_model',
+    'loop_',
+    '_ma_qa_metric.id', '_ma_qa_metric.name', '_ma_qa_metric.type', '_ma_qa_metric.mode',
+    "1 QMEANDisCo 'pLDDT all-atom in [0,1]' local",
+    "2 QMEANDisCo 'pLDDT all-atom in [0,1]' global",
+    'loop_',
+    '_ma_qa_metric_local.ordinal_id', '_ma_qa_metric_local.model_id', '_ma_qa_metric_local.label_asym_id', '_ma_qa_metric_local.label_seq_id',
+    '_ma_qa_metric_local.label_comp_id', '_ma_qa_metric_local.metric_id', '_ma_qa_metric_local.metric_value',
+    '1 1 A 1 THR 1 0.790',
+    '2 1 A 2 GLU 1 0.920',
+    'loop_',
+    '_atom_site.group_PDB', '_atom_site.id', '_atom_site.type_symbol', '_atom_site.label_atom_id', '_atom_site.label_comp_id',
+    '_atom_site.label_asym_id', '_atom_site.label_seq_id', '_atom_site.Cartn_x', '_atom_site.Cartn_y', '_atom_site.Cartn_z',
+    '_atom_site.B_iso_or_equiv', '_atom_site.auth_seq_id', '_atom_site.auth_asym_id',
+    'ATOM 1 C CA THR A 1 0.0 0.0 0.0 0.79 1 C',
+    'ATOM 2 C CA GLU A 2 3.8 0.0 0.0 0.92 2 C',
+  ].join('\n');
+  const structure = derive(parseStructure(cif, 'swissmodel.cif'));
+  const confidences = structure.models[0].residues.map((residue) => Math.round(residue.confidence));
+  assert.deepEqual(confidences, [79, 92]);
+  assert.equal(structure.meta.isPredicted, true);
+  assert.match(structure.meta.confidenceSource, /QMEANDisCo/);
+});

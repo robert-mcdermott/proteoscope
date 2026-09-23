@@ -1,6 +1,6 @@
 // Structure-prediction outputs: AlphaFold 3 (local runs and AlphaFold Server downloads), Boltz-1
-// and Boltz-2, Chai-1, and ColabFold. detectPredictionSets() groups files into ranked models by
-// their names alone; the parse functions read confidence files into one shape:
+// and Boltz-2, Chai-1, ColabFold, Protenix and OpenFold3. detectPredictionSets() groups files into
+// ranked models by their names alone; the parse functions read confidence files into one shape:
 //
 //   { rankingScore, ptm, iptm, chainIds, chainPtm, chainPairIptm, chainPairPaeMin,
 //     fractionDisordered, hasClash, complexPlddt, extra }
@@ -13,6 +13,8 @@ export const PREDICTION_TOOLS = {
   boltz: 'Boltz',
   chai: 'Chai-1',
   colabfold: 'ColabFold',
+  protenix: 'Protenix',
+  openfold3: 'OpenFold3',
 };
 
 function directory(path) {
@@ -34,11 +36,13 @@ function baseName(path) {
   return path.slice(path.lastIndexOf('/') + 1);
 }
 
-// Returns { sets, rest }: recognized prediction sets and the files that belong to none.
+// Returns { sets, rest }: recognized prediction sets and the files that belong to none. Each set
+// has a root, the folder its predictor wrote (empty for loose files); other files in it are the
+// predictor's logs, settings, templates and inputs.
 export function detectPredictionSets(files) {
   const used = new Set();
   const sets = [];
-  for (const detector of [detectServer, detectAF3, detectBoltz, detectChai, detectColabFold]) {
+  for (const detector of [detectServer, detectAF3, detectBoltz, detectChai, detectColabFold, detectProtenix, detectOpenFold3]) {
     for (const set of detector(files.filter((file) => !used.has(file)))) {
       for (const file of set.files) used.add(file);
       sets.push(set);
@@ -47,15 +51,20 @@ export function detectPredictionSets(files) {
   return { sets, rest: files.filter((file) => !used.has(file)) };
 }
 
-function makeSet(tool, name, models, files, extras = {}) {
-  return { tool, toolLabel: PREDICTION_TOOLS[tool], name, models, files, ...extras };
+// Whether a file lies inside the folder of one of the sets.
+export function insidePredictionFolder(file, sets) {
+  return sets.some((set) => set.root && file.path.startsWith(`${set.root}/`));
+}
+
+function makeSet(tool, name, root, models, files, extras = {}) {
+  return { tool, toolLabel: PREDICTION_TOOLS[tool], name, root, models, files, ...extras };
 }
 
 // AlphaFold Server: fold_<name>_model_<i>.cif with fold_<name>_full_data_<i>.json and
 // fold_<name>_summary_confidences_<i>.json; model 0 ranks first.
 function detectServer(files) {
   const sets = [];
-  for (const [, group] of byDirectory(files)) {
+  for (const [dir, group] of byDirectory(files)) {
     const jobs = new Map();
     for (const file of group) {
       const match = baseName(file.path).match(/^(fold_.+)_(model|full_data|summary_confidences)_(\d+)\.(cif|json)$/i);
@@ -71,7 +80,7 @@ function detectServer(files) {
       if (!list.length) continue;
       const request = group.find((file) => baseName(file.path).toLowerCase() === `${job.toLowerCase()}_job_request.json`);
       const setFiles = [...list.flatMap(([, item]) => [item.model, item.full_data, item.summary_confidences]), request].filter(Boolean);
-      sets.push(makeSet('server', job.replace(/^fold_/i, ''), list.map(([index, item]) => ({
+      sets.push(makeSet('server', job.replace(/^fold_/i, ''), dir, list.map(([index, item]) => ({
         id: `model-${index}`,
         label: `Model ${index}`,
         order: Number(index),
@@ -122,7 +131,7 @@ function detectAF3(files) {
     if (!models.length && top.structure) models = [{ id: 'top', label: 'Top model', order: 0, files: { structure: top.structure, confidences: top.confidences ?? null, summary } }];
     if (!models.length) continue;
     const setFiles = [top.structure, top.confidences, summary, ranking, data, ...models.flatMap((model) => Object.values(model.files))].filter(Boolean);
-    sets.push(makeSet('af3', job, models, [...new Set(setFiles)], { data, ranking }));
+    sets.push(makeSet('af3', job, dir, models, [...new Set(setFiles)], { data, ranking }));
   }
   return sets;
 }
@@ -150,7 +159,9 @@ function detectBoltz(files) {
       const msaDir = directory(directory(dir));
       const msas = files.filter((item) => directory(item.path) === `${msaDir ? `${msaDir}/` : ''}msa` && /\.(a3m|csv)$/i.test(item.path) && baseName(item.path).startsWith(name));
       const setFiles = [...models.flatMap((model) => Object.values(model.files)), affinity, ...msas].filter(Boolean);
-      sets.push(makeSet('boltz', name, models, setFiles, { affinity, msas }));
+      // boltz_results_<input>/predictions/<name>/ sits beside processed/ and msa/.
+      const root = baseName(directory(dir)) === 'predictions' ? msaDir : dir;
+      sets.push(makeSet('boltz', name, root, models, setFiles, { affinity, msas }));
     }
   }
   return sets;
@@ -177,7 +188,7 @@ function detectChai(files) {
     if (!models.length) continue;
     models.sort((a, b) => a.order - b.order);
     const setFiles = models.flatMap((model) => Object.values(model.files)).filter(Boolean);
-    sets.push(makeSet('chai', baseName(dir) || 'Chai-1', models, setFiles));
+    sets.push(makeSet('chai', baseName(dir) || 'Chai-1', dir, models, setFiles));
   }
   return sets;
 }
@@ -186,7 +197,7 @@ function detectChai(files) {
 // <name>_scores_rank_<r>_<model>.json; relaxed structures win over unrelaxed ones.
 function detectColabFold(files) {
   const sets = [];
-  for (const [, group] of byDirectory(files)) {
+  for (const [dir, group] of byDirectory(files)) {
     const jobs = new Map();
     for (const file of group) {
       const match = baseName(file.path).match(/^(.+?)_(unrelaxed|relaxed)_rank_(\d+)_(.+)\.(pdb|cif)$/i);
@@ -213,8 +224,78 @@ function detectColabFold(files) {
       for (const file of group) {
         if (new RegExp(`^${escapeRegExp(name)}_(unrelaxed|relaxed)_rank_`).test(baseName(file.path))) setFiles.push(file);
       }
-      sets.push(makeSet('colabfold', name, models, [...new Set(setFiles)], { msas: a3m ? [a3m] : [] }));
+      sets.push(makeSet('colabfold', name, dir, models, [...new Set(setFiles)], { msas: a3m ? [a3m] : [] }));
     }
+  }
+  return sets;
+}
+
+// Protenix: <name>/seed_<seed>/predictions/<name>_sample_<rank>.cif with
+// <name>_summary_confidence_sample_<rank>.json and, when run with --need_atom_confidence,
+// <name>_full_data_sample_<rank>.json. Samples are numbered by rank within each seed.
+function detectProtenix(files) {
+  return detectSamples(files, 'protenix', {
+    structure: /^(.+)_sample_(\d+)\.(cif|pdb|bcif)$/i,
+    summary: (name, sample) => `${name}_summary_confidence_sample_${sample}.json`,
+    confidences: (name, sample) => [`${name}_full_data_sample_${sample}.json`],
+    seedFolder: (dir) => (/^predictions$/i.test(baseName(dir)) ? directory(dir) : null),
+  });
+}
+
+// OpenFold3: <query>/seed_<seed>/<query>_seed_<seed>_sample_<k>_model.cif (or .pdb) with
+// <prefix>_confidences_aggregated.json and, when full confidences are written,
+// <prefix>_confidences.json (or .npz). Some services drop the seed from the names.
+function detectOpenFold3(files) {
+  return detectSamples(files, 'openfold3', {
+    structure: /^(.+?)(?:_seed_(\d+))?_sample_(\d+)_model\.(cif|pdb|bcif)$/i,
+    summary: (prefix) => `${prefix}_confidences_aggregated.json`,
+    confidences: (prefix) => [`${prefix}_confidences.json`, `${prefix}_confidences.npz`],
+    seedFolder: (dir) => dir,
+    seedInName: true,
+  });
+}
+
+// Groups the samples of Protenix and OpenFold3 runs: one set per job name, across seed folders
+// (seed_<seed>/), with a model for each structure whose summary file is present.
+function detectSamples(files, tool, pattern) {
+  const byName = new Map(files.map((file) => [file.path.toLowerCase(), file]));
+  const find = (dir, name) => byName.get(`${dir ? `${dir}/` : ''}${name}`.toLowerCase()) ?? null;
+  const jobs = new Map();
+  for (const file of files) {
+    const match = baseName(file.path).match(pattern.structure);
+    if (!match) continue;
+    const name = match[1];
+    // Companion files repeat the sample number as written (zero-padded or not).
+    const sampleText = pattern.seedInName ? match[3] : match[2];
+    const sample = Number(sampleText);
+    const dir = directory(file.path);
+    const prefix = baseName(file.path).replace(/_model\.(cif|pdb|bcif)$/i, '');
+    const summary = find(dir, pattern.seedInName ? pattern.summary(prefix) : pattern.summary(name, sampleText));
+    if (!summary) continue;
+    const confidences = (pattern.seedInName ? pattern.confidences(prefix) : pattern.confidences(name, sampleText)).map((item) => find(dir, item)).find(Boolean) ?? null;
+    // The seed comes from the name (OpenFold3) or from the seed_<seed> folder around the files.
+    const folder = pattern.seedFolder(dir);
+    const seedMatch = folder !== null ? baseName(folder).match(/^seed_(\d+)$/i) : null;
+    const seedText = pattern.seedInName ? match[2] : seedMatch?.[1];
+    const root = seedMatch ? directory(folder) : dir;
+    const key = `${root}|${name}`;
+    if (!jobs.has(key)) jobs.set(key, { name, root, models: [] });
+    const seed = seedText === undefined ? null : Number(seedText);
+    jobs.get(key).models.push({
+      id: seed === null ? `sample-${sample}` : `seed-${seed}_sample-${sample}`,
+      label: seed === null ? `Sample ${sample}` : `Seed ${seed} · sample ${sample}`,
+      seed,
+      sample,
+      files: { structure: file, summary, confidences },
+    });
+  }
+  const sets = [];
+  for (const { name, root, models } of jobs.values()) {
+    models.sort((a, b) => (a.seed ?? 0) - (b.seed ?? 0) || a.sample - b.sample);
+    models.forEach((model, order) => {
+      model.order = order;
+    });
+    sets.push(makeSet(tool, name, root, models, models.flatMap((model) => Object.values(model.files)).filter(Boolean)));
   }
   return sets;
 }
@@ -226,6 +307,20 @@ function escapeRegExp(text) {
 /* ---------- Confidence files ---------- */
 
 const number = (value) => (Number.isFinite(Number(value)) && value !== null && value !== '' ? Number(value) : NaN);
+
+// PAE entries a predictor left undefined (NaN) count as AlphaFold's largest error bin.
+export const MISSING_PAE = 31.75;
+
+// Python's json module writes NaN and Infinity as bare words, which JSON.parse rejects; they are
+// read as null.
+export function parsePredictionJSON(text) {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    if (!/\b(NaN|Infinity)\b/.test(text)) throw error;
+    return JSON.parse(text.replace(/([:\[,]\s*)-?(?:NaN|Infinity)(?=\s*[,\]}])/g, '$1null'));
+  }
+}
 
 // AlphaFold 3 and AlphaFold Server summary_confidences.
 export function parseAF3Summary(json) {
@@ -249,7 +344,7 @@ function matrixOf(value) {
 // AlphaFold 3 confidences (full_data for the Server): PAE over tokens, token chain ids and residue
 // numbers, per-atom pLDDT and contact probabilities.
 export function parseAF3Confidences(json) {
-  const pae = flatSquare(json.pae);
+  const pae = flatSquare(json.pae, MISSING_PAE);
   return {
     pae,
     tokenChainIds: Array.isArray(json.token_chain_ids) ? json.token_chain_ids.map(String) : null,
@@ -260,13 +355,17 @@ export function parseAF3Confidences(json) {
   };
 }
 
-export function flatSquare(rows) {
+// A square array of rows as { size, matrix }; missing and non-finite entries become `fill`.
+export function flatSquare(rows, fill = 0) {
   if (!Array.isArray(rows) || !rows.length || !Array.isArray(rows[0]) || rows[0].length !== rows.length) return null;
   const size = rows.length;
   const matrix = new Float32Array(size * size);
   for (let row = 0; row < size; row += 1) {
     const values = rows[row];
-    for (let column = 0; column < size; column += 1) matrix[row * size + column] = Number(values[column]) || 0;
+    for (let column = 0; column < size; column += 1) {
+      const value = values?.[column];
+      matrix[row * size + column] = value === null || value === undefined || !Number.isFinite(Number(value)) ? fill : Number(value);
+    }
   }
   return { size, matrix };
 }
@@ -343,9 +442,62 @@ export function parseColabFoldScores(json) {
     ptm,
     iptm,
     complexPlddt: meanPlddt,
-    pae: flatSquare(json.pae ?? json.predicted_aligned_error),
+    pae: flatSquare(json.pae ?? json.predicted_aligned_error, MISSING_PAE),
     plddt,
   };
+}
+
+// Protenix <name>_summary_confidence_sample_<k>.json: AlphaFold 3's summary keys, with the fraction
+// disordered as "disorder", mean pLDDT (0–100) and the global PDE.
+export function parseProtenixSummary(json) {
+  return {
+    ...parseAF3Summary(json),
+    fractionDisordered: number(json.disorder),
+    complexPlddt: number(json.plddt),
+    extra: { gpde: number(json.gpde) },
+  };
+}
+
+// Protenix <name>_full_data_sample_<k>.json: the token-pair PAE and contact probabilities.
+export function parseProtenixFullData(json) {
+  return {
+    pae: flatSquare(json.token_pair_pae, MISSING_PAE),
+    contactProbs: flatSquare(json.contact_probs),
+  };
+}
+
+// OpenFold3 <prefix>_confidences_aggregated.json. Chain scores are keyed by chain id ("A", and
+// "(A, B)" for pairs), so the result names its chains in chainIds.
+export function parseOpenFold3Aggregated(json) {
+  const perChain = json.chain_ptm && typeof json.chain_ptm === 'object' && !Array.isArray(json.chain_ptm) ? json.chain_ptm : null;
+  const chainIds = perChain ? Object.keys(perChain) : null;
+  let chainPairIptm = null;
+  if (chainIds && json.chain_pair_iptm && typeof json.chain_pair_iptm === 'object') {
+    const pairs = new Map();
+    for (const [key, value] of Object.entries(json.chain_pair_iptm)) {
+      const [a, b] = key.replace(/[()\s]/g, '').split(',');
+      pairs.set(`${a}|${b}`, number(value));
+      if (!pairs.has(`${b}|${a}`)) pairs.set(`${b}|${a}`, number(value));
+    }
+    chainPairIptm = chainIds.map((a) => chainIds.map((b) => (a === b ? number(perChain[a]) : pairs.get(`${a}|${b}`) ?? NaN)));
+  }
+  return {
+    rankingScore: number(json.sample_ranking_score),
+    ptm: number(json.ptm),
+    iptm: number(json.iptm),
+    chainIds,
+    chainPtm: chainIds ? chainIds.map((id) => number(perChain[id])) : null,
+    chainPairIptm,
+    fractionDisordered: number(json.disorder),
+    hasClash: json.has_clash === undefined ? null : Boolean(Number(json.has_clash)),
+    complexPlddt: number(json.avg_plddt),
+    extra: { gpde: number(json.gpde) },
+  };
+}
+
+// OpenFold3 <prefix>_confidences.json: per-atom pLDDT, PDE and the token PAE.
+export function parseOpenFold3Confidences(json) {
+  return { pae: flatSquare(json.pae, MISSING_PAE) };
 }
 
 /* ---------- Tokens ---------- */

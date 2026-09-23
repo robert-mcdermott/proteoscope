@@ -21,10 +21,16 @@ export const COMMANDS = [
   { name: 'unlabel', aliases: [], syntax: 'unlabel [<selection>]', summary: 'Remove labels' },
   { name: 'fetch', aliases: ['open', 'load'], syntax: 'fetch <PDB ID|UniProt accession>', summary: 'Fetch a structure, replacing the scene' },
   { name: 'add', aliases: [], syntax: 'add <PDB ID|UniProt accession>', summary: 'Fetch a structure and add it to the scene' },
+  { name: 'search', aliases: ['lookup', 'discover'], syntax: 'search <gene|protein|UniProt|keywords|sequence>', summary: 'Find structures and models in RCSB PDB, UniProt, PDBe and 3D-Beacons' },
+  { name: 'example', aliases: ['examples', 'sample', 'demo'], syntax: 'example [add] [<id>]', summary: 'Open a bundled example with its opening view (add: next to the open structures, without the view), or list them' },
   { name: 'remove', aliases: ['delete', 'close'], syntax: 'remove <structure>', summary: 'Remove a structure from the scene' },
   { name: 'activate', aliases: ['use'], syntax: 'activate <structure>', summary: 'Make a structure the active one' },
   { name: 'superpose', aliases: ['super', 'align', 'matchmaker', 'mm'], syntax: 'superpose <moving|all> [onto <reference>] [fit <selection>]', summary: 'Superpose structures and report RMSD, TM-score and lDDT' },
   { name: 'alphafold', aliases: ['af'], syntax: 'alphafold', summary: 'Compare the active structure with its AlphaFold DB model' },
+  { name: 'assembly', aliases: ['assemblies', 'biounit'], syntax: 'assembly [<id>|au]', summary: 'Build a biological assembly of the active structure (au: the asymmetric unit), or list them' },
+  { name: 'evidence', aliases: ['public', 'peptideatlas'], syntax: 'evidence', summary: 'Load public peptides and PTM sites (EBI Proteins API) and color their coverage' },
+  { name: 'exposure', aliases: ['ppse', 'structuremap'], syntax: 'exposure', summary: 'Part-sphere exposure (pPSE) and disorder as in StructureMap, and color by pPSE' },
+  { name: 'interface', aliases: ['contacts'], syntax: 'interface <chain> <chain>', summary: 'List the contacts between two chains and frame their interface' },
   { name: 'overlay', aliases: [], syntax: 'overlay [on|off]', summary: 'Overlay all models of an ensemble' },
   { name: 'ranking', aliases: ['models', 'predictions'], syntax: 'ranking [<rank>]', summary: 'List the models of an opened prediction, or show the one at a rank' },
   { name: 'domains', aliases: ['paedomains'], syntax: 'domains', summary: 'Find rigid domains in the PAE matrix and color by them' },
@@ -138,6 +144,24 @@ export function parseCommand(text, options = {}) {
     case 'add':
       if (words.length !== 1) throw new CommandError(`Usage: ${command.syntax}`);
       return { ...parsed, id: words[0] };
+    case 'search':
+      if (!rest) throw new CommandError(`Usage: ${command.syntax}`);
+      return { ...parsed, query: rest };
+    case 'example': {
+      const add = words[0]?.toLowerCase() === 'add';
+      const ids = add ? words.slice(1) : words;
+      if (ids.length > 1 || (add && !ids.length)) throw new CommandError(`Usage: ${command.syntax}`);
+      return { ...parsed, add, id: ids[0] ?? null };
+    }
+    case 'assembly':
+      if (words.length > 1) throw new CommandError(`Usage: ${command.syntax}`);
+      return { ...parsed, assembly: words[0] ?? null };
+    case 'interface': {
+      // "A B", "/A /B", "A,B" and "A:B" all name two chains.
+      const chains = rest.split(/[\s,:/]+/).filter(Boolean);
+      if (chains.length !== 2) throw new CommandError(`Usage: ${command.syntax}, for example "interface A B".`);
+      return { ...parsed, chains };
+    }
     case 'remove':
     case 'activate':
       if (!rest) throw new CommandError(`Usage: ${command.syntax}`);
@@ -204,7 +228,9 @@ export function parseCommand(text, options = {}) {
     case 'help':
       return { ...parsed, topic: words[0]?.toLowerCase() ?? null };
     default:
-      return parsed;
+      // Commands without arguments share words with selection keywords ("msa", "ppse",
+      // "exposure"): followed by more words, the text is a selection such as "msa < 30".
+      return words.length ? null : parsed;
   }
 }
 

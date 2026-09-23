@@ -1,0 +1,250 @@
+{
+  "about": "Bundled examples, in menu order. Each file is the RCSB PDB mmCIF (anisotropic displacement parameters removed to save space) or an AlphaFold DB model, gzipped. \"view\" lists the commands that set up the opening view when the example is chosen from the menu.",
+  "examples": [
+    {
+      "id": "1m17",
+      "file": "1m17.cif.gz",
+      "label": "EGFR kinase with erlotinib",
+      "category": "Drugs and their targets",
+      "description": "Erlotinib (Tarceva), a lung-cancer drug, in the ATP site of the EGFR kinase domain. Opens on the binding site with its hydrogen bonds and contacts.",
+      "view": ["focus :AQ4"],
+      "credit": "Stamos et al., J Biol Chem 2002"
+    },
+    {
+      "id": "2hyy",
+      "file": "2hyy.cif.gz",
+      "label": "ABL kinase with imatinib",
+      "category": "Drugs and their targets",
+      "description": "Imatinib (Gleevec) bound to the inactive, DFG-out ABL kinase: the drug that made chronic myeloid leukemia a manageable disease.",
+      "view": ["focus /A and :STI"],
+      "credit": "Cowan-Jacob et al., Acta Cryst D 2007"
+    },
+    {
+      "id": "3og7",
+      "file": "3og7.cif.gz",
+      "label": "BRAF V600E with vemurafenib",
+      "category": "Drugs and their targets",
+      "description": "Vemurafenib (PLX4032) in the kinase domain of BRAF V600E, the driver mutation of half of all melanomas. The drug occupies chain A; the mutant Glu600 is modeled in chain B.",
+      "view": ["focus :032"],
+      "credit": "Bollag et al., Nature 2010"
+    },
+    {
+      "id": "6oim",
+      "file": "6oim.cif.gz",
+      "label": "KRAS G12C with sotorasib",
+      "category": "Drugs and their targets",
+      "description": "Sotorasib (AMG 510), the first approved KRAS drug, bonded covalently to Cys12 of KRAS G12C next to GDP and Mg²⁺.",
+      "view": ["focus :MOV", "label /A:12"],
+      "credit": "Canon et al., Nature 2019"
+    },
+    {
+      "id": "8gub",
+      "file": "8gub.cif.gz",
+      "label": "PI3Kα H1047R with alpelisib",
+      "category": "Drugs and their targets",
+      "description": "Cryo-EM structure of the oncogenic PI3Kα H1047R mutant with its regulatory subunit p85α and alpelisib (BYL-719), a breast-cancer drug.",
+      "view": ["focus :1LT", "label /A:1047"],
+      "credit": "Liu et al., PNAS 2022"
+    },
+    {
+      "id": "6vei",
+      "file": "6vei.cif.gz",
+      "label": "IDH1 R132H with vorasidenib",
+      "category": "Drugs and their targets",
+      "description": "Mutant IDH1 R132H, which makes the oncometabolite 2-hydroxyglutarate, with NADPH and vorasidenib (approved for glioma in 2024) in the allosteric pocket at the dimer interface.",
+      "view": ["focus :9UO"],
+      "credit": "Konteatis et al., ACS Med Chem Lett 2020"
+    },
+    {
+      "id": "7kk4",
+      "file": "7kk4.cif.gz",
+      "label": "PARP1 with olaparib",
+      "category": "Drugs and their targets",
+      "description": "Olaparib (Lynparza), a PARP inhibitor for BRCA-mutated cancers, in the nicotinamide pocket of the PARP1 catalytic domain.",
+      "view": ["focus /A and :09L"],
+      "credit": "Ryan et al., J Biol Chem 2021"
+    },
+    {
+      "id": "8ef5",
+      "file": "8ef5.cif.gz",
+      "label": "μ-opioid receptor with fentanyl",
+      "category": "Drugs and their targets",
+      "description": "Cryo-EM structure of fentanyl in the μ-opioid receptor, a G protein-coupled receptor, coupled to the Gi heterotrimer (with scFv16 used to stabilize it).",
+      "view": ["focus /R and :7V7"],
+      "credit": "Zhuang et al., Cell 2022"
+    },
+    {
+      "id": "5t35",
+      "file": "5t35.cif.gz",
+      "label": "PROTAC MZ1 bridging BRD4 and VHL",
+      "category": "Targeted protein degradation",
+      "description": "The PROTAC MZ1 joins the second bromodomain of BRD4 to the VHL E3 ligase. The new protein–protein contacts it induces explain its selectivity for BRD4.",
+      "view": ["focus /D and resn 759"],
+      "credit": "Gadd et al., Nat Chem Biol 2017"
+    },
+    {
+      "id": "5fqd",
+      "file": "5fqd.cif.gz",
+      "label": "Lenalidomide gluing CK1α to cereblon",
+      "category": "Targeted protein degradation",
+      "description": "The molecular glue lenalidomide binds cereblon (with DDB1) and creates a surface that recruits casein kinase 1α for degradation, the basis of its activity in del(5q) myelodysplastic syndrome.",
+      "view": ["focus /B and :LVY"],
+      "credit": "Petzold et al., Nature 2016"
+    },
+    {
+      "id": "4zqk",
+      "file": "4zqk.cif.gz",
+      "label": "PD-1 with PD-L1",
+      "category": "Antibodies and immune recognition",
+      "description": "The immune checkpoint receptor PD-1 bound to its ligand PD-L1, the interaction that checkpoint immunotherapies block.",
+      "view": ["interface A B"],
+      "credit": "Zak et al., Structure 2015"
+    },
+    {
+      "id": "5xxy",
+      "file": "5xxy.cif.gz",
+      "label": "Atezolizumab Fab with PD-L1",
+      "category": "Antibodies and immune recognition",
+      "description": "The therapeutic antibody atezolizumab bound to PD-L1. Add 4ZQK and superpose PD-L1 to see the Fab cover the PD-1 binding site.",
+      "view": ["interface A H"],
+      "credit": "Zhang et al., Oncotarget 2017"
+    },
+    {
+      "id": "1n8z",
+      "file": "1n8z.cif.gz",
+      "label": "Trastuzumab Fab with HER2",
+      "category": "Antibodies and immune recognition",
+      "description": "The Fab of trastuzumab (Herceptin) bound to domain IV of the HER2 extracellular region, the target in HER2-positive breast cancer.",
+      "view": ["interface C B"],
+      "credit": "Cho et al., Nature 2003"
+    },
+    {
+      "id": "7ow6",
+      "file": "7ow6.cif.gz",
+      "label": "T-cell receptor with a KRAS G12D neoantigen",
+      "category": "Antibodies and immune recognition",
+      "description": "A high-affinity T-cell receptor recognizing the KRAS G12D peptide VVVGADGVGK presented by HLA-A*11:01.",
+      "view": ["focus /C", "label /C:6"],
+      "credit": "Poole et al., Nat Commun 2022"
+    },
+    {
+      "id": "1tup",
+      "file": "1tup.cif.gz",
+      "label": "p53 DNA-binding domain on DNA",
+      "category": "DNA, chromatin and gene editing",
+      "description": "The p53 core domain on its DNA response element. The most frequent cancer mutations (R175, R248, R273) are shown; R248 and R273 contact the DNA directly.",
+      "view": ["show sticks /B:175+248+273", "label /B:175+248+273", "zoom /B"],
+      "credit": "Cho et al., Science 1994"
+    },
+    {
+      "id": "1ycr",
+      "file": "1ycr.cif.gz",
+      "label": "MDM2 with the p53 transactivation peptide",
+      "category": "DNA, chromatin and gene editing",
+      "description": "The p53 transactivation helix in the MDM2 pocket. Phe19, Trp23 and Leu26 are the anchors that MDM2 inhibitors such as nutlins mimic.",
+      "view": ["focus /B", "label /B:19+23+26"],
+      "credit": "Kussie et al., Science 1996"
+    },
+    {
+      "id": "1t29",
+      "file": "1t29.cif.gz",
+      "label": "BRCA1 BRCT repeats with a phosphopeptide",
+      "category": "DNA, chromatin and gene editing",
+      "description": "The tandem BRCT repeats of BRCA1 recognizing a BACH1 peptide phosphorylated on Ser990 (residue 6 of chain B); cancer mutations here disrupt phosphopeptide binding.",
+      "view": ["focus /B", "label /B:6"],
+      "credit": "Shiozaki et al., Mol Cell 2004"
+    },
+    {
+      "id": "7lyb",
+      "file": "7lyb.cif.gz",
+      "label": "Nucleosome with BRCA1–BARD1",
+      "category": "DNA, chromatin and gene editing",
+      "description": "Cryo-EM structure of the BRCA1–BARD1 RING heterodimer with the E2 enzyme UbcH5c bound to a nucleosome, positioned to ubiquitylate histone H2A.",
+      "view": [],
+      "credit": "Hu et al., Nature 2021"
+    },
+    {
+      "id": "4oo8",
+      "file": "4oo8.cif.gz",
+      "label": "Cas9 with guide RNA and target DNA",
+      "category": "DNA, chromatin and gene editing",
+      "description": "Streptococcus pyogenes Cas9 with its single-guide RNA and target DNA strand; the RNA–DNA heteroduplex sits in a positively charged groove. The crystal holds two complexes; the view shows the first.",
+      "view": ["hide /D,E,F", "zoom /A,B,C"],
+      "credit": "Nishimasu et al., Cell 2014"
+    },
+    {
+      "id": "4ake",
+      "file": "4ake.cif.gz",
+      "label": "Adenylate kinase, open and closed",
+      "category": "Conformational change",
+      "description": "Open, substrate-free adenylate kinase (4AKE) with the closed form (1AKE) superposed on the CORE domain of chain A and colored by deviation: the LID and NMP domains swing shut over the substrates.",
+      "view": ["example add 1ake", "superpose 1ake onto 4ake fit /A:1-29+60-121+160-214", "hide /B", "color deviation", "activate 4ake", "zoom /A"],
+      "credit": "Müller et al., Structure 1996; Müller & Schulz, J Mol Biol 1992"
+    },
+    {
+      "id": "1ake",
+      "file": "1ake.cif.gz",
+      "label": "Adenylate kinase with Ap5A (closed)",
+      "category": "Conformational change",
+      "description": "The closed state of adenylate kinase trapping the bisubstrate inhibitor Ap5A between its LID and NMP domains.",
+      "view": ["focus /A and :AP5"],
+      "credit": "Müller & Schulz, J Mol Biol 1992"
+    },
+    {
+      "id": "4hhb",
+      "file": "4hhb.cif.gz",
+      "label": "Hemoglobin, deoxy and oxy",
+      "category": "Conformational change",
+      "description": "Deoxyhemoglobin (T state, 4HHB) with oxyhemoglobin (R state, the 1HHO tetramer) superposed on one αβ dimer: the other dimer shows the quaternary rotation of the T→R transition.",
+      "view": ["example add 1hho", "assembly 1", "superpose 1hho onto 4hhb fit /A,B", "color deviation", "activate 4hhb"],
+      "credit": "Fermi et al., J Mol Biol 1984; Shaanan, J Mol Biol 1983"
+    },
+    {
+      "id": "1hho",
+      "file": "1hho.cif.gz",
+      "label": "Oxyhemoglobin",
+      "category": "Conformational change",
+      "description": "Oxyhemoglobin with O₂ bound to each heme. The crystal holds one αβ dimer; the view builds the biological tetramer (assembly 1).",
+      "view": ["assembly 1", "focus /A.1 and :HEM"],
+      "credit": "Shaanan, J Mol Biol 1983"
+    },
+    {
+      "id": "1jm7",
+      "file": "1jm7.cif.gz",
+      "label": "BRCA1–BARD1 RING domains (NMR ensemble)",
+      "category": "Conformational change",
+      "description": "Twenty NMR models of the BRCA1–BARD1 RING heterodimer, overlaid and colored by RMSF: the zinc-binding cores are well defined and the termini are flexible.",
+      "view": ["overlay on", "color rmsf"],
+      "credit": "Brzovic et al., Nat Struct Biol 2001"
+    },
+    {
+      "id": "af-p04637-f1",
+      "file": "AF-P04637-F1-model_v6.cif.gz",
+      "pae": "AF-P04637-F1-predicted_aligned_error_v6.json.gz",
+      "accession": "P04637",
+      "label": "p53, AlphaFold prediction",
+      "category": "Predicted structures",
+      "description": "AlphaFold DB model of full-length human p53 with its predicted aligned error: confident DNA-binding and tetramerization domains, disordered termini. Compare it with 1TUP, or find its PAE domains.",
+      "view": [],
+      "credit": "AlphaFold DB (Jumper et al., Nature 2021; Varadi et al., Nucleic Acids Res 2024), CC BY 4.0"
+    },
+    {
+      "id": "6vxx",
+      "file": "6vxx.cif.gz",
+      "label": "SARS-CoV-2 spike, closed",
+      "category": "Viruses and assemblies",
+      "description": "Cryo-EM structure of the prefusion SARS-CoV-2 spike trimer with its N-linked glycans, the antigen of COVID-19 vaccines.",
+      "view": [],
+      "credit": "Walls et al., Cell 2020"
+    },
+    {
+      "id": "1lp3",
+      "file": "1lp3.cif.gz",
+      "label": "AAV2 capsid",
+      "category": "Viruses and assemblies",
+      "description": "The adeno-associated virus 2 capsid, a gene-therapy vector. The file holds one VP3 subunit; the view builds the 60-subunit icosahedral shell (assembly 1, 249,000 atoms), each subunit colored N → C.",
+      "view": ["assembly 1", "color rainbow"],
+      "credit": "Xie et al., PNAS 2002"
+    }
+  ]
+}

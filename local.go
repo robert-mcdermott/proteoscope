@@ -92,9 +92,14 @@ func localFolder(dir string, start int) []localFile {
 }
 
 // Structures plus the files predictors write next to them: confidence JSON, NumPy arrays,
-// alignments, ranking tables, BinaryCIF and ZIP archives (AlphaFold Server downloads).
+// alignments, ranking tables, BinaryCIF and ZIP archives (AlphaFold Server downloads). Gzip files
+// are decompressed here; Zstandard files (AlphaFold 3's --compress_large_output_files) are served
+// as they are and decompressed by the page.
 func isLocalFile(name string) bool {
 	base := trimGzip(name)
+	if strings.EqualFold(filepath.Ext(base), ".zst") {
+		base = base[:len(base)-len(".zst")]
+	}
 	if isStructureFile(base) {
 		return true
 	}
@@ -108,7 +113,7 @@ func isLocalFile(name string) bool {
 
 func localStructure(name string, index int) (localFile, error) {
 	if !isLocalFile(name) {
-		return localFile{}, errors.New("unsupported file type (expected .pdb, .cif, .bcif, .json, .zip … optionally .gz, or a folder)")
+		return localFile{}, errors.New("unsupported file type (expected .pdb, .cif, .bcif, .json, .zip … optionally .gz or .zst, or a folder)")
 	}
 	abs, err := filepath.Abs(name)
 	if err != nil {

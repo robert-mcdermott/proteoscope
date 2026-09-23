@@ -3,18 +3,25 @@ import test from 'node:test';
 import { parseStructure } from './parse.js';
 import { deriveStructure } from './structure.js';
 import {
+  MISSING_PAE,
   detectPredictionSets,
   flatSquare,
+  insidePredictionFolder,
   modelTokens,
   parseAF3Confidences,
   parseAF3Summary,
   parseBoltzConfidence,
   parseChaiScores,
   parseColabFoldScores,
+  parseOpenFold3Aggregated,
+  parsePredictionJSON,
+  parseProtenixFullData,
+  parseProtenixSummary,
   rankModels,
   tokensForPAE,
 } from './predictions.js';
 import { interfaceScores, pDockQ, tmD0 } from './interface-scores.js';
+import { examplePDB } from './test-data.mjs';
 
 const file = (path) => ({ path, name: path.split('/').pop() });
 const paths = (set) => set.models.map((model) => [model.id, model.files.structure.path]);
@@ -37,12 +44,19 @@ test('prediction folders of each tool are recognized and grouped into models', (
     'cf/p53_unrelaxed_rank_001_alphafold2_ptm_model_3_seed_000.pdb', 'cf/p53_relaxed_rank_001_alphafold2_ptm_model_3_seed_000.pdb',
     'cf/p53_scores_rank_001_alphafold2_ptm_model_3_seed_000.json', 'cf/p53_unrelaxed_rank_002_alphafold2_ptm_model_1_seed_000.pdb',
     'cf/p53_scores_rank_002_alphafold2_ptm_model_1_seed_000.json', 'cf/p53.a3m', 'cf/p53_predicted_aligned_error_v1.json',
+    // Protenix, two seeds; only the second was run with --need_atom_confidence.
+    'px/seed_7/predictions/px_sample_0.cif', 'px/seed_7/predictions/px_summary_confidence_sample_0.json',
+    'px/seed_3/predictions/px_sample_0.cif', 'px/seed_3/predictions/px_summary_confidence_sample_0.json', 'px/seed_3/predictions/px_full_data_sample_0.json',
+    // OpenFold3, and a service export that drops the seed from the names.
+    'of/q1/seed_42/q1_seed_42_sample_2_model.cif', 'of/q1/seed_42/q1_seed_42_sample_2_confidences_aggregated.json', 'of/q1/seed_42/q1_seed_42_sample_2_confidences.json',
+    'of/q1/seed_42/q1_seed_42_sample_1_model.cif', 'of/q1/seed_42/q1_seed_42_sample_1_confidences_aggregated.json',
+    'svc/results/result_sample_1_model.pdb', 'svc/results/result_sample_1_confidences_aggregated.json',
     // Not part of any prediction.
-    'notes/1abc.cif', 'notes/session.proteoscope.json',
+    'notes/1abc.cif', 'notes/session.proteoscope.json', 'notes/loose_sample_0.cif',
   ].map(file);
   const { sets, rest } = detectPredictionSets(files);
-  const byTool = Object.fromEntries(sets.map((set) => [set.tool, set]));
-  assert.deepEqual(Object.keys(byTool).sort(), ['af3', 'boltz', 'chai', 'colabfold', 'server']);
+  const byTool = Object.fromEntries(sets.map((set) => [set.tool === 'openfold3' ? `${set.tool}:${set.name}` : set.tool, set]));
+  assert.deepEqual(Object.keys(byTool).sort(), ['af3', 'boltz', 'chai', 'colabfold', 'openfold3:q1', 'openfold3:result', 'protenix', 'server']);
   assert.deepEqual(paths(byTool.server), [['model-0', 'fold_pd1/fold_pd1_model_0.cif'], ['model-1', 'fold_pd1/fold_pd1_model_1.cif']]);
   assert.equal(byTool.server.name, 'pd1');
   assert.equal(byTool.server.models[1].files.confidences.path, 'fold_pd1/fold_pd1_full_data_1.json');
@@ -56,7 +70,16 @@ test('prediction folders of each tool are recognized and grouped into models', (
   assert.equal(byTool.colabfold.models[0].files.structure.path, 'cf/p53_relaxed_rank_001_alphafold2_ptm_model_3_seed_000.pdb', 'relaxed wins');
   assert.equal(byTool.colabfold.models[0].label, 'Rank 1 · ptm model 3 seed 000');
   assert.deepEqual(byTool.colabfold.msas.map((item) => item.path), ['cf/p53.a3m']);
-  assert.deepEqual(rest.map((item) => item.path), ['notes/1abc.cif', 'notes/session.proteoscope.json']);
+  assert.deepEqual(paths(byTool.protenix), [['seed-3_sample-0', 'px/seed_3/predictions/px_sample_0.cif'], ['seed-7_sample-0', 'px/seed_7/predictions/px_sample_0.cif']], 'seeds of one job form one set');
+  assert.deepEqual(byTool.protenix.models.map((model) => model.files.confidences?.path ?? null), ['px/seed_3/predictions/px_full_data_sample_0.json', null]);
+  assert.equal(byTool.protenix.models[1].label, 'Seed 7 · sample 0');
+  assert.deepEqual(paths(byTool['openfold3:q1']), [['seed-42_sample-1', 'of/q1/seed_42/q1_seed_42_sample_1_model.cif'], ['seed-42_sample-2', 'of/q1/seed_42/q1_seed_42_sample_2_model.cif']]);
+  assert.equal(byTool['openfold3:q1'].models[1].files.confidences.path, 'of/q1/seed_42/q1_seed_42_sample_2_confidences.json');
+  assert.equal(byTool['openfold3:result'].models[0].label, 'Sample 1');
+  assert.deepEqual(rest.map((item) => item.path), ['notes/1abc.cif', 'notes/session.proteoscope.json', 'notes/loose_sample_0.cif']);
+  // Each set knows the folder its predictor wrote; other files there are not annotations.
+  assert.deepEqual(['server', 'af3', 'boltz', 'chai', 'colabfold', 'protenix', 'openfold3:q1', 'openfold3:result'].map((key) => byTool[key].root), ['fold_pd1', 'job', 'boltz_results_x', 'chai', 'cf', 'px', 'of/q1', 'svc/results']);
+  assert.deepEqual(['fold_pd1/templates/fold_pd1_template_hit_0_chains_a.cif', 'boltz_results_x/processed/records/x.json', 'svc/results/timing.json', 'notes/1abc.cif'].map((path) => insidePredictionFolder(file(path), sets)), [true, true, true, false]);
 });
 
 test('confidence files of each predictor parse into one score shape', () => {
@@ -89,6 +112,29 @@ test('confidence files of each predictor parse into one score shape', () => {
 
   const models = rankModels([{ order: 0, scores: { rankingScore: 0.2 } }, { order: 1, scores: { rankingScore: 0.9 } }, { order: 2, scores: {} }]);
   assert.deepEqual(models.map((model) => [model.order, model.rank]), [[1, 1], [0, 2], [2, 3]]);
+});
+
+// Shapes of real Protenix v1 and OpenFold3 outputs (the LIVIA p53–MDM2 examples).
+test('Protenix and OpenFold3 confidence files, including the bare NaN Python writes', () => {
+  const protenix = parseProtenixSummary({
+    plddt: 63.52, gpde: 1.98, ptm: 0.335, iptm: 0.242, chain_ptm: [0.546, 0.246], chain_iptm: [0.242, 0.242],
+    chain_pair_iptm: [[0, 0.242], [0.242, 0]], chain_plddt: [0.72, 0.567], has_clash: false, disorder: 0, ranking_score: 0.261, num_recycles: 10,
+  });
+  assert.deepEqual([protenix.rankingScore, protenix.iptm, protenix.chainPairIptm[1][0], protenix.chainPtm[1], protenix.hasClash, protenix.fractionDisordered, protenix.complexPlddt], [0.261, 0.242, 0.242, 0.246, false, 0, 63.52]);
+
+  const full = parseProtenixFullData(parsePredictionJSON('{"token_pair_pae": [[0.8, NaN], [12.5, 0.76]], "contact_probs": [[1.0, 0.02], [0.02, 1.0]], "atom_plddt": [0.71, NaN]}'));
+  assert.deepEqual(Array.from(full.pae.matrix), [0.8, MISSING_PAE, 12.5, 0.76].map(Math.fround), 'undefined PAE counts as the largest error');
+  assert.equal(full.contactProbs.size, 2);
+  assert.deepEqual(parsePredictionJSON('{"a": [-Infinity, NaN], "b": "NaN, kept"}'), { a: [null, null], b: 'NaN, kept' });
+  assert.throws(() => parsePredictionJSON('{"a": }'), SyntaxError);
+
+  const openfold = parseOpenFold3Aggregated({
+    avg_plddt: 55.35, gpde: 2.19, iptm: 0.157, ptm: 0.317, disorder: 0.07, has_clash: 0.0, sample_ranking_score: 0.224,
+    chain_ptm: { A: 0.514, B: 0.236 }, chain_pair_iptm: { '(A, B)': 0.157 }, bespoke_iptm: { '(A, B)': 0.157 },
+  });
+  assert.deepEqual(openfold.chainIds, ['A', 'B']);
+  assert.deepEqual(openfold.chainPairIptm, [[0.514, 0.157], [0.157, 0.236]]);
+  assert.deepEqual([openfold.rankingScore, openfold.hasClash, openfold.complexPlddt, openfold.fractionDisordered], [0.224, false, 55.35, 0.07]);
 });
 
 // Two short chains (A: 3 residues, B: 2) plus a two-atom ligand and a phosphoserine, the way
@@ -154,4 +200,44 @@ test('interface scores follow the ipSAE, pDockQ, pDockQ2 and LIS definitions', (
   assert.equal(pDockQ(tokens, { pairs: [], residuesA: new Set(), residuesB: new Set() }), 0);
   assert.ok(pair.pdockq2 > 0 && pair.pdockq2 < 0.1, 'high PAE on most contacts keeps pDockQ2 low');
   assert.throws(() => interfaceScores({ size: 4, matrix: new Float32Array(16) }, tokens), /4 rows/);
+});
+
+// The MDM2–p53 peptide complex 1YCR (chains A and B) with a made-up PAE whose values are whole
+// multiples of 0.25 Å, including exact hits on the 10, 12 and 15 Å cutoffs. The expected values
+// are the output of Dunbrack's ipsae.py (version 4) on the same PDB and matrix, written as an
+// AlphaFold 2 scores file, at "10 10" and "15 15".
+test('interface scores match ipsae.py on a reference complex', () => {
+  const lines = examplePDB('1ycr').split('\n').filter((line) => line.startsWith('ATOM') && 'AB'.includes(line[21]) && ' A'.includes(line[16]));
+  const structure = parseStructure(`${lines.join('\n')}\nEND\n`, '1ycr_AB.pdb');
+  deriveStructure(structure);
+  const model = structure.models[0];
+  const chains = model.residues.filter((residue) => residue.kind === 'protein').map((residue) => residue.chain);
+  const n = chains.length;
+  assert.equal(n, 98);
+  const matrix = new Float32Array(n * n);
+  for (let i = 0; i < n; i += 1) {
+    for (let j = 0; j < n; j += 1) {
+      let k;
+      if (i === j) k = 1;
+      else if (chains[i] === chains[j]) k = 2 + (Math.abs(i - j) % 23);
+      else if (chains[i] === 'A') k = i >= 45 && i <= 70 && j >= 88 ? 2 + ((i * 31 + j * 17) % 45) : 40 + ((i * 13 + j * 7) % 87);
+      else k = j >= 40 && j <= 75 && i >= 86 ? 3 + ((i * 11 + j * 29) % 50) : 44 + ((i * 5 + j * 19) % 83);
+      matrix[i * n + j] = k / 4;
+    }
+  }
+  const tokens = tokensForPAE(model, n);
+  tokens.forEach((token, index) => {
+    token.plddt = 35 + ((index * 37) % 61) + 0.5;
+  });
+  const close = (actual, expected, digits) => assert.ok(Math.abs(actual - expected) <= 0.5 * 10 ** -digits, `${actual} vs ${expected}`);
+  for (const [cutoff, ab, ba] of [[10, 0.205545, 0.117352], [15, 0.169487, 0.164811]]) {
+    const [pair] = interfaceScores({ size: n, matrix }, tokens, { paeCutoff: cutoff }).pairs;
+    close(pair.ipsaeAB, ab, 6);
+    close(pair.ipsaeBA, ba, 6);
+    close(pair.iptmAB, 0.366459, 6);
+    close(pair.iptmBA, 0.165261, 6);
+    close(pair.pdockq, 0.0623, 4);
+    close(pair.pdockq2, 0.0254, 4);
+    close(pair.lis, 0.4250, 4);
+  }
 });

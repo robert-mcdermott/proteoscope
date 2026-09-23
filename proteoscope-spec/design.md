@@ -45,7 +45,7 @@ graph TB
     Browser[Browser client]
     Embed[(Embedded web + data)]
     Cache[(Fetch cache)]
-    Remote[RCSB / AlphaFold DB / UniProt]
+    Remote[RCSB / AlphaFold DB / UniProt / EBI: PDBe, 3D-Beacons, Proteins API / model providers]
     Local[Local files, prediction folders and CLI arguments]
 
     User -->|runs| Binary
@@ -80,8 +80,13 @@ graph LR
     Predict[predictions.js<br/>interface-scores.js<br/>pae-domains.js + msa.js + npy.js]
     Validate[validation.js<br/>ramachandran.js + rama-top8000.js]
     Variants[missense.js]
-    Formats[bcif.js]
+    Formats[bcif.js + zstd.js]
     Views[sequence-view.js<br/>plots.js]
+    Discover[discover.js]
+    Reports[reports.js<br/>parquet.js + snappy.js]
+    Context[exposure.js]
+    XL[crosslinks.js]
+    HDX[hdx.js]
 
     App --> Parse --> Structure --> DSSP
     App --> Scene --> Cartoon
@@ -100,27 +105,35 @@ graph LR
     App --> Variants
     App --> Formats
     App --> Views
+    App --> Discover
+    App --> Context
+    App -. lazy .-> Reports
+    App -. lazy .-> XL
+    App -. lazy .-> HDX
 ```
 
 Modules in `web/lib/` are pure (no DOM access) except `renderer*.js`,
 `sequence-view.js` and `plots.js`. Pure modules run in the browser, in Web
-Workers and in Node tests. Interactions, proteomics, electrostatics and the
-Top8000 Ramachandran tables load lazily on first use.
+Workers and in Node tests. Interactions, proteomics, electrostatics, the
+Top8000 Ramachandran tables, and the report, cross-link and HDX importers load
+lazily on first use.
 
 ## Host Application Design
 
 ### Embedded Content
 
 `//go:embed` includes `web/index.html`, `web/styles.css`, `web/app.js`,
-`web/favicon.svg`, `web/lib/*.js` and `data/`. Test files (`*.test.mjs`) are
-not embedded. `--dev` serves `web/` and `data/` from disk instead.
+`web/favicon.svg`, `web/lib/*.js` and `data/`: the examples as gzipped mmCIF
+plus `data/examples.json`, which gives each a label, category, description,
+credit and opening view. Test files (`*.test.mjs`) and test data are not
+embedded. `--dev` serves `web/` and `data/` from disk instead.
 
 ### HTTP Routes
 
 | Route | Purpose |
 | --- | --- |
 | `/` and static assets | Embedded application |
-| `/api/health`, `/api/samples` | Health check and bundled-structure manifest |
+| `/api/health`, `/api/samples` | Health check and the examples manifest, in manifest order (listed examples are described by the manifest, not parsed, so startup stays fast) |
 | `/api/startup` | Version, offline flag and files given on the command line (with folder-relative paths) |
 | `/api/local/{index}` | A file named on the command line, or found in a folder named there (gzip decoded) |
 | `/api/fetch/pdb/{id}` | RCSB PDBx/mmCIF by PDB ID, including extended `pdb_` IDs |
@@ -130,13 +143,21 @@ not embedded. `--dev` serves `web/` and `data/` from disk instead.
 | `/api/fetch/afdb/{accession}/missense` | AlphaMissense substitutions (CSV), human proteins |
 | `/api/fetch/uniprot/{accession}` | UniProtKB entry with feature annotations |
 | `/api/fetch/validation/{id}` | wwPDB validation report, reduced from XML to per-residue JSON |
-| `/data/*` | Bundled structure files |
+| `/api/fetch/model?url=` | A model file listed by 3D-Beacons, from an allowed provider host |
+| `/api/fetch/proteomics/{accession}` | Public peptides and PTM sites (EBI Proteins API), merged |
+| `/api/search/text`, `/api/search/sequence` | RCSB full-text and sequence search, with entry summaries from RCSB GraphQL |
+| `/api/search/uniprot` | UniProt protein search (exact gene matches first; optional organism) |
+| `/api/search/protein/{accession}` | PDBe best structures and 3D-Beacons models of a protein |
+| `/data/*` | Bundled examples: `name.cif` is served from `name.cif.gz`, passed through with `Content-Encoding: gzip` when the browser accepts it |
 
 Fetch responses carry `X-Proteoscope-Filename`, `-Source`, `-Cache` and, for
 AlphaFold DB, `-Pae`, `-Msa`, `-Missense` and `-Meta-B64` headers. Payloads are
 cached on disk with atomic writes and refetched after `--cache-max-age`
-(30 days). If the refetch fails, the stale copy is served (`-Cache: stale`),
-and `?refresh=1` bypasses the cache.
+(30 days; search answers after a day). If the refetch fails, the stale copy
+is served (`-Cache: stale`), and `?refresh=1` bypasses the cache. An answer
+assembled while one of several services failed (evidence, a protein's
+structures and models) is served with its problems but not cached
+(`-Cache: partial`), so the next request asks again.
 
 ### Security
 
@@ -390,6 +411,29 @@ ambient occlusion or outlines.
   the chain's UniProt segments, or directly for AlphaFold DB models, after
   checking the wild type.
 
+## Data Import and Discovery
+
+- **Files.** Local files, archive members and command-line files share one
+  `{ name, path, read(), text() }` view. Gzip and Zstandard files are
+  decompressed on read and keep their inner name; the server decompresses
+  gzip but passes Zstandard through.
+- **Reports** (`reports.js`) are detected from their header row, then
+  streamed: text line by line (gzip through `DecompressionStream`), Parquet
+  by row group through `File.slice` ranges, filtered on the protein column
+  before rows are normalized. Only the structure's rows are kept, so memory
+  follows the protein, not the report.
+- **Summaries** are recomputed when thresholds or sample groups change; the
+  normalized rows stay on the entry.
+- **Surface distances** (`crosslinks.js`) use one occupancy grid per
+  structure, with the linked residues' side chains removed per pair, and an
+  A* search on 26-neighbor steps; the page computes all pairs in one pass.
+- **HDX** (`hdx.js`) parses to peptides per state and exposure, then
+  computes differences, significance and residue values on demand for the
+  chosen states and exposure.
+- **Discovery** (`discover.js`) classifies the query in the page; the Go
+  routes do the upstream calls, merge their answers into compact JSON and
+  cache them, so the page never contacts the services directly.
+
 ## Interaction Design
 
 - **Camera.**
@@ -437,12 +481,15 @@ The canvas fills the window, and panels float over it.
 
 ## Known Limitations
 
-See `roadmap.md` §10. In particular:
+See `roadmap.md` §11. In particular:
 
 - Superposition needs sequence (or UniProt) correspondence; there is no
   structure-only alignment yet.
 - Electrostatics are qualitative (formal charges, ε = 4r).
 - Ligand chemistry is inferred from geometry.
 - Rotamer outliers and clashscore come only from validation reports.
-- Prediction folders were checked against documented layouts and synthetic
-  files; real outputs of each tool remain to be checked.
+- Chai-1 prediction folders were checked only against the documented
+  layout; the other predictors against real outputs.
+- Search reports, cross-link and HDX importers cover the formats listed in
+  the README; others (Scout, mzIdentML cross-links, nested Parquet) are not
+  read yet.

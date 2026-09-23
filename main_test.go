@@ -29,8 +29,8 @@ func TestStructureFileExtensions(t *testing.T) {
 	if isStructureFile("validation.pdf") {
 		t.Fatal("PDF validation report should not be accepted as a structure file")
 	}
-	if isStructureFile("1abc.pdb.gz") {
-		t.Fatal("compressed files are only accepted as command-line files, not samples")
+	if isStructureFile("1abc.pdb.gz") || !isStructureFile(trimGzip("1abc.pdb.gz")) {
+		t.Fatal("compressed names are recognized after trimGzip, as examples and command-line files are")
 	}
 }
 

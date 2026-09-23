@@ -5,10 +5,14 @@ export const ASYMMETRIC_UNIT_ID = 'asym';
 
 const BONDING_CONNECTION_TYPES = new Set(['covale', 'covale_base', 'covale_phosphate', 'covale_sugar', 'disulf', 'metalc', 'modres']);
 
+// By name, unless a file named as mmCIF has no data block but does have PDB atom records.
 export function detectStructureFormat(text, label) {
   const name = String(label || '').toLowerCase().replace(/\.gz$/, '');
-  if (name.endsWith('.cif') || name.endsWith('.mmcif') || name.endsWith('.bcif')) return { kind: 'mmcif', label: 'PDBx/mmCIF' };
-  if (/^\s*data_/i.test(text) && /_atom_site\./i.test(text)) return { kind: 'mmcif', label: 'PDBx/mmCIF' };
+  if (name.endsWith('.cif') || name.endsWith('.mmcif') || name.endsWith('.bcif')) {
+    if (/^data_/im.test(text) || !/^(ATOM  |HETATM)/m.test(text)) return { kind: 'mmcif', label: 'PDBx/mmCIF' };
+    return { kind: 'pdb', label: 'PDB' };
+  }
+  if (/^data_/im.test(text) && /_atom_site\./i.test(text)) return { kind: 'mmcif', label: 'PDBx/mmCIF' };
   return { kind: 'pdb', label: 'PDB' };
 }
 
@@ -674,18 +678,28 @@ function applyMMCIFConfidence(structure, cif) {
     const seq = table.column('label_seq_id');
     const metric = table.column('metric_id');
     const value = table.column('metric_value');
+    let max = -Infinity;
     for (let row = 0; row < table.rowCount; row += 1) {
       if (cleanCIFValue(metric(row)) !== localId) continue;
       const score = parseFloatSafe(value(row));
-      if (Number.isFinite(score)) structure.residueConfidence.set(`${cleanCIFValue(asym(row))}:${cleanCIFValue(seq(row))}`, score);
+      if (!Number.isFinite(score)) continue;
+      structure.residueConfidence.set(`${cleanCIFValue(asym(row))}:${cleanCIFValue(seq(row))}`, score);
+      max = Math.max(max, score);
     }
+    // SWISS-MODEL reports QMEANDisCo as "pLDDT all-atom in [0,1]"; the viewer works in 0–100.
+    if (/\[0,\s*1\]/.test(cleanCIFValue(local.type)) || (structure.residueConfidence.size && max <= 1)) {
+      for (const [key, score] of structure.residueConfidence) structure.residueConfidence.set(key, score * 100);
+    }
+    const name = cleanCIFValue(local.name);
+    if (name && !/plddt/i.test(name)) structure.meta.confidenceSource = `${name} (ModelCIF, as pLDDT)`;
   }
   const software = getCIFColumnValues(cif, 'software', 'name').join(' ');
-  detectPrediction(structure, `${structure.meta.title} ${structure.meta.method} ${software}`, hasModelArchive || structure.residueConfidence.size > 0);
+  // Protenix names the data block <job>_sample_<n>_predicted_by_protenix.
+  detectPrediction(structure, `${structure.meta.title} ${structure.meta.method} ${software} ${cif.dataBlock}`, hasModelArchive || structure.residueConfidence.size > 0);
 }
 
 function detectPrediction(structure, text, force = false) {
-  if (force || /ALPHAFOLD|COLABFOLD|ESMFOLD|ROSETTAFOLD|BOLTZ|CHAI-1|OPENFOLD|PREDICTED MODEL|COMPUTATIONAL MODEL|THEORETICAL MODEL/i.test(text)) {
+  if (force || /ALPHAFOLD|COLABFOLD|ESMFOLD|ROSETTAFOLD|BOLTZ|CHAI-1|OPENFOLD|PROTENIX|PREDICTED MODEL|COMPUTATIONAL MODEL|THEORETICAL MODEL/i.test(text)) {
     structure.meta.isPredicted = true;
   }
   if (structure.meta.isPredicted && !structure.meta.confidenceSource) {

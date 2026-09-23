@@ -219,6 +219,134 @@ export function drawProfile(canvas, series, options = {}) {
   return { points: series.map((item, index) => ({ x: xFor(index), residue: item.residue })) };
 }
 
+// Distance histogram: bars per bin (a second series overlaid as outlines), and the cutoff as a line.
+export function drawHistogram(canvas, histogram, options = {}) {
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  const left = width * 0.08;
+  const right = width * 0.03;
+  const top = height * 0.1;
+  const bottom = height * 0.2;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  ctx.clearRect(0, 0, width, height);
+  const { bins, binWidth, max } = histogram;
+  const overlay = options.overlay?.bins ?? null;
+  const peak = Math.max(1, ...bins, ...(overlay ?? []));
+  const barWidth = plotWidth / bins.length;
+  const cutoff = options.cutoff;
+  bins.forEach((count, index) => {
+    if (!count) return;
+    const x = left + index * barWidth;
+    const barHeight = (count / peak) * plotHeight;
+    ctx.fillStyle = Number.isFinite(cutoff) && (index + 1) * binWidth > cutoff ? 'rgba(255,107,107,0.75)' : 'rgba(82,214,138,0.75)';
+    ctx.fillRect(x + 1, top + plotHeight - barHeight, Math.max(1, barWidth - 2), barHeight);
+  });
+  if (overlay) {
+    ctx.strokeStyle = options.overlayColor ?? '#4cc9f0';
+    ctx.lineWidth = Math.max(1.2, width / 420);
+    overlay.forEach((count, index) => {
+      if (!count) return;
+      const x = left + index * barWidth;
+      const barHeight = (count / peak) * plotHeight;
+      ctx.strokeRect(x + 1.5, top + plotHeight - barHeight + 0.5, Math.max(1, barWidth - 3), barHeight - 1);
+    });
+  }
+  ctx.strokeStyle = 'rgba(248,245,238,0.25)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(left + 0.5, top + 0.5, plotWidth - 1, plotHeight - 1);
+  if (Number.isFinite(cutoff)) {
+    const x = left + (Math.min(cutoff, max) / (bins.length * binWidth)) * plotWidth;
+    ctx.strokeStyle = '#ffd166';
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, top + plotHeight);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.fillStyle = 'rgba(248,245,238,0.6)';
+  ctx.font = `${Math.round(height * 0.075)}px ui-sans-serif, system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  for (let value = 0; value <= bins.length * binWidth; value += 10) {
+    ctx.fillText(value >= max ? `${value}+` : String(value), left + (value / (bins.length * binWidth)) * plotWidth, height - bottom * 0.4);
+  }
+  ctx.textAlign = 'left';
+  ctx.fillText(options.label ?? 'Distance (Å)', left, top * 0.8);
+  ctx.textAlign = 'right';
+  ctx.fillText(String(peak), left - 4, top + ctx.measureText('0').actualBoundingBoxAscent);
+}
+
+// Woods plot: each peptide a horizontal bar over its residues at its value (ΔD, or relative
+// uptake); significant protection blue, deprotection red, the rest gray; ± the limit dashed.
+export function drawWoods(canvas, rows, options = {}) {
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  const left = width * 0.09;
+  const right = width * 0.02;
+  const top = height * 0.1;
+  const bottom = height * 0.18;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  ctx.clearRect(0, 0, width, height);
+  if (!rows.length) return;
+  const first = Math.min(...rows.map((row) => row.start));
+  const last = Math.max(...rows.map((row) => row.end));
+  const key = options.value ?? 'delta';
+  const values = rows.map((row) => row[key]).filter(Number.isFinite);
+  const limit = options.limit ?? 0;
+  let min = Math.min(0, -limit, ...values);
+  let max = Math.max(0, limit, ...values);
+  if (options.range) [min, max] = options.range;
+  if (max - min < 1e-6) max = min + 1;
+  const pad = (max - min) * 0.08;
+  min -= pad;
+  max += pad;
+  const xFor = (position) => left + ((position - first) / Math.max(1, last - first + 1)) * plotWidth;
+  const yFor = (value) => top + (1 - (value - min) / (max - min)) * plotHeight;
+  ctx.strokeStyle = 'rgba(248,245,238,0.25)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(left + 0.5, top + 0.5, plotWidth - 1, plotHeight - 1);
+  ctx.beginPath();
+  ctx.moveTo(left, yFor(0));
+  ctx.lineTo(left + plotWidth, yFor(0));
+  ctx.stroke();
+  if (limit) {
+    ctx.strokeStyle = '#ffd166';
+    ctx.setLineDash([4, 3]);
+    for (const value of [limit, -limit]) {
+      ctx.beginPath();
+      ctx.moveTo(left, yFor(value));
+      ctx.lineTo(left + plotWidth, yFor(value));
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+  ctx.lineWidth = Math.max(2, height / 70);
+  ctx.lineCap = 'butt';
+  for (const row of rows) {
+    const value = row[key];
+    if (!Number.isFinite(value)) continue;
+    ctx.strokeStyle = !row.significant ? 'rgba(170,178,189,0.75)' : value < 0 ? '#3f7fff' : '#ff5a4d';
+    ctx.beginPath();
+    ctx.moveTo(xFor(row.start), yFor(value));
+    ctx.lineTo(xFor(row.end + 1), yFor(value));
+    ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(248,245,238,0.6)';
+  ctx.font = `${Math.round(height * 0.07)}px ui-sans-serif, system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  const step = Math.max(10, Math.ceil((last - first) / 8 / 10) * 10);
+  for (let position = Math.ceil(first / step) * step; position <= last; position += step) ctx.fillText(String(position), xFor(position), height - bottom * 0.35);
+  ctx.textAlign = 'left';
+  ctx.fillText(options.label ?? 'ΔD (D)', left, top * 0.8);
+  ctx.textAlign = 'right';
+  ctx.fillText(formatTick(max - pad), left - 4, top + 8);
+  ctx.fillText(formatTick(min + pad), left - 4, top + plotHeight);
+}
+
 export function drawPAE(canvas, pae, options = {}) {
   const ctx = canvas.getContext('2d');
   const n = pae.size;

@@ -47,7 +47,8 @@ func (f *fakeRemote) requests() []string {
 func fetchApp(base, cacheDir string, offline bool) *app {
 	a := &app{
 		offline: offline,
-		remote:  &upstream{client: newUpstreamClient(), rcsb: base, afdb: base, uniprot: base, maxBytes: maxDownloadBytes},
+		remote: &upstream{client: newUpstreamClient(), rcsb: base, rcsbSearch: base, rcsbData: base, afdb: base, uniprot: base, ebi: base,
+			modelHosts: []string{base}, maxBytes: maxDownloadBytes},
 	}
 	if cacheDir != "" {
 		a.cache = &diskCache{dir: cacheDir}

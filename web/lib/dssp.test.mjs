@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 
 import { DSSP_CARTOON, assignDSSP, dsspSummary } from './dssp.js';
 import { residueKindFromName } from './residues.js';
+import { exampleFiles, examplePDB } from './test-data.mjs';
 
-const DATA_URL = new URL('../../data/', import.meta.url);
 const ALPHA = [-57, -47];
 const BACKBONE_NAMES = new Set(['N', 'CA', 'C', 'O']);
 const HELIX_CODES = new Set(['H', 'G', 'I']);
@@ -65,8 +64,8 @@ test('summary counts every code and the cartoon map covers all codes', () => {
 // C=O acceptor and the last N-H donor), which DSSP itself never labels as helix. The cap-adjusted
 // score also credits a record's first and last residue when the residue inside them is helical.
 for (const name of ['1ycr', '4hhb', '1m17', '3og7']) {
-  test(`agrees with HELIX/SHEET records in ${name}.pdb`, async (t) => {
-    const { residues, helices, sheets } = parsePDB(await readFile(new URL(`${name}.pdb`, DATA_URL), 'utf8'));
+  test(`agrees with the helix and sheet records of ${name}`, (t) => {
+    const { residues, helices, sheets } = parsePDB(examplePDB(name));
     const codes = assignDSSP(residues);
     assert.equal(codes.length, residues.length);
 
@@ -81,10 +80,10 @@ for (const name of ['1ycr', '4hhb', '1m17', '3og7']) {
   });
 }
 
-test('performance on the largest bundled structure and a tiled 10,000-residue assembly', async (t) => {
+test('performance on the largest bundled structure and a tiled 10,000-residue assembly', (t) => {
   let largest = null;
-  for (const name of (await readdir(DATA_URL)).filter((file) => file.endsWith('.pdb'))) {
-    const { residues } = parsePDB(await readFile(new URL(name, DATA_URL), 'utf8'));
+  for (const name of exampleFiles()) {
+    const { residues } = parsePDB(examplePDB(name));
     const count = countProtein(residues);
     if (!largest || count > largest.count) largest = { name, residues, count };
   }

@@ -39,17 +39,24 @@ var (
 )
 
 type upstream struct {
-	client   *http.Client
-	rcsb     string
-	afdb     string
-	uniprot  string
-	maxBytes int64
+	client     *http.Client
+	rcsb       string
+	rcsbSearch string
+	rcsbData   string
+	afdb       string
+	uniprot    string
+	ebi        string
+	modelHosts []string
+	maxBytes   int64
 }
 
 type payload struct {
 	body        []byte
 	contentType string
 	headers     map[string]string
+	// partial marks an answer assembled while one of several services failed; it is served but
+	// not cached, so the next request asks again.
+	partial bool
 }
 
 type fetchError struct {
@@ -95,11 +102,14 @@ func fetchErrorf(status int, format string, args ...any) error {
 
 func defaultUpstream() *upstream {
 	return &upstream{
-		client:   newUpstreamClient(),
-		rcsb:     "https://files.rcsb.org",
-		afdb:     "https://alphafold.ebi.ac.uk",
-		uniprot:  "https://rest.uniprot.org",
-		maxBytes: maxDownloadBytes,
+		client:     newUpstreamClient(),
+		rcsb:       "https://files.rcsb.org",
+		rcsbSearch: "https://search.rcsb.org",
+		rcsbData:   "https://data.rcsb.org",
+		afdb:       "https://alphafold.ebi.ac.uk",
+		uniprot:    "https://rest.uniprot.org",
+		ebi:        "https://www.ebi.ac.uk",
+		maxBytes:   maxDownloadBytes,
 	}
 }
 
@@ -221,6 +231,15 @@ func (a *app) serveRemote(w http.ResponseWriter, r *http.Request, kind, name str
 			return
 		}
 		writeFetchError(w, err)
+		return
+	}
+	if fresh.partial {
+		// An earlier complete answer beats a partial one, unless the user asked for a refresh.
+		if ok && !refresh {
+			writePayload(w, cached, "stale")
+			return
+		}
+		writePayload(w, fresh, "partial")
 		return
 	}
 	a.cache.store(kind, name, fresh)

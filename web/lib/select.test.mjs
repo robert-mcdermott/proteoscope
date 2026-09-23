@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { parsePDB } from './parse.js';
+import { parsePDB, parseStructure } from './parse.js';
 import { deriveStructure, prepareAssemblyEstimates } from './structure.js';
 import { SelectionError, countMask, looksLikeSelection, parseSelection, residueKeysFromMask, selectAtoms } from './select.js';
+import { exampleText } from './test-data.mjs';
 
-const DATA_DIR = new URL('../../data/', import.meta.url);
 
 function derive(structure) {
   structure.baseModels = structure.models;
@@ -15,7 +14,7 @@ function derive(structure) {
 }
 
 async function target(name, id = 1, context = {}) {
-  const structure = derive(parsePDB(await readFile(new URL(name, DATA_DIR), 'utf8'), name));
+  const structure = derive(parseStructure(exampleText(name), name.replace(/\.pdb$/, '.cif')));
   return { id, index: id, name: structure.meta.code || name, model: structure.models[0], structure, context };
 }
 
@@ -137,6 +136,30 @@ test('context sets and per-residue values drive selections', async () => {
   assert.deepEqual([...keysOf(selectAtoms('sele', [hb]), hb)].sort(), ['A:12:ALA', 'A:14:TRP']);
   assert.deepEqual([...keysOf(selectAtoms('deviation > 2', [hb]), hb)], ['A:12:ALA']);
   assert.deepEqual([...keysOf(selectAtoms('uniprot 11', [hb]), hb)], ['A:10:VAL']);
+});
+
+test('residue specs read chemical component codes that begin with a digit as names', () => {
+  const lines = [
+    atomLine(1, 'CA', 'ALA', 'A', 32, ' ', 0),
+    atomLine(2, 'C1', '032', 'A', 401, ' ', 4),
+    atomLine(3, 'C1', '1LT', 'A', 402, ' ', 8),
+    atomLine(4, 'C1', '09L', 'A', 403, ' ', 12),
+    atomLine(5, 'CA', 'GLY', 'A', 15, 'P', 16),
+    atomLine(6, 'C1', '15P', 'A', 404, ' ', 20),
+    atomLine(7, 'CA', 'SER', 'A', 100, 'A', 24),
+  ].map((line) => line.replace(/^ATOM  (.{11}.{6})(032|1LT|09L|15P)/, 'HETATM$1$2'));
+  const structure = derive(parsePDB(lines.join('\n'), 'codes.pdb'));
+  const t = { id: 1, index: 1, name: 'codes', model: structure.models[0], structure, context: {} };
+  const names = (text) => [...keysOf(selectAtoms(text, [t]), t)].map((key) => key.split(':').slice(1).join(':')).sort();
+  assert.deepEqual(names(':032'), ['401:032'], 'a leading zero marks a code, not residue 32');
+  assert.deepEqual(names(':32'), ['32:ALA']);
+  assert.deepEqual(names(':1LT'), ['402:1LT']);
+  assert.deepEqual(names(':09L'), ['403:09L']);
+  assert.deepEqual(names(':15P'), ['15P:GLY', '404:15P'], 'a number with one letter matches an insertion code or a code');
+  assert.deepEqual(names(':100A'), ['100A:SER']);
+  assert.deepEqual(names(':1LT,032'), ['401:032', '402:1LT']);
+  assert.deepEqual(names(':30-35'), ['32:ALA']);
+  assert.deepEqual(names('resn 032'), ['401:032']);
 });
 
 test('search text is recognized as a selection only when it starts like one', () => {
