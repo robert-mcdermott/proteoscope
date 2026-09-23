@@ -2,15 +2,49 @@
 
 ![proteoscope](proteoscope.png)
 
-Proteoscope is an application for interactive 3D visualization of Protein Data
-Bank structures in legacy PDB (`.pdb`) and PDBx/mmCIF (`.cif`, `.mmcif`)
-formats. It is written as a single Go binary that embeds the browser UI, static
-assets, and bundled structure files, then serves the application on a local URL.
+Proteoscope is a local, single-binary 3D viewer and analysis workbench for
+protein and nucleic-acid structures. A small Go executable embeds the browser
+application and serves it on `localhost`. Parsing, rendering and analysis all
+happen in your browser, so local files never leave your computer.
 
-Proteoscope is designed for exploratory structural biology work: load a
-structure, inspect chains and ligands, switch molecular representations, color by
-scientific properties, view PDBx/mmCIF biological assemblies, search atoms or
-residues, measure distances, and export publication-prep screenshots.
+It covers the everyday structural biology loop: open a structure by file, PDB
+ID or UniProt accession; style it; find and focus a ligand or residue; see its
+interactions, surface and electrostatics; judge model quality (B-factors,
+AlphaFold pLDDT and PAE, Ramachandran); map proteomics data onto it; and
+export a publication-ready figure.
+
+Highlights:
+
+- **WebGPU renderer.**
+  - Ray-cast atoms and bonds with exact intersections.
+  - Screen-space ambient occlusion, outlines, depth fog and anti-aliasing.
+  - Lighting presets: Standard, Soft, Illustrative, Glossy, Neon and Flat.
+  - Interactive at 100k atoms.
+- **Representations.**
+  - Cartoon with sheet arrows and nucleic-acid bases, ball and stick,
+    sticks, spacefill and trace.
+  - Molecular, solvent-accessible and Gaussian surfaces with Coulombic
+    electrostatics.
+- **Analysis.**
+  - DSSP secondary structure.
+  - Ligand and interface interactions (PLIP criteria).
+  - SASA and buried surface area.
+  - Ramachandran plot and per-residue profiles.
+  - Distance, angle and torsion rulers.
+- **AlphaFold.** Fetch any UniProt accession from AlphaFold DB; view pLDDT
+  coloring and an interactive PAE plot linked to the 3D view.
+- **Proteomics.**
+  - ProtParam-style sequence properties.
+  - Peptide coverage from MaxQuant, DIA-NN, Spectronaut, ProForma or Comet
+    output.
+  - PTM and variant sites, with UniProt numbering.
+  - Cross-link validation.
+  - Custom per-residue data.
+  - UniProt annotations mapped onto the structure.
+- **Figures.** Supersampled PNG up to 4× with transparent background and
+  legend; clipboard copy; spin videos.
+- **Private.** Local files are parsed in the browser; `--offline` disables
+  all network access.
 
 ## Quick Start: Download A Release
 
@@ -33,9 +67,13 @@ When Proteoscope starts, it prints a local URL, usually:
 http://127.0.0.1:8765
 ```
 
-It will also try to open that URL in your browser. For best performance, open
-the URL in Chrome, Edge, or Brave, which have strong WebGPU support. Safari may
-fall back to a slower compatibility renderer.
+It will also try to open that URL in your browser. Use a browser with WebGPU:
+Chrome, Edge or Brave on any desktop OS, Safari 26 or later on macOS, or
+Firefox 141 or later on Windows. Other browsers fall back to a simplified
+compatibility renderer.
+
+Release binaries can lag behind the main branch. To use the newest features,
+build from source (see [Development](#development)).
 
 ### macOS
 
@@ -114,417 +152,347 @@ You can also run it from PowerShell:
 .\proteoscope-windows-amd64.exe
 ```
 
-## Getting Structure Files
+## Opening Structures
 
-Proteoscope reads standard legacy `.pdb` coordinate files and modern
-PDBx/mmCIF files ending in `.cif` or `.mmcif`.
+| Source | How |
+| --- | --- |
+| **RCSB PDB** | Type a PDB ID (for example `4HHB`, or an extended ID such as `pdb_00004hhb`) in **Open structure** and press **Fetch**. The PDBx/mmCIF file is downloaded from RCSB. |
+| **AlphaFold DB** | Type a UniProt accession (for example `P04637`). The current AlphaFold DB model and its predicted aligned error (PAE) matrix are downloaded. |
+| **Local file** | Click **Open local file** or drag files onto the window. Accepts `.pdb`, `.ent`, `.cif` and `.mmcif`, optionally gzip-compressed (`.gz`). |
+| **Command line** | `proteoscope structure.cif model.pdb.gz` opens the first file at startup. |
+| **Examples** | **Bundled examples** lists the structures embedded from `data/`. |
+| **Deep link** | `http://127.0.0.1:8765/#fetch=4HHB` fetches on load. |
 
-You can download more structures from the RCSB PDB download service:
+Remote downloads go through the local Proteoscope server, which only contacts
+`files.rcsb.org`, `alphafold.ebi.ac.uk` and `rest.uniprot.org`. Results are
+cached on disk under your user cache directory, for example
+`~/Library/Caches/proteoscope` on macOS. Start with `--offline` to disable all
+network access; cached entries are still served.
 
-[https://www.rcsb.org/downloads](https://www.rcsb.org/downloads)
+AlphaFold 3, ColabFold and AlphaFold DB PAE files (`.json`) can be dropped onto
+a loaded model to show its PAE plot.
 
-The RCSB download page supports downloading multiple files from the PDB archive
-and points users to individual data files from each structure's summary page.
-For modern RCSB downloads, PDBx/mmCIF (`.cif` or `.mmcif`) is usually the best
-choice. Legacy PDB coordinate files (`.pdb`) are also supported. Avoid PDFs,
-validation reports, sequence files, compressed archives, and documentation files
-unless you decompress or convert them into one of the supported coordinate
-formats first.
+## The Workspace
 
-## Loading Structures
+- **Top bar:** structure title, search (press `/`), renderer badge, panel toggles.
+- **Left panel tabs:**
+  - **Structure:** entry metadata (method, resolution, R-free, organism,
+    deposition date), biological assemblies, composition and molecules, and
+    the secondary-structure source.
+  - **Style:** representations, surface, color scheme, sizes, lighting and
+    effects, background, projection and clipping.
+  - **Analysis:** interactions, solvent accessibility, Ramachandran plot,
+    per-residue profile, PAE.
+  - **Proteomics:** sequence properties, UniProt annotations, peptides,
+    sites and variants, cross-links, custom data.
+- **Right panel:**
+  - Chains: click to show or hide; double-click to show only that chain.
+  - Selection details, interactions of the focused residue, and measurements.
+- **Sequence panel:** the full sequence of the chosen chain.
+  - Residues missing from the model are grey, and helices and strands are
+    underlined.
+  - Numbering gaps are marked.
+  - Click to select, shift-click to add, drag for a range, double-click to
+    focus.
+- **Toolbar:** reset view, focus, distance, angle and torsion rulers, spin,
+  export, full screen, help.
+- **Legend:** describes the active color scheme and surface coloring. Click a
+  legend title to collapse it.
 
-### Bundled Structures
+## Navigation
 
-The dropdown labeled `Bundled structure` lists every supported structure file
-embedded from the repository's `data/` directory at build time.
+| Action | Mouse / key |
+| --- | --- |
+| Rotate (free trackball) | Drag |
+| Pan | Shift-drag or right-drag |
+| Roll | Alt/Option-drag |
+| Zoom | Scroll or pinch |
+| Select residue / add to selection | Click / Shift-click |
+| Focus a residue or ligand | Double-click, or select and press `F` |
+| Reset view | `R` |
+| Representation presets | `1` cartoon, `2` ball & stick, `3` sticks, `4` spacefill, `5` trace, `6` surface |
+| Distance / angle / torsion ruler | `D` / `A` / `T` |
+| Label selection | `L` |
+| Spin | `S` |
+| Orthographic / perspective | `O` |
+| Water / hydrogens | `W` / `H` |
+| Export image | `P` |
+| Clear focus, selection or ruler | `Esc` |
+| Shortcuts | `?` |
 
-To add default structures to your own build:
-
-1. Put one or more `.pdb`, `.cif`, or `.mmcif` files in `data/`.
-2. Rebuild the Go binary.
-3. The files will be embedded into the executable through Go's embedded
-   filesystem.
-
-### Local Uploads
-
-Use `Open local structure` to load a structure from your computer.
-
-The file is parsed in the browser. Proteoscope does not upload local coordinate
-files to an external server; the Go process only serves the local application.
-
-## Main Viewer
-
-The central viewport shows the active structure in 3D.
-
-Mouse controls:
-
-- Drag to rotate the molecule.
-- Shift-drag to pan.
-- Scroll to zoom.
-- Click an atom to select it.
-- Press `R` to reset the view.
-- Press `Esc` to clear search and measurement state.
-
-The renderer badge shows the active rendering mode:
-
-- `WebGPU`: hardware-accelerated rendering is active.
-- `Canvas preview`: WebGPU was unavailable in the current browser, so
-  Proteoscope is using a compatibility renderer.
-
-For best performance, use a browser with strong WebGPU support. Chrome, Edge,
-and Brave work well in current testing. Safari may fall back to a non-WebGPU
-path and can feel slower or less responsive with larger structures.
-
-## Structure Summary
-
-The top-left panel shows metadata and counts for the active structure.
-
-The metadata strip reports:
-
-- Coordinate format, such as `PDB` or `PDBx/mmCIF`.
-- Experimental method when present.
-- Resolution when present.
-- Entry ID for deposited structures, or `Local` for files without an entry ID.
-- Active assembly, either the asymmetric unit or a selected biological assembly.
-
-### Atoms
-
-For ordinary single-model structures, `Atoms` is the number of atoms in the
-loaded model.
-
-For NMR ensembles or other multi-model coordinate files, Proteoscope renders one
-model at a time. In that case the UI shows:
-
-- `Atoms/model`: atom count in the currently selected model.
-- `Total atoms`: total coordinate records across all models.
-- `Models`: number of models available in the file.
-
-For example, an NMR ensemble with 40 models and 619 atoms in each model has
-24,760 total coordinate records, but the viewer displays 619 atoms at a time.
-
-### Residues
-
-Residues are grouped by chain, residue name, residue number, and insertion
-code. Standard residues, nucleic-acid residues, ligands, and waters are all
-recognized from the parsed coordinate records.
-
-### Chains
-
-Chains come from the PDB chain identifier or, for PDBx/mmCIF, the author chain
-identifier when present. The chain panel lets you isolate one chain at a time or
-return to all chains.
+New structures are framed on their principal axes, with the longest axis
+horizontal.
 
 ## Representations
 
-Proteoscope provides four molecular representations.
-
-### Ball + Stick
-
-Shows atoms as spheres and bonds as cylinders or ribbons. This is the best
-default for inspecting connectivity, ligands, cofactors, and residue-level
-geometry.
-
-### Spacefill
-
-Shows atoms closer to their van der Waals size. This emphasizes molecular
-volume, steric packing, surface shape, and how tightly ligands or residues fill
-space.
-
-### Backbone
-
-Shows a simplified polymer trace. Proteins are traced through alpha carbons
-(`CA`), while nucleic acids are traced through backbone atoms such as `P` and
-sugar carbons. Ligands remain visible so cofactors and bound molecules are not
-lost.
-
-### Cartoon
-
-Shows proteins as a smooth backbone cartoon generated from residue-level
-polymer chains. Alpha helices, beta strands, turns, and coils are distinguished
-from PDB `HELIX`/`SHEET` records or PDBx/mmCIF `_struct_conf` and
-`_struct_sheet_range` annotations when present. If no annotations are available,
-Proteoscope uses an approximate C-alpha geometry fallback and labels the source
-as computed. Cartoon mode keeps non-protein entities such as ligands, ions,
-waters, and nucleic acids available through the existing atom-level rendering
-controls.
-
-## Coloring Modes
-
-### Chain
-
-Assigns a different color to each chain. This is useful for complexes,
-oligomers, protein-DNA assemblies, and comparing subunits.
-
-### Element
-
-Uses conventional element coloring, such as carbon, nitrogen, oxygen, sulfur,
-phosphorus, and common metal ions. This is useful for atom-level chemical
-inspection.
-
-### B-factor
-
-Colors atoms by B-factor, also called temperature factor or atomic displacement
-parameter. Lower and higher values are mapped to different colors so flexible
-or uncertain regions are easier to spot. For NMR files, B-factors may be zero
-or less meaningful depending on how the file was deposited.
-
-### Residue
-
-Colors by residue class:
-
-- Hydrophobic residues
-- Polar residues
-- Positively charged residues
-- Negatively charged residues
-- Nucleic-acid residues
-- Ligands and solvent
-
-This is useful for quickly reading chemical character across a structure.
-
-### Sec Struct
-
-Colors protein cartoons and protein atoms by secondary-structure assignment:
-alpha helices, beta strands, turns, and coils. Selection details show whether a
-residue's assignment came from file annotation, computed fallback geometry, or
-the default coil fallback.
-
-## Display Controls
-
-### Atom Scale
-
-Changes atom sphere size. Increase it for presentations or space-filling
-inspection; decrease it when dense structures become visually crowded.
-
-### Bond Scale
-
-Changes bond thickness. Increase it to make connectivity clearer; decrease it
-for very large structures.
-
-### Glow
-
-Adds a subtle screen-space glow around atoms. This is a visual aid for depth and
-presentation screenshots. Set it lower for a quieter scientific plotting style.
-
-### Clip
-
-Clips the structure along the current viewing direction. This helps inspect the
-interior of dense proteins, binding pockets, nucleic-acid grooves, or buried
-ligands.
-
-## Visibility Toggles
-
-### Ligands
-
-Shows or hides `HETATM` records that are not water. This usually includes
-cofactors, ions, inhibitors, substrates, prosthetic groups, and crystallization
-components.
-
-### Water
-
-Shows or hides water molecules such as `HOH`, `WAT`, `H2O`, and `DOD`.
-
-Water is off by default because crystallographic waters can clutter the view,
-but turning it on is useful for inspecting active sites, interfaces, and
-hydrogen-bonding networks.
-
-### H
-
-Shows or hides hydrogen atoms. Hydrogens are often absent from X-ray structures
-and abundant in some NMR or modeled structures, so they are hidden by default.
-
-### Motion
-
-Enables or disables gentle automatic rotation.
-
-## Search
-
-The search box finds residues, ligands, chains, atom names, elements, residue
-numbers, and atom serials.
-
-Examples:
-
-- `heme`
-- `HEM A142`
-- `chain B`
-- `lys 42`
-- `FE`
-- `CA`
-
-Search results include both residue-level and atom-level hits. Selecting a
-result focuses the view on that atom or residue representative.
-
-## Selection Panel
-
-Click an atom or choose a search result to select it.
-
-The selection panel reports:
-
-- Atom name
-- Residue name and number
-- Chain
-- Element
-- Atom serial number
-- Occupancy
-- B-factor
-- Protein secondary-structure type and assignment source, when applicable
-
-Use `Frame` to center the camera on the selected atom.
-
-## Distance Measurement
-
-Proteoscope supports simple point-to-point distance measurements.
-
-1. Click one atom.
-2. Click a second atom.
-3. Proteoscope records the distance between them in Angstroms (`Å`).
-
-Each new atom click after the first creates a measurement from the previously
-selected atom to the newly selected atom. Measurement lines are drawn in the
-viewport and recent measurements appear in the selection panel.
-
-Use `Clear measure` to remove measurement lines and reset the measurement
-sequence.
-
-Common uses:
-
-- Ligand-to-residue contact distances
-- Metal coordination distances
-- Hydrogen-bond candidate distances
-- Interface contacts
-- Nucleic-acid base-pair or intercalator geometry checks
-
-## Model Slider
-
-Multi-model coordinate files, especially NMR ensembles, show a model slider at
-the bottom of the viewport.
-
-Proteoscope displays one model at a time. Move the slider to inspect alternate
-conformations in the ensemble.
-
-## Biological Assemblies
-
-PDBx/mmCIF files may define biological assemblies in addition to the deposited
-asymmetric unit. When assembly definitions are present, Proteoscope shows a
-`Biological assembly` selector in the structure panel.
-
-- `Asymmetric unit` shows the deposited coordinate set.
-- Numbered assemblies apply the transformations from the mmCIF assembly records
-  and display the generated biological unit.
-
-Proteoscope reads `_pdbx_struct_assembly`, `_pdbx_struct_assembly_gen`, and
-`_pdbx_struct_oper_list` for assembly definitions. Operation expressions,
-including ranges and Cartesian-product expressions such as `(1-4)(5,6)`, are
-resolved into 3D transforms before rendering.
-
-Assembly generation can multiply atom counts dramatically, so Proteoscope uses a
-300,000 atoms/model safety limit for generated assemblies. Assemblies above that
-limit are shown as unavailable rather than freezing the browser.
-
-## Chain Panel
-
-The chain panel lists all chains detected in the first model. Each row shows:
-
-- Chain identifier
-- Residue count
-- Atom count
-- Chain color
-
-Click any chain row to toggle that chain on or off. You can show any arbitrary
-combination of chains, which is useful for comparing interfaces, hiding solvent
-or partner chains, or focusing on selected subunits. Press `All` to restore all
-chains.
-
-## PNG Export
-
-Use the square toolbar button to export the current viewport as a PNG image.
-The image reflects the current camera angle, representation, coloring mode,
-visibility toggles, clipping, glow, and selection state.
+The **Representation** presets set the polymer and ligand styles together.
+You can also set each component separately:
+
+- **Polymer:** cartoon, trace, ball and stick, sticks, spacefill or hidden.
+  - The cartoon draws helices as ribbons, strands as flat arrows and loops as
+    tubes, with smooth transitions.
+  - Nucleic acids get a phosphate-backbone tube with base slabs.
+- **Ligands and ions:** ball and stick, sticks, spacefill or hidden. Ions are
+  drawn as spheres; metal-coordination bonds are dashed.
+- **Side chains:** *Around focus* (the default) shows side chains within 5 Å
+  of the focused residue or ligand. *All* shows every side chain on top of
+  the cartoon.
+- **Water and hydrogens:** toggles.
+- **Surface:**
+  - *Molecular (SES)*, *Solvent accessible (SAS)*, *Gaussian* or *van der
+    Waals*.
+  - Coloring can match the color scheme, Coulombic electrostatics or
+    hydrophobicity.
+  - Opacity is adjustable; a transparent surface shows the cartoon underneath.
+  - Surfaces are computed in a background worker, taking about 0.2 s for a
+    5,000-atom protein.
+
+Modified residues such as selenomethionine and phosphoserine stay part of the
+polymer. Unknown residues with a linked peptide or sugar-phosphate backbone
+are recognized automatically.
+
+## Color Schemes
+
+| Scheme | Notes |
+| --- | --- |
+| Chain / Molecule (entity) | Palettes: Vivid, Colorblind-safe (Okabe-Ito), Muted (Tol), Pastel |
+| Rainbow (N → C) | Sequence position within each chain |
+| Secondary structure | Helix, strand, turn, coil |
+| Molecule type | Protein, nucleic acid, ligand, ion, water |
+| Element | Standard element colors |
+| Residue class | Hydrophobic, polar, positive, negative, nucleic acid, ligand |
+| Hydrophobicity | Kyte-Doolittle scale |
+| Nucleotide | A, C, G, U/T |
+| B-factor | Blue-white-red, viridis or magma colormaps |
+| AlphaFold confidence (pLDDT) | AlphaFold DB colors: >90 dark blue, 70–90 light blue, 50–70 yellow, <50 orange. Applied automatically to predicted models. |
+| Solvent exposure | Relative SASA, after **Compute SASA** |
+| Peptide coverage / Custom residue data | From the Proteomics tab |
+| Uniform | Any color |
+
+*Heteroatoms by element* (on by default) colors N, O, S and other non-carbon
+atoms by element in the structural schemes. Ligand carbons are green.
+
+## Lighting and Effects
+
+| Preset | Look |
+| --- | --- |
+| Standard | Key light plus headlamp, ambient occlusion, depth fog |
+| Soft | Strong ambient occlusion with little direct light, similar to ChimeraX "soft" |
+| Illustrative | Flat colors, black outlines and ambient occlusion, for Goodsell-style figures |
+| Glossy | Strong specular highlights |
+| Neon | Additive glow on a dark background (the original Proteoscope look) |
+| Flat | Unlit colors with outlines |
+
+The individual sliders are ambient occlusion strength and radius, outline,
+depth fog, glow and specular. Backgrounds are dark, black, gray or white.
+**Front clip** and **Back clip** cut slabs through the molecule without
+rebuilding geometry; clipped atoms are capped.
+
+## Selection, Focus and Interactions
+
+![Imatinib in the ABL kinase pocket (2HYY) with hydrogen bonds to Met318, Thr315, Glu286 and Asp381, salt bridges, π-stacking and hydrophobic contacts](docs/images/binding-site.jpg)
+
+- **Selecting.** Click an atom to select its residue. The selection card
+  shows:
+  - Residue type, including modifications.
+  - Secondary structure and its source, including the DSSP code.
+  - φ/ψ angles.
+  - B-factor or pLDDT.
+  - UniProt position.
+  - Relative SASA and proteomics values, when computed.
+- **Focusing.** Double-click a residue or ligand (or select one and press
+  `F`) to focus it:
+  - The camera frames the binding site.
+  - Side chains within 5 Å appear.
+  - Non-covalent interactions are detected and drawn as colored dashed lines.
+- **Interaction types:** hydrogen bond, salt bridge, π-stacking (parallel and
+  T-shaped), cation-π, hydrophobic contact, halogen bond, metal coordination
+  and water bridge (when water is shown).
+  - The criteria follow PLIP (Salentin et al. 2015).
+  - Each type can be toggled in the Analysis tab.
+  - **Analyze interface** lists the contacts between two chains.
+  - **Export CSV** saves the interaction table.
+- **Labels.** **Label** (or `L`) adds 3D labels to the selected residues.
+  **Isolate chain** hides the other chains.
+
+## Measurements
+
+Pick a ruler in the toolbar or press `D` (distance), `A` (angle) or `T`
+(torsion/dihedral), then click 2, 3 or 4 atoms. Values appear as 3D labels
+and in the Measurements card. Remove one with ×, or press Backspace to remove
+the last.
+
+## Analysis Tab
+
+![AlphaFold DB model of p53 (P04637) colored by pLDDT, with the per-residue confidence profile and the predicted aligned error matrix](docs/images/alphafold-pae.jpg)
+
+- **Secondary structure.**
+  - *Auto* uses the file's HELIX/SHEET or `struct_conf` annotations when
+    present, and otherwise computes DSSP (Kabsch & Sander 1983).
+  - *DSSP* always recomputes.
+  - Chains with only C-alpha atoms fall back to a C-alpha-geometry estimate.
+- **Solvent accessibility.**
+  - Shrake-Rupley SASA with a 1.4 Å probe gives totals per chain and relative
+    exposure per residue (maximum ASA from Tien et al. 2013).
+  - It also gives each chain's buried surface area in the complex.
+  - After an interface analysis, it adds the buried surface area of that
+    interface.
+- **Ramachandran plot.** φ/ψ per residue, colored by secondary structure, with
+  glycine and proline marked. Click a point to select the residue. The shaded
+  regions are an approximate guide, not MolProbity contours.
+- **Per-residue profile.** B-factor or pLDDT, relative SASA, hydrophobicity
+  (9-residue window) or custom data along the sequence. Click to select.
+- **Predicted aligned error.** The PAE heatmap for AlphaFold models. Drag a
+  rectangle to select the residues of both ranges in 3D.
+
+## Proteomics Tab
+
+![p53 bound to DNA (1TUP) with the six most frequent cancer hotspot mutations labeled and peptide coverage shown in gold](docs/images/proteomics-sites.jpg)
+
+Everything in this tab runs in the browser. Nothing is uploaded.
+
+- **Sequence properties.**
+  - Uses ExPASy ProtParam conventions: average and monoisotopic mass, the
+    Bjellqvist pI, net charge at pH 7, ε280 with and without cystines,
+    absorbance at 0.1 %, GRAVY, the aliphatic and instability indices, and
+    aromaticity.
+  - Computed from the full deposited sequence when SEQRES or `entity_poly`
+    is available.
+- **UniProt annotations.**
+  - Fetches domains, functional sites, PTMs, disease variants and mutagenesis
+    data from UniProtKB.
+  - Features are mapped onto the structure through its UniProt
+    cross-reference.
+  - Filter the list (for example `R175`, `kinase`, `phospho`), click a feature
+    to select it, or mark features as sites.
+- **Peptide coverage.**
+  - Paste peptides, one per line, with an optional value.
+  - Understands MaxQuant, Spectronaut, DIA-NN, ProForma 2.0, Comet/SEQUEST and
+    FragPipe notation, including modifications.
+  - Isoleucine and leucine can be treated as equal.
+  - Coverage is mapped onto every matching chain and colored by peptide count.
+    Peptide values are averaged per residue.
+  - **In-silico digest** generates theoretical peptides for common proteases.
+- **Sites and variants.**
+  - Accepts `R175H`, `p.Arg248Gln`, `pS15`, `A:K120ac`, `Y1068` and similar.
+  - Sites can use structure (author) or UniProt numbering. Wild-type
+    mismatches are flagged, which catches numbering offsets.
+  - Sites are highlighted, labeled and focused.
+- **Cross-links (XL-MS).**
+  - Paste links such as `A:K123-B:K45`, or CSV with Protein1, Residue1,
+    Protein2 and Residue2 columns.
+  - Cα–Cα distances are checked against the chosen cross-linker's maximum
+    (DSS/BS3 30 Å, DSSO 30 Å, PhoX 20 Å, EDC 20 Å, …).
+  - Links are drawn green when satisfied and red when violated. For
+    homo-oligomers the shortest chain pairing is used.
+- **Custom residue data.**
+  - Paste `chain,residue,value` rows, such as HDX uptake, conservation or DMS
+    fitness.
+  - Choose a colormap, optionally centered on zero, to color the structure
+    and plot the profile.
+
+## Exporting
+
+**Export image** (the camera button, or `P`) renders the current view off
+screen:
+
+- Resolution 1× to 4× of the viewport, optionally supersampled for smooth
+  edges.
+- Optionally a transparent background, the color legend, labels and
+  measurements.
+- **Copy** puts the image on the clipboard.
+- **Spin video** records one full rotation as WebM.
+
+Interaction tables export as CSV.
+
+## Biological Assemblies and Ensembles
+
+- **Assemblies.** When a file defines biological assemblies (PDBx/mmCIF
+  `pdbx_struct_assembly` or PDB `REMARK 350`), choose one under **Biological
+  assembly**. Assemblies above 300,000 atoms per model are shown as
+  unavailable.
+- **Ensembles.** Multi-model files, such as NMR ensembles, show a model slider
+  with a play button.
 
 ## Structure Parsing Notes
 
-Proteoscope supports two coordinate formats.
+- **Legacy PDB:**
+  - Coordinates, `MODEL`/`ENDMDL`, `HELIX`/`SHEET`, `CONECT` and `SSBOND`.
+  - Header metadata from `HEADER`, `TITLE`, `COMPND`, `SOURCE`, `EXPDTA`,
+    `KEYWDS`, `REMARK 2` and `REMARK 3` (resolution, R-free), and
+    `REMARK 350` (assemblies).
+  - `SEQRES`, and UniProt mappings from `DBREF`/`DBREF1`/`DBREF2`.
+  - Element columns and formal charges. When the element column is missing,
+    the element is inferred from the PDB atom-name alignment, so an alpha
+    carbon is never mistaken for calcium.
+- **PDBx/mmCIF:**
+  - `_atom_site`: author and label identifiers, entity IDs, models, formal
+    charges.
+  - `_entity`, `_entity_poly` and `_entity_poly_seq`.
+  - `_struct_conf` and `_struct_sheet_range`.
+  - `_struct_conn`: only covalent, disulfide and metal-coordination records
+    become bonds.
+  - `_pdbx_struct_assembly*` and `_pdbx_struct_oper_list`.
+  - `_struct_ref`/`_struct_ref_seq` for UniProt numbering.
+  - `_refine`, `_reflns` and `_em_3d_reconstruction` for resolution and
+    R-factors, plus the organism and deposition-date categories.
+  - ModelCIF `_ma_qa_metric_local` for per-residue pLDDT.
+- **Chain and residue identifiers.** Author chain and residue IDs are used for
+  display.
+- **Alternate conformers.** The highest-occupancy conformer is kept.
+- **Bonds** come from explicit records plus geometry, using element covalent
+  radii. The geometric step also finds inter-chain disulfides and metal
+  coordination.
 
-### Legacy PDB
+## Command-Line Options
 
-For `.pdb` files, Proteoscope reads these records and fields:
+```text
+proteoscope [flags] [structure files...]
 
-- `HEADER`, `TITLE`, `EXPDTA`, and resolution remarks for metadata.
-- `ATOM` and `HETATM` for coordinates and atom properties.
-- `MODEL` and `ENDMDL` for multi-model ensembles.
-- `HELIX` and `SHEET` for secondary-structure hints.
-- `CONECT` for explicit connectivity where present.
-- Occupancy, B-factor, element, chain, residue name, residue number, insertion
-  code, alternate location, and atom serial fields.
+  --host string       interface to bind (default 127.0.0.1)
+  --port int          preferred port; nearby ports are tried if busy (default 8765)
+  --no-open           do not open a browser
+  --offline           disable remote fetching (cached entries still work)
+  --cache-dir path    fetch cache location (default: user cache dir/proteoscope)
+  --no-cache          do not read or write the fetch cache
+  --dev               serve web/ and data/ from disk for development
+  --version           print the version and exit
+```
 
-### PDBx/mmCIF
+The server only answers requests whose Host is the local address, and it
+rejects cross-origin API calls. This protects against DNS-rebinding and
+cross-site requests.
 
-For `.cif` and `.mmcif` files, Proteoscope reads the PDBx/mmCIF categories used
-for interactive coordinate viewing:
+## Scripting
 
-- `_atom_site` for atom coordinates, element, atom name, residue name, chain,
-  sequence ID, insertion code, occupancy, B-factor, model number, and
-  `ATOM`/`HETATM` group.
-- `_entry`, `_struct`, `_struct_keywords`, `_exptl`, `_refine`,
-  `_em_3d_reconstruction`, and `_reflns` for title, entry ID, method,
-  classification, keywords, and resolution metadata where present.
-- `_struct_conf` and `_struct_sheet_range` for helix and sheet ranges.
-- `_struct_conn` for explicit nonstandard links such as ligand, metal,
-  disulfide, salt-bridge, or other curated structure connections when those
-  records can be matched to rendered atoms.
-- `_pdbx_struct_assembly`, `_pdbx_struct_assembly_gen`, and
-  `_pdbx_struct_oper_list` for biological assembly generation.
+The page exposes a small console API for automation:
 
-For mmCIF chain display, Proteoscope prefers author-provided chain and residue
-identifiers (`auth_*`) when present because they usually match the identifiers
-researchers see in publications and RCSB pages. Label identifiers (`label_*`)
-are also retained internally for connection matching.
-
-Bond handling:
-
-- Explicit `CONECT` bonds are used when present.
-- Explicit `_struct_conn` relationships are used for PDBx/mmCIF files when
-  they can be resolved to atom records.
-- Standard covalent bonds are inferred from element radii and interatomic
-  distance because many coordinate files omit explicit records for ordinary
-  polymer residues.
-
-Alternate locations:
-
-- Blank alternate locations are accepted.
-- When alternate conformers describe the same atom, Proteoscope chooses the
-  highest-occupancy conformer, then `A`/`1`, then the first available conformer.
-
-Limitations:
-
-- Biological assembly generation is currently implemented for PDBx/mmCIF files,
-  not legacy PDB `REMARK 350` records.
-- Full solvent-accessible surfaces, electrostatics, density maps, and sequence
-  annotation tracks are not yet implemented.
-- PDBx/mmCIF coordinate, metadata, secondary-structure, and curated connection
-  categories are supported; full dictionary coverage is intentionally out of
-  scope for the interactive viewer.
+```js
+await proteoscope.fetch('6OIM');                  // PDB ID or UniProt accession
+proteoscope.representation('cartoon');            // cartoon, ball-stick, sticks, spacefill, trace, surface
+proteoscope.color('plddt');                       // any scheme id from the Style tab
+proteoscope.lighting('illustrative');
+const ligand = proteoscope.residues().find((r) => r.resName === 'MOV');
+await proteoscope.focus([ligand.key]);            // frame, side chains, interactions
+const png = await proteoscope.snapshot({ scale: 3, transparent: true });  // data URL
+```
 
 ## Development
 
 ### Requirements
 
 - Go 1.24 or newer.
-- A modern browser with WebGPU support. Chrome, Edge, and Brave are recommended
-  for best performance. Safari may fall back to a compatibility renderer and is
-  not recommended for large structures.
+- Node.js 22 or newer, to run the JavaScript tests.
+- A WebGPU-capable browser.
 
 ### Run From Source
 
 ```sh
-go run .
+go run . --dev
 ```
 
-Useful flags:
-
-```sh
-go run . --no-open
-go run . --host 127.0.0.1 --port 8765
-```
+`--dev` serves `web/` and `data/` from disk, so edits to the frontend show up
+after a browser reload without rebuilding. There is no JavaScript build step.
 
 ### Build A Single Binary
 
@@ -532,13 +500,10 @@ go run . --host 127.0.0.1 --port 8765
 go build -o proteoscope .
 ```
 
-The resulting executable embeds:
-
-- `web/*`
-- supported structure files from `data/`, including `.pdb`, `.cif`, and
-  `.mmcif`
-
-That means the app can be distributed as one file.
+The executable embeds `web/index.html`, `web/styles.css`, `web/app.js`,
+`web/favicon.svg`, `web/lib/*.js` and the structures in `data/`. To bundle
+your own example structures, put `.pdb`, `.ent`, `.cif` or `.mmcif` files in
+`data/` and rebuild.
 
 ### Cross Compile
 
@@ -553,32 +518,60 @@ GOOS=windows GOARCH=amd64 go build -o dist/proteoscope-windows-amd64.exe .
 
 ```sh
 go test ./...
-node --test web/app.test.mjs
+node --test "web/lib/*.test.mjs"
 ```
 
-There is no Node build step. The frontend is plain embedded HTML, CSS, and
-JavaScript.
+### Code Layout
+
+| Path | Responsibility |
+| --- | --- |
+| `main.go`, `fetch.go`, `cache.go`, `local.go`, `security.go` | Local server, embedded assets, fetch proxy and cache, command-line files, request hardening |
+| `web/app.js` | Application state, UI wiring, render loop, analysis and proteomics panels |
+| `web/lib/parse.js` | PDB and PDBx/mmCIF parsing, assemblies |
+| `web/lib/structure.js` | Residues, polymer typing, bonds, secondary structure, sequences, UniProt mapping |
+| `web/lib/dssp.js` | DSSP secondary-structure assignment |
+| `web/lib/cartoon.js` | Protein and nucleic-acid cartoon meshes |
+| `web/lib/scene.js`, `web/lib/coloring.js` | Representation and color-scheme logic |
+| `web/lib/renderer.js` | WebGPU renderer: impostors, G-buffer, SSAO, outlines, FXAA, picking, capture |
+| `web/lib/renderer-canvas.js` | Canvas 2D fallback renderer |
+| `web/lib/camera.js`, `web/lib/math3d.js` | Trackball camera and math |
+| `web/lib/surface.js`, `web/lib/surface-worker.js`, `web/lib/electrostatics.js` | Surfaces, SASA, Coulombic potential |
+| `web/lib/interactions.js` | Non-covalent interaction detection |
+| `web/lib/proteomics.js` | Sequence properties, peptide, site and cross-link parsing, digestion |
+| `web/lib/sequence-view.js`, `web/lib/plots.js` | Sequence panel, Ramachandran, profile and PAE plots |
+| `web/lib/residues.js`, `web/lib/elements.js`, `web/lib/colors.js` | Shared chemistry and color tables |
+
+See [proteoscope-spec/roadmap.md](proteoscope-spec/roadmap.md) for the project
+review, a comparison with other viewers and the roadmap.
 
 ## Troubleshooting
 
-### The App Opens But Says Canvas Preview
+### The badge says "Canvas preview"
 
-Your browser did not provide a WebGPU device. The app remains usable, but for
-the best rendering performance and shading quality, open the localhost URL in a
-browser with WebGPU enabled. Chrome, Edge, and Brave are the recommended
-choices. Safari may use a fallback path and can perform poorly on larger PDB
-files.
+Your browser did not provide WebGPU, so Proteoscope is using a simplified
+renderer without surfaces, ambient occlusion or outlines. Use Chrome, Edge or
+Brave, Safari 26 or later on macOS, or Firefox 141 or later on Windows. To
+force the compatibility renderer, for example to work around a GPU driver
+problem, open `http://127.0.0.1:8765/?renderer=canvas`.
 
-### The Port Is Already In Use
+### Fetching fails
 
-Proteoscope tries the requested port first and then searches nearby ports. Use
-the URL printed in the terminal.
+Check your network connection, and make sure Proteoscope was not started with
+`--offline`. The error message shows RCSB's or AlphaFold DB's reply, for
+example when an entry does not exist. Very large entries can take longer than
+the 45-second download limit on slow connections; download the file and open
+it locally instead.
 
-### My Downloaded File Does Not Load
+### The port is already in use
 
-Make sure the file is a coordinate file ending in `.pdb`, `.cif`, or `.mmcif`.
-Some RCSB download options provide compressed archives, validation reports,
-sequence files, or PDFs; those are not accepted directly by Proteoscope.
+Proteoscope tries the requested port first and then nearby ports. Use the URL
+printed in the terminal.
+
+### My downloaded file does not load
+
+Use a coordinate file ending in `.pdb`, `.ent`, `.cif` or `.mmcif`,
+optionally gzip-compressed. Validation reports, sequence files, BinaryCIF and
+PDFs are not coordinate files.
 
 ## License
 

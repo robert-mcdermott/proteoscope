@@ -229,3 +229,58 @@ the completed v0.1 application.
   - Verify representative workflows: sample switch, NMR model slider, heme
     search, ligand selection, and measurement-ready selection panel
   - _Requirements: 1.5, 2.3, 3.3, 11.5, 12.1, 13.1, 14.1, 14.2, 15.4_
+
+## Wave 1 (branch `wave1`)
+
+- [x] 21. Modularize the browser client into testable ES modules under `web/lib/`
+  - Parse, structure, DSSP, cartoon, scene, coloring, renderer, camera, plots and sequence view
+  - Port the existing tests and add regression tests over all bundled structures
+  - _Requirements: 18, 23_
+
+- [x] 22. Replace the renderer
+  - Ray-cast sphere and cylinder impostors with `frag_depth`, and indexed meshes
+  - G-buffer, SSAO with depth-aware blur, composite (outlines, fog, background), FXAA
+  - Reversed-Z depth, shader clipping with caps, transparent surfaces, GPU picking with tolerance
+  - On-demand rendering, supersampled and transparent capture, canvas fallback with depth cueing
+  - _Requirements: 14, 16_
+
+- [x] 23. Replace the camera with a quaternion trackball, principal-axes framing, orthographic mode and a panel-aware projection offset
+  - _Requirements: 6_
+
+- [x] 24. Fix parsing correctness issues and extend metadata
+  - Element inference; modified-residue promotion; `_struct_conn` bond filtering; SSBOND; CIF quoting; case-sensitive chain order
+  - R-free, organism, entities, SEQRES, `entity_poly_seq`, DBREF, `struct_ref_seq`, HETNAM, `chem_comp`, ModelCIF pLDDT, REMARK 350
+  - _Requirements: 4, 21, 23_
+
+- [x] 25. DSSP secondary structure with Auto, File and DSSP modes
+  - _Requirements: 18_
+
+- [x] 26. Cartoon rewrite: superellipse cross-sections, carbonyl-guided ribbons, sheet arrowheads, nucleic-acid tube and base slabs
+  - _Requirements: 7_
+
+- [x] 27. Per-component representations, 15 color schemes with legends, colorblind-safe palettes, lighting presets
+  - _Requirements: 7, 8, 16_
+
+- [x] 28. Surfaces, SASA and Coulombic electrostatics in a Web Worker
+  - _Requirements: 17_
+
+- [x] 29. Focus mode, PLIP-style interactions, interface analysis, CSV export
+  - _Requirements: 19_
+
+- [x] 30. Sequence panel, selection model, labels, distance, angle and torsion measurements
+  - _Requirements: 12, 20_
+
+- [x] 31. Go fetch proxy with cache and `--offline`, command-line files, security hardening, `--dev`
+  - _Requirements: 1, 21_
+
+- [x] 32. AlphaFold confidence: pLDDT coloring and summary, PAE heatmap linked to 3D
+  - _Requirements: 21_
+
+- [x] 33. Analysis plots: Ramachandran, per-residue profile
+  - _Requirements: 16, 21_
+
+- [x] 34. Proteomics toolkit: sequence properties, peptides, sites and variants, cross-links, custom data, UniProt annotations
+  - _Requirements: 22_
+
+- [x] 35. Documentation: README, design, requirements, review and roadmap
+  - _Requirements: 15_

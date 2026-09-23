@@ -229,3 +229,96 @@ selection, distance measurement, and PNG export.
 3. WHEN documentation is provided, THE System SHALL explain release downloads, browser recommendations, PDB acquisition, controls, representations, measurement, and build instructions
 4. WHEN release binaries are provided, THE documentation SHALL explain macOS, Linux, and Windows run/unblock steps
 
+
+## Wave 1 Requirements
+
+### Requirement 16: Publication-Quality Rendering
+
+**User Story:** As a researcher preparing figures, I want correct, depth-rich molecular rendering, so that images read clearly in 3D and meet journal standards.
+
+#### Acceptance Criteria
+
+1. WHEN atoms and bonds are rendered, THE System SHALL ray-cast spheres and cylinders and write per-pixel depth so intersections are exact
+2. WHEN ambient occlusion, outlines or depth fog are enabled, THE System SHALL apply them as screen-space post-processing
+3. WHEN a lighting preset (Standard, Soft, Illustrative, Glossy, Neon, Flat) is chosen, THE System SHALL update material, occlusion, outline, fog and glow settings together
+4. WHEN clipping is adjusted, THE System SHALL clip in the shaders without rebuilding geometry
+5. WHEN an image is exported, THE System SHALL render off screen at 1× to 4× viewport resolution, with optional 2× supersampling, transparent background, legend and labels
+6. WHEN nothing changes, THE System SHALL NOT re-render frames
+
+### Requirement 17: Surfaces and Electrostatics
+
+**User Story:** As a structural biologist, I want molecular surfaces colored by chemistry, so that I can see pockets, interfaces and charge distribution.
+
+#### Acceptance Criteria
+
+1. WHEN a surface type (SES, SAS, Gaussian or van der Waals) is selected, THE System SHALL compute it in a background worker for the visible chains
+2. WHEN electrostatic coloring is selected, THE System SHALL color by Coulombic potential (formal charges, ε = 4r, 1.4 Å offset, ±10 kcal/mol·e) and show a legend describing the method
+3. WHEN surface opacity is below 100%, THE System SHALL render a single transparent layer over the underlying representation
+4. WHEN SASA is requested, THE System SHALL report per-chain totals, per-residue relative exposure and buried surface area
+
+### Requirement 18: Secondary Structure Assignment
+
+**User Story:** As a researcher working with predicted or modeled structures, I want secondary structure without file annotations, so that cartoons are correct for any input.
+
+#### Acceptance Criteria
+
+1. WHEN a structure lacks HELIX/SHEET or struct_conf annotations, THE System SHALL assign secondary structure with DSSP
+2. WHEN the user selects File, DSSP or Auto mode, THE System SHALL reassign secondary structure and rebuild the cartoon
+3. WHEN chains contain only C-alpha atoms, THE System SHALL fall back to a C-alpha geometry estimate and label the source
+
+### Requirement 19: Binding Sites and Interactions
+
+**User Story:** As a medicinal chemist, I want to focus a ligand and see its non-covalent contacts, so that I can reason about binding.
+
+#### Acceptance Criteria
+
+1. WHEN a residue or ligand is focused, THE System SHALL frame it, show side chains within 5 Å and detect interactions using PLIP criteria
+2. WHEN interactions are shown, THE System SHALL draw typed dashed lines and list each contact with its distance
+3. WHEN two chains are chosen, THE System SHALL analyze their interface and, if SASA is available, report buried surface area
+4. WHEN interactions are exported, THE System SHALL write a CSV table
+
+### Requirement 20: Sequence Panel
+
+**User Story:** As a researcher, I want a sequence view linked to 3D, so that I can navigate by sequence and see what is not modeled.
+
+#### Acceptance Criteria
+
+1. WHEN a polymer chain is shown, THE System SHALL display its full declared sequence with unmodeled residues marked and helices and strands underlined
+2. WHEN residues are clicked, shift-clicked or dragged, THE System SHALL update the 3D selection, and hovering SHALL highlight in both views
+3. WHEN UniProt cross-references exist, THE System SHALL map author numbering to UniProt numbering
+
+### Requirement 21: Remote Structures and Prediction Confidence
+
+**User Story:** As a researcher, I want to open structures by identifier and judge prediction confidence, so that I can work with PDB entries and AlphaFold models without manual downloads.
+
+#### Acceptance Criteria
+
+1. WHEN a PDB ID or UniProt accession is entered, THE System SHALL fetch the RCSB mmCIF or current AlphaFold DB model through the local server
+2. WHEN `--offline` is set, THE System SHALL refuse remote fetches and still serve cached entries
+3. WHEN a predicted model is loaded, THE System SHALL color by pLDDT with the AlphaFold DB scheme and summarize confidence
+4. WHEN a PAE matrix is available (AlphaFold DB, AlphaFold 3, ColabFold), THE System SHALL show an interactive heatmap whose rectangle selections highlight residues in 3D
+
+### Requirement 22: Proteomics Overlays
+
+**User Story:** As a proteomics researcher, I want to map my MS results onto structures locally, so that I can interpret coverage, modifications and cross-links in 3D without uploading unpublished data.
+
+#### Acceptance Criteria
+
+1. WHEN a protein chain is selected, THE System SHALL report ExPASy-ProtParam-equivalent sequence properties
+2. WHEN peptides are pasted in common proteomics notations, THE System SHALL parse modifications, map peptides to all chains (optionally treating I and L as equal), and color coverage
+3. WHEN sites or variants are entered, THE System SHALL locate them in structure or UniProt numbering and flag wild-type mismatches
+4. WHEN cross-links are entered, THE System SHALL measure Cα–Cα distances against the chosen cross-linker's maximum and color satisfied and violated links
+5. WHEN per-residue values are pasted, THE System SHALL color by them with a selectable colormap
+6. WHEN UniProt annotations are requested, THE System SHALL fetch UniProtKB features and map them onto the structure
+
+### Requirement 23: Scientific Correctness of Parsing
+
+**User Story:** As a structural biologist, I want residues, elements and bonds interpreted correctly, so that the visualization is trustworthy.
+
+#### Acceptance Criteria
+
+1. WHEN element columns are missing, THE System SHALL infer elements from PDB atom-name alignment (for example, alpha carbons are not calcium)
+2. WHEN modified residues carry a linked backbone, THE System SHALL keep them in the polymer
+3. WHEN `_struct_conn` records are read, THE System SHALL create bonds only for covalent, disulfide and metal-coordination records
+4. WHEN geometry indicates inter-chain disulfides or metal coordination, THE System SHALL add those bonds
+5. WHEN legacy PDB files define REMARK 350 assemblies, THE System SHALL offer them like mmCIF assemblies

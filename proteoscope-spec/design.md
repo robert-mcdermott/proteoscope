@@ -2,34 +2,37 @@
 
 ## Overview
 
-Proteoscope is a local molecular visualization application built as a Go
-single-binary web server with an embedded browser frontend. The backend is
-minimal by design: it serves static assets, embedded PDB files, a sample
-manifest, and health information. The browser frontend owns the scientific
-workflow: PDB parsing, bond inference, molecular scene construction, rendering,
-search, selection, measurement, and export.
+Proteoscope is a local molecular visualization and analysis application built
+as a Go single-binary web server with an embedded browser frontend.
 
-The architecture follows a two-layer local application model:
+The backend serves static assets, the bundled structures, a sample manifest,
+files named on the command line, and a small fetch proxy for public databases.
+The browser frontend owns the scientific workflow:
 
-- **Local Application Host**: Go HTTP server, embedded filesystem, sample
-  manifest, and browser launch helper.
-- **Browser Visualization Client**: HTML/CSS/JavaScript application with PDB
-  parser, molecular data model, interaction state, WebGPU renderer, canvas
-  fallback renderer, and UI controls.
+- Parsing and structure derivation.
+- Secondary structure.
+- Representation and color building.
+- WebGPU rendering.
+- Analysis: interactions, surfaces, SASA, plots.
+- Proteomics overlays.
+- Export.
 
 Key design principles:
 
-- **Single-file distribution**: All app assets and bundled structures ship in
-  one executable.
-- **Local-first privacy**: User-selected PDB files are parsed in the browser and
-  are not uploaded externally.
-- **Scientific competence before spectacle**: Visual polish must preserve
-  chemically meaningful atom, residue, chain, ligand, B-factor, and model
-  semantics.
-- **Progressive rendering capability**: Prefer WebGPU for performance while
-  maintaining a fallback path for browsers without WebGPU.
-- **Immediate usability**: Bundled structures and an in-browser upload flow let
-  users start without setup.
+- **Single-file distribution.** All application assets and bundled structures
+  ship in one executable.
+- **Local-first privacy.**
+  - User files are parsed in the browser and are never uploaded.
+  - Remote requests go only to fixed public databases (RCSB, AlphaFold DB,
+    UniProt), through the local proxy.
+  - `--offline` disables remote requests.
+- **Scientific competence before spectacle.** Chemical and biological
+  semantics come first: residue typing, bonds, DSSP, numbering, confidence
+  and interactions. Every analysis states its method.
+- **Publication-quality rendering.** Ray-cast impostors, ambient occlusion,
+  outlines and supersampled export, with a canvas fallback.
+- **No build step.** Plain ES modules in `web/lib/` are loaded directly by the
+  browser and tested with Node's built-in test runner.
 
 ## Architecture
 
@@ -38,440 +41,283 @@ Key design principles:
 ```mermaid
 graph TB
     User[Researcher]
-    Binary[Proteoscope Go Binary]
-    Browser[Browser UI]
-    EmbedFS[(Embedded FS)]
-    Data[(Bundled PDB Files)]
-    Upload[Local User PDB]
-    Parser[PDB Parser]
-    Model[Molecular Data Model]
-    Scene[Scene Builder]
-    Renderer[WebGPU Renderer]
-    Canvas[Canvas Preview Renderer]
-    UI[Controls and Panels]
+    Binary[Proteoscope Go binary]
+    Browser[Browser client]
+    Embed[(Embedded web + data)]
+    Cache[(Fetch cache)]
+    Remote[RCSB / AlphaFold DB / UniProt]
+    Local[Local files and CLI arguments]
 
     User -->|runs| Binary
     Binary -->|serves localhost| Browser
-    Binary --> EmbedFS
-    EmbedFS --> Data
-    Browser -->|GET /api/samples| Binary
-    Browser -->|GET /data/*.pdb| Binary
-    User -->|selects file| Upload
-    Upload --> Parser
-    Data --> Parser
-    Parser --> Model
-    Model --> Scene
-    Scene --> Renderer
-    Scene --> Canvas
-    UI --> Scene
-    Renderer --> Browser
-    Canvas --> Browser
+    Binary --> Embed
+    Binary -->|/api/fetch proxy| Remote
+    Binary <--> Cache
+    Local -->|drag-drop / open| Browser
+    Local -->|CLI args /api/local| Binary
 ```
 
-### Runtime Flow
+### Browser Modules
 
 ```mermaid
-sequenceDiagram
-    participant U as User
-    participant G as Go Host
-    participant B as Browser Client
-    participant P as PDB Parser
-    participant R as Renderer
+graph LR
+    App[app.js<br/>state, UI, render loop]
+    Parse[parse.js<br/>PDB + mmCIF]
+    Structure[structure.js<br/>residues, bonds, SS, sequences]
+    DSSP[dssp.js]
+    Cartoon[cartoon.js]
+    Scene[scene.js]
+    Color[coloring.js]
+    Renderer[renderer.js<br/>WebGPU]
+    Canvas[renderer-canvas.js]
+    Camera[camera.js]
+    Interactions[interactions.js]
+    Surface[surface-worker.js<br/>surface.js + electrostatics.js]
+    Proteomics[proteomics.js]
+    Views[sequence-view.js<br/>plots.js]
 
-    U->>G: Start executable
-    G->>G: Bind localhost port
-    G->>U: Print local URL
-    G->>B: Serve embedded HTML/CSS/JS
-    B->>G: GET /api/samples
-    G->>B: Return bundled PDB manifest
-    B->>G: GET /data/default.pdb
-    G->>B: Return PDB text
-    B->>P: Parse PDB records
-    P->>B: Structure model
-    B->>B: Infer bonds, chains, residues, search index
-    B->>R: Upload or project scene data
-    R->>B: Render molecule
-    U->>B: Interact, search, select, measure, export
+    App --> Parse --> Structure --> DSSP
+    App --> Scene --> Cartoon
+    App --> Color
+    App --> Renderer
+    App --> Canvas
+    App --> Camera
+    App -. lazy .-> Interactions
+    App -. worker .-> Surface
+    App -. lazy .-> Proteomics
+    App --> Views
 ```
 
-## Technology Stack
-
-- **Host Runtime**: Go 1.24+
-- **Distribution**: Go `embed.FS` for `web/*` and `data/*.pdb`
-- **HTTP Server**: Go standard library `net/http`
-- **Frontend**: Plain HTML, CSS, and JavaScript modules
-- **Primary Renderer**: WebGPU with WGSL shaders
-- **Fallback Renderer**: Canvas 2D compatibility preview
-- **Data Format**: Standard `.pdb` coordinate files
-- **Build Model**: No Node build step; Go compiler creates final binary
+Modules in `web/lib/` are pure (no DOM access) except `renderer*.js`,
+`sequence-view.js` and `plots.js`. Pure modules run in the browser, in Web
+Workers and in Node tests. Interactions, proteomics and electrostatics load
+lazily on first use.
 
 ## Host Application Design
 
 ### Embedded Content
 
-The Go binary embeds:
-
-- `web/index.html`
-- `web/styles.css`
-- `web/app.js`
-- `web/favicon.svg`
-- `data/*.pdb`
-
-This removes runtime dependency on external asset files and supports
-cross-platform single-binary releases.
+`//go:embed` includes `web/index.html`, `web/styles.css`, `web/app.js`,
+`web/favicon.svg`, `web/lib/*.js` and `data/`. Test files (`*.test.mjs`) are
+not embedded. `--dev` serves `web/` and `data/` from disk instead.
 
 ### HTTP Routes
 
 | Route | Purpose |
 | --- | --- |
-| `/` | Serve the embedded application shell |
-| `/app.js`, `/styles.css`, `/favicon.svg` | Serve embedded frontend assets |
-| `/api/health` | Return simple health status |
-| `/api/samples` | Return metadata for embedded PDB samples |
-| `/data/*.pdb` | Serve embedded PDB files |
+| `/` and static assets | Embedded application |
+| `/api/health`, `/api/samples` | Health check and bundled-structure manifest |
+| `/api/startup` | Version, offline flag and files given on the command line |
+| `/api/local/{index}` | A file named on the command line (gzip decoded) |
+| `/api/fetch/pdb/{id}` | RCSB PDBx/mmCIF by PDB ID, including extended `pdb_` IDs |
+| `/api/fetch/afdb/{accession}` | AlphaFold DB model; the file URL comes from the prediction API |
+| `/api/fetch/afdb/{accession}/pae` | AlphaFold DB PAE JSON |
+| `/api/fetch/uniprot/{accession}` | UniProtKB entry with feature annotations |
+| `/data/*` | Bundled structure files |
 
-### Port Selection
+Fetch responses carry `X-Proteoscope-Filename`, `-Source`, `-Cache` and, for
+AlphaFold DB, `-Pae` and `-Meta-B64` headers. Payloads are cached on disk with
+atomic writes. The cache has no expiry.
 
-The server first attempts the requested host and port. If the preferred port is
-unavailable, it tries nearby ports before falling back to an OS-assigned port.
-The selected URL is printed to the terminal.
+### Security
 
-### Browser Launch
-
-Unless disabled with `--no-open`, the host attempts to open the local URL using:
-
-- `open` on macOS
-- `rundll32 url.dll,FileProtocolHandler` on Windows
-- `xdg-open` on Linux
-
-## Browser Client Design
-
-### Major Client Modules
-
-Although implemented in a single JavaScript module, the client has distinct
-logical modules:
-
-```mermaid
-graph LR
-    Boot[Bootstrapping]
-    GPU[Renderer Init]
-    Fetch[Sample Fetch/Upload]
-    Parse[PDB Parser]
-    Derive[Derived Structure Builder]
-    Scene[Scene Builder]
-    Interact[Interaction Controller]
-    Search[Search Index]
-    UI[UI Renderer]
-    Export[PNG Export]
-
-    Boot --> GPU
-    Boot --> Fetch
-    Fetch --> Parse
-    Parse --> Derive
-    Derive --> Search
-    Derive --> Scene
-    Interact --> Scene
-    UI --> Scene
-    Scene --> GPU
-    Scene --> Export
-```
-
-### Client State
-
-The browser maintains a single application state object containing:
-
-- Loaded sample manifest
-- Active structure
-- Active model index
-- Representation mode
-- Color scheme
-- Atom, bond, glow, and clipping controls
-- Ligand, water, hydrogen, and motion toggles
-- Isolated chain
-- Selected atom
-- Hovered atom
-- Measurement history
-- Camera position and orientation
-- Visible atom and bond buffers
-
-This design keeps UI controls, rendering, picking, and search synchronized
-through a single rebuild path.
+- **Host check.** Requests must name a loopback host, or the `--host` value,
+  in the `Host` header. This blocks DNS rebinding.
+- **Cross-origin checks.** API requests with a foreign `Origin` or a
+  cross-site `Sec-Fetch-Site` are rejected.
+- **Headers.** HTML is served with a strict CSP (`script-src 'self'`,
+  `connect-src 'self'`). All responses carry `nosniff`, `no-referrer`, COOP
+  and CORP.
+- **Upstreams.** Only fixed hosts, with size and time limits. Redirects are
+  followed only within the same host.
 
 ## Data Model
 
-### Structure
+A **structure** holds:
 
-```text
-Structure
-  meta
-    title
-    code
-    classification
-    method
-    resolution
-    numModels
-  helices[]
-  sheets[]
-  conect[]
-  models[]
-  chains[]
-  residues[]
-  searchItems[]
-```
+- Metadata: title, code, method, resolution, R-free, organism, deposition
+  date, and whether the structure is a predicted model.
+- Entities, chain→entity mapping and declared sequences (SEQRES or
+  `entity_poly_seq`).
+- UniProt segments, per-residue confidence (ModelCIF), component names, and
+  secondary-structure ranges.
+- Explicit connections, assemblies, models, chains and sequences.
 
-### Model
+A **model** holds atoms, residues, `residueMap`, `atomResidue` (atom →
+residue index), bonds (`{a, b, kind}`, where kind is `covalent` or `metal`),
+bounds, the B-factor range and a cartoon cache.
 
-```text
-Model
-  number
-  atoms[]
-  bonds[]
-  serialToIndex
-  bounds
-  bFactorRange
-```
+An **atom** carries:
 
-### Atom
+- Identity: `id` (its index in the model), serial, name.
+- Residue identity: `resName`, `chain`/`authChain`/`labelChain`,
+  `resSeq`/`authSeq`/`labelSeq`, `iCode`, `entityId`.
+- Coordinates and scalars: coordinates, occupancy, B-factor, formal charge,
+  element.
+- Classification: `kind` (protein, nucleic, ligand, ion or water) and
+  secondary structure.
 
-```text
-Atom
-  id
-  serial
-  name
-  altLoc
-  resName
-  chain
-  resSeq
-  iCode
-  x, y, z
-  occupancy
-  bFactor
-  element
-  record
-  isHet
-  isWater
-  isHydrogen
-  residueKey
-  polymerType
-  ss
-```
+A **residue** carries:
 
-### Bond
+- Its atoms and an `atomByName` map.
+- Backbone atoms (protein) or nucleic backbone atoms.
+- Identity and type: `kind`, `parent` (e.g. MET for MSE), a one-letter code
+  and a `modified` flag.
+- Chain linkage: `linkedToPrevious`, computed from peptide or phosphodiester
+  geometry.
+- Secondary structure: `ss`, `ssSource`, `dssp`.
+- Geometry and quality: φ/ψ, mean B-factor, occupancy, confidence.
 
-```text
-Bond
-  a
-  b
-  explicit
-```
+## Parsing Design
 
-### Search Item
+- **PDB (fixed columns).**
+  - Coordinates, models, HELIX/SHEET, CONECT and SSBOND.
+  - Metadata: HEADER, TITLE, COMPND, SOURCE, KEYWDS, EXPDTA, REMARK 2 and 3
+    (resolution, R-free), HETNAM, SEQRES, DBREF/DBREF1/DBREF2.
+  - Assemblies from REMARK 350.
+  - Element inference follows the atom-name alignment convention when the
+    element column is missing.
+- **PDBx/mmCIF.**
+  - The tokenizer follows CIF quoting rules: a quote ends a value only when
+    followed by whitespace.
+  - Loops are stored column-wise, so `_atom_site` is read without creating an
+    object per row.
+  - Only covalent, disulfide and metal-coordination `_struct_conn` records
+    become bonds; hydrogen-bond records do not.
+  - ModelCIF `_ma_qa_metric_local` supplies per-residue pLDDT.
+- **Alternate locations.** The highest-occupancy conformer is kept
+  (deterministic ties). Aliases keep CONECT serial numbers resolvable.
 
-```text
-SearchItem
-  type
-  label
-  sublabel
-  atomID
-  haystack
-```
+## Structure Derivation
 
-## PDB Parsing Design
-
-The parser is fixed-column oriented and recognizes:
-
-- `HEADER`
-- `TITLE`
-- `EXPDTA`
-- resolution remarks
-- `ATOM`
-- `HETATM`
-- `MODEL`
-- `ENDMDL`
-- `HELIX`
-- `SHEET`
-- `CONECT`
-
-Parsing happens entirely in the browser for both bundled and uploaded files.
-
-### Alternate Location Policy
-
-The parser accepts:
-
-- blank alternate location
-- `A`
-- `1`
-
-Other alternate locations are skipped in the default view. This avoids duplicate
-atoms in common crystal structures while preserving a deterministic primary
-conformer.
-
-### Multi-Model Policy
-
-PDB files with `MODEL` blocks are treated as ensembles. Proteoscope renders one
-model at a time and exposes a model slider. Counts distinguish atoms per active
-model from total coordinate records across all models.
-
-## Derived Structure Design
-
-After parsing, the client derives additional data:
-
-- Chain summaries from first model
-- Residue summaries from first model
-- Secondary-structure assignment from `HELIX` and `SHEET`
-- Explicit bonds from `CONECT`
-- Inferred covalent bonds from distance and element radii
-- Bounds and radius for camera fitting
-- B-factor min/max for color scaling
-- Search index for residues and atoms
-
-### Bond Inference
-
-Bond inference uses spatial hashing to avoid all-pairs comparisons. Candidate
-atoms are evaluated by:
-
-- Distance threshold
-- Element covalent radii
-- Water and hydrogen exclusions
-- Chain boundary rules
-- Metal-specific threshold allowance
-
-This produces visually useful polymer connectivity while respecting explicit
-PDB connectivity where present.
+- **Residue kinds.** Kinds come from name tables. Unknown residues with a
+  linked peptide or sugar-phosphate backbone are promoted into the polymer.
+- **Bonds.**
+  - Explicit records are applied first.
+  - Then a spatial hash with 2.9 Å cells finds bonds using element covalent
+    radii.
+  - Cross-chain bonds are allowed only for ligands and disulfides.
+  - Metal–ligand pairs up to 2.8 Å become `metal` bonds.
+- **Secondary structure.**
+  - DSSP is always computed.
+  - The *Auto* mode uses file annotations when present, otherwise DSSP.
+  - C-alpha-only chains use a geometric estimate.
+- **Sequences.**
+  - Declared sequences are aligned to modeled residues: by `label_seq_id` for
+    mmCIF, and by Needleman–Wunsch for PDB SEQRES.
+  - UniProt segments map between author and UniProt numbering.
 
 ## Rendering Design
 
-### WebGPU Renderer
+### WebGPU Frame
 
-The WebGPU renderer uses three pipelines:
+```mermaid
+graph LR
+    G[Geometry pass<br/>color + normal + atom id + depth] --> AO[SSAO] --> B[Depth-aware blur]
+    G --> C[Composite<br/>AO, outlines, fog, background]
+    B --> C
+    C --> O[Overlay<br/>transparent surfaces, glow]
+    O --> F[FXAA or 2x downsample]
+    F --> S[Swap chain or capture texture]
+```
 
-- Atom impostor pipeline
-- Atom glow pipeline
-- Bond billboard pipeline
+- **Spheres.** Camera-facing quads sized to the perspective silhouette. The
+  fragment shader ray-casts the sphere, writes `frag_depth`, and caps spheres
+  cut by the front clip plane.
+- **Cylinders.** Oriented bounding-box proxies, ray-cast in the fragment
+  shader. They use split colors and pick the atom at the nearer end. Optional
+  dashes and round caps support measurement, interaction and cross-link
+  lines.
+- **Meshes.** Cartoon and surfaces are indexed triangle lists with smooth
+  normals. The per-vertex atom index looks up the atom's color and
+  selection flags, so recoloring and selection never rebuild geometry.
+- **Per-atom buffers.** Color and flags (selected, hovered, dimmed) are
+  storage buffers indexed by atom ID.
+- **Depth.** Reversed-Z on `depth32float`.
+- **Clipping.** Front and back view-depth planes are applied in the shaders.
+- **Transparency.** Transparent surfaces use a depth pre-pass followed by a
+  single-layer blend.
+- **Picking.** The atom-ID target is copied into a 9×9 readback window, and
+  the hit nearest the cursor is used.
+- **Capture.** Off-screen targets are rendered at 2× and downsampled with
+  premultiplied alpha, then un-premultiplied on the CPU. Transparent
+  backgrounds are supported.
+- **On-demand rendering.** A frame is drawn only when the scene, camera,
+  colors or flags change, or while an animation runs.
 
-Atoms are uploaded as storage-buffer records containing position, radius, color,
-and alpha. The atom shader renders screen-facing quads and shades them as
-spherical impostors. Bonds are rendered as camera-facing strips between atom
-positions.
+### Canvas Fallback
 
-Lighting uses viewer-facing headlamp-style shading, so atoms facing the screen
-remain lit as the molecule rotates.
+The Canvas 2D fallback consumes the same instance buffers and cartoon polyline
+shapes. It sorts them by depth and applies depth cueing. It draws no surfaces,
+ambient occlusion or outlines.
 
-### Canvas Preview Renderer
+### Representations
 
-If WebGPU is unavailable or initialization times out, Proteoscope falls back to a
-Canvas 2D renderer. The canvas renderer projects 3D atom and bond positions into
-screen space, sorts by depth, draws bonds, draws glow, and then draws atoms with
-a centered radial highlight.
-
-The fallback prioritizes usability and compatibility over large-structure
-performance.
-
-### Representation Builder
-
-The scene builder filters atoms and creates render records based on:
-
-- Active model
-- Representation
-- Color scheme
-- Chain isolation
-- Ligand, water, and hydrogen visibility
-- Clipping
-- Atom and bond scale
-- Measurements
-
-Representation behavior:
-
-- **Ball + Stick**: atoms and inferred/explicit bonds
-- **Spacefill**: atoms at van der Waals scale, no standard bonds
-- **Backbone**: protein/nucleic backbone trace plus ligands
+- **Scene building.** Each atom gets a style from its component: polymer
+  (cartoon, trace, ball-and-stick, sticks, spacefill or hidden), ligand, ion
+  or water. Side chains are drawn around the focus or everywhere.
+- **Cartoon coverage.** Residues outside the cartoon, such as isolated
+  residues, fall back to ball-and-stick so nothing disappears.
+- **Cartoon geometry.**
+  - Catmull–Rom splines through C-alpha atoms. Sheet control points are
+    smoothed.
+  - Ribbon orientation comes from carbonyl guide vectors.
+  - The cross-section is a superellipse whose width, thickness and exponent
+    morph per sample: ellipse helices, flat sheets and round coils.
+  - Arrowheads use a step face.
+  - Nucleic acids get a phosphate-trace tube, base-ring slabs and
+    glycosidic connectors.
 
 ## Interaction Design
 
-### Camera
-
-The camera is an orbital camera with:
-
-- Target point
-- Radius
-- Yaw
-- Pitch
-- Forward, right, and up vectors
-- Perspective projection
-
-Pointer events map to:
-
-- Drag: rotate
-- Shift-drag: pan
-- Wheel: zoom
-
-### Picking
-
-Atom picking uses ray-sphere proximity against currently visible atom records.
-The closest visible atom near the pointer ray is selected.
-
-### Measurement
-
-Measurements are sequential:
-
-1. Select first atom
-2. Select second atom
-3. Compute Euclidean distance in PDB coordinate units
-4. Store and render a measurement line
-
-Distances are reported in Angstroms, matching PDB coordinate convention.
-
-### Search
-
-Search is client-side and term-based. A result matches when all query terms are
-present in a precomputed lowercase haystack. Residue and atom search items share
-one result list.
-
-Known aliases support common ligand names, such as `heme` for `HEM`.
+- **Camera.**
+  - A quaternion trackball orbits about the camera axes; there is no gimbal
+    lock.
+  - Pan, roll and pinch-zoom are supported.
+  - New structures are framed on their principal axes. The long axis runs
+    horizontal on landscape screens and vertical on portrait screens.
+  - A projection offset centers the molecule in the area not covered by the
+    side panels.
+  - Transitions are animated.
+- **Selection.** Selection works on residues. Click selects,
+  shift/meta-click toggles, and the sequence panel supports drag ranges.
+  Hover highlighting is synchronized between 3D and the sequence panel.
+- **Focus.** Focusing selects the residues within 5 Å of the target (a
+  spatial-hash search), shows their side chains, computes PLIP-style
+  interactions and frames the site.
+- **Measurements.** Distance, angle and torsion modes collect atoms by
+  clicking. Lines are dashed cylinders, and values appear as HTML labels
+  projected every frame.
 
 ## UI Design
 
-### Panels
+The canvas fills the window, and panels float over it.
 
-- **Structure Summary**: title, renderer mode, bundled sample selector, local
-  upload, atom/residue/chain/model counts
-- **Search Panel**: residue and atom search
-- **Controls Panel**: representation, color scheme, atom scale, bond scale,
-  glow, clipping, ligand/water/hydrogen/motion toggles
-- **Chain Panel**: chain list and chain isolation
-- **Selection Panel**: selected atom details and measurement controls
-- **Model Strip**: visible only for multi-model structures
-- **Toolbar**: reset view and PNG export
-
-### Visual Style
-
-The interface uses a dark scientific visualization surface with translucent
-panels, restrained colors, compact controls, and emphasis on the molecular
-scene. The design favors repeated research use over landing-page presentation.
+- **Top bar.**
+- **Left panel.** Tabs for Structure, Style, Analysis and Proteomics.
+- **Right panel.** Chains, selection, interactions and measurements.
+- **Bottom.** The sequence panel.
+- **Viewport overlays.** Toolbar, legend, mode banner, model strip, labels
+  and tooltip.
+- **Dialogs.** Export and help.
+- **Performance.** Plots in hidden tabs are not re-rendered.
+- **Narrow screens.** Panels become exclusive overlays.
 
 ## Error Handling
 
-- Missing PDB coordinates produce a visible load error.
-- WebGPU absence or device timeout triggers Canvas preview.
-- Port conflicts trigger nearby-port selection.
-- Browser auto-open failures are logged but do not stop the server.
-
-## Security and Privacy
-
-- The application binds to localhost by default.
-- Uploaded local PDB files are read in the browser.
-- No external upload service is used for local structures.
-- Release binaries may need OS-specific trust/unblock steps because they are not
-  signed by platform vendors.
+- Parse and fetch errors appear as toasts. Proxy errors are returned as JSON
+  with a readable message.
+- WebGPU absence or timeout triggers the Canvas fallback, and the badge
+  explains the limitations. A lost GPU device shows a reload message.
+- A lazily loaded module that fails is reported once, and its features are
+  disabled.
+- Assemblies above 300,000 atoms per model are disabled in the selector.
 
 ## Known Limitations
 
-- `.pdb` is supported; `.cif` and `.mmCIF` are not yet supported.
-- Biological assembly transformations are not expanded.
-- Molecular surfaces are not implemented.
-- Electron density maps are not implemented.
-- Electrostatics are not implemented.
-- Sequence annotation tracks are not implemented.
-- Canvas preview is less performant than WebGPU and is not ideal for large
-  structures.
+See `roadmap.md` §5. In particular:
 
+- One structure at a time.
+- Electrostatics are qualitative (formal charges, ε = 4r).
+- Ligand chemistry is inferred from geometry.
+- The Ramachandran regions are approximate.

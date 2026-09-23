@@ -11,6 +11,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -20,8 +21,10 @@ import (
 	"time"
 )
 
-//go:embed web/* data
+//go:embed web/index.html web/styles.css web/app.js web/favicon.svg web/lib/*.js data
 var content embed.FS
+
+var version = "0.5.0-dev"
 
 type sample struct {
 	ID             string `json:"id"`
@@ -38,31 +41,65 @@ type sample struct {
 	SizeBytes      int    `json:"sizeBytes"`
 }
 
-func main() {
-	host := flag.String("host", "127.0.0.1", "host interface to bind")
-	port := flag.Int("port", 8765, "preferred localhost port")
-	noOpen := flag.Bool("no-open", false, "do not open the browser automatically")
-	flag.Parse()
+type config struct {
+	host        string
+	port        int
+	noOpen      bool
+	offline     bool
+	noCache     bool
+	cacheDir    string
+	dev         bool
+	showVersion bool
+	files       []string
+}
 
+type app struct {
+	offline  bool
+	dev      bool
+	assetDir string
+	assets   fs.FS
+	files    []localFile
+	cache    *diskCache
+	remote   *upstream
+}
+
+func init() {
 	if err := mime.AddExtensionType(".js", "text/javascript; charset=utf-8"); err != nil {
 		log.Printf("mime registration warning: %v", err)
 	}
+}
 
-	handler, err := appHandler()
+func main() {
+	cfg, err := parseConfig(os.Args[1:])
+	if errors.Is(err, flag.ErrHelp) {
+		return
+	}
 	if err != nil {
-		log.Fatalf("failed to prepare embedded app: %v", err)
+		os.Exit(2)
+	}
+	if cfg.showVersion {
+		fmt.Printf("proteoscope %s\n", version)
+		return
 	}
 
-	listener, actualPort, err := listen(*host, *port)
+	a, err := newApp(cfg)
+	if err != nil {
+		log.Fatalf("failed to prepare app: %v", err)
+	}
+	handler, err := a.handler()
+	if err != nil {
+		log.Fatalf("failed to prepare app: %v", err)
+	}
+
+	listener, actualPort, err := listen(cfg.host, cfg.port)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	url := fmt.Sprintf("http://%s:%d", *host, actualPort)
-	fmt.Printf("Proteoscope is running at %s\n", url)
-	fmt.Println("Press Ctrl+C to stop.")
+	url := "http://" + net.JoinHostPort(cfg.host, strconv.Itoa(actualPort))
+	a.printBanner(url)
 
-	if !*noOpen {
+	if !cfg.noOpen {
 		go func() {
 			time.Sleep(300 * time.Millisecond)
 			if err := openBrowser(url); err != nil {
@@ -72,7 +109,7 @@ func main() {
 	}
 
 	server := &http.Server{
-		Handler:           handler,
+		Handler:           protect(handler, cfg.host, actualPort),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -80,31 +117,148 @@ func main() {
 	}
 }
 
-func appHandler() (http.Handler, error) {
-	webFS, err := fs.Sub(content, "web")
+func parseConfig(args []string) (config, error) {
+	var cfg config
+	flags := flag.NewFlagSet("proteoscope", flag.ContinueOnError)
+	flags.StringVar(&cfg.host, "host", "127.0.0.1", "host interface to bind")
+	flags.IntVar(&cfg.port, "port", 8765, "preferred localhost port")
+	flags.BoolVar(&cfg.noOpen, "no-open", false, "do not open the browser automatically")
+	flags.BoolVar(&cfg.offline, "offline", false, "disable remote structure fetching (cached downloads are still served)")
+	flags.StringVar(&cfg.cacheDir, "cache-dir", "", "directory for cached downloads (default: <user cache dir>/proteoscope)")
+	flags.BoolVar(&cfg.noCache, "no-cache", false, "do not cache downloads on disk")
+	flags.BoolVar(&cfg.dev, "dev", false, "serve web/ and data/ from the working directory instead of the embedded copies")
+	flags.BoolVar(&cfg.showVersion, "version", false, "print the version and exit")
+	flags.Usage = func() {
+		fmt.Fprintln(flags.Output(), "Usage: proteoscope [flags] [structure files...]")
+		flags.PrintDefaults()
+	}
+	files, err := parseArgs(flags, args)
+	cfg.files = files
+	return cfg, err
+}
+
+func parseArgs(flags *flag.FlagSet, args []string) ([]string, error) {
+	var positional []string
+	for {
+		if err := flags.Parse(args); err != nil {
+			return nil, err
+		}
+		rest := flags.Args()
+		if len(rest) == 0 {
+			return positional, nil
+		}
+		if consumed := len(args) - len(rest); consumed > 0 && args[consumed-1] == "--" {
+			return append(positional, rest...), nil
+		}
+		positional = append(positional, rest[0])
+		args = rest[1:]
+	}
+}
+
+func newApp(cfg config) (*app, error) {
+	a := &app{
+		offline: cfg.offline,
+		dev:     cfg.dev,
+		assets:  content,
+		files:   loadLocalFiles(cfg.files),
+		cache:   openCache(cfg.cacheDir, cfg.noCache),
+		remote:  defaultUpstream(),
+	}
+	if !cfg.dev {
+		return a, nil
+	}
+	dir, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
+	a.assetDir = dir
+	a.assets = os.DirFS(dir)
+	if _, err := fs.Stat(a.assets, "web/index.html"); err != nil {
+		return nil, fmt.Errorf("--dev must be run from the repository root: %w", err)
+	}
+	return a, nil
+}
 
-	samples, err := loadSamples()
+func (a *app) printBanner(url string) {
+	fmt.Printf("Proteoscope %s is running at %s\n", version, url)
+	if a.dev {
+		fmt.Printf("Dev mode: serving web/ and data/ from disk in %s (no-store)\n", a.assetDir)
+	}
+	if a.offline {
+		fmt.Println("Offline mode: remote fetching is disabled.")
+	}
+	if a.cache != nil {
+		fmt.Printf("Download cache: %s\n", a.cache.dir)
+	} else {
+		fmt.Println("Download cache: disabled")
+	}
+	for _, file := range a.files {
+		fmt.Printf("Local file %s: %s\n", file.URL, file.path)
+	}
+	fmt.Println("Press Ctrl+C to stop.")
+}
+
+func (a *app) handler() (http.Handler, error) {
+	webFS, err := fs.Sub(a.assets, "web")
 	if err != nil {
 		return nil, err
+	}
+	dataFS, err := fs.Sub(a.assets, "data")
+	if err != nil {
+		return nil, err
+	}
+	samples, err := a.sampleSource()
+	if err != nil {
+		return nil, err
+	}
+	webCache, dataCache := "", "public, max-age=3600"
+	if a.dev {
+		webCache, dataCache = "no-store", "no-store"
 	}
 
 	mux := http.NewServeMux()
+	a.registerAPI(mux, samples)
+	mux.Handle("/data/", cacheControl(dataCache, http.StripPrefix("/data", http.FileServer(http.FS(dataFS)))))
+	mux.Handle("/", cacheControl(webCache, spaFileServer(webFS)))
+	return mux, nil
+}
+
+func (a *app) registerAPI(mux *http.ServeMux, samples func() ([]sample, error)) {
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("/api/samples", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{"samples": samples})
+		list, err := samples()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"samples": list})
 	})
-	mux.Handle("/data/", cacheControl(http.FileServer(http.FS(content))))
-	mux.Handle("/", spaFileServer(webFS))
-	return mux, nil
+	mux.HandleFunc("GET /api/startup", a.serveStartup)
+	mux.HandleFunc("GET /api/local/{index}", a.serveLocal)
+	mux.HandleFunc("GET /api/fetch/pdb/{id}", a.fetchPDB)
+	mux.HandleFunc("GET /api/fetch/afdb/{accession}", a.fetchAlphaFold)
+	mux.HandleFunc("GET /api/fetch/afdb/{accession}/pae", a.fetchAlphaFoldPAE)
+	mux.HandleFunc("GET /api/fetch/uniprot/{accession}", a.fetchUniProt)
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, "Unknown API endpoint.")
+	})
 }
 
-func loadSamples() ([]sample, error) {
-	entries, err := content.ReadDir("data")
+func (a *app) sampleSource() (func() ([]sample, error), error) {
+	if a.dev {
+		return func() ([]sample, error) { return loadSamples(a.assets) }, nil
+	}
+	samples, err := loadSamples(a.assets)
+	if err != nil {
+		return nil, err
+	}
+	return func() ([]sample, error) { return samples, nil }, nil
+}
+
+func loadSamples(fsys fs.FS) ([]sample, error) {
+	entries, err := fs.ReadDir(fsys, "data")
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +268,7 @@ func loadSamples() ([]sample, error) {
 			continue
 		}
 		path := "data/" + entry.Name()
-		body, err := content.ReadFile(path)
+		body, err := fs.ReadFile(fsys, path)
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +285,7 @@ func loadSamples() ([]sample, error) {
 
 func isStructureFile(filename string) bool {
 	switch strings.ToLower(filepath.Ext(filename)) {
-	case ".pdb", ".cif", ".mmcif":
+	case ".pdb", ".cif", ".mmcif", ".ent":
 		return true
 	default:
 		return false
@@ -510,7 +664,7 @@ func listen(host string, preferredPort int) (net.Listener, int, error) {
 		port := preferredPort + offset
 		listener, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 		if err == nil {
-			return listener, port, nil
+			return listener, listener.Addr().(*net.TCPAddr).Port, nil
 		}
 	}
 	listener, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
@@ -534,17 +688,30 @@ func openBrowser(url string) error {
 }
 
 func writeJSON(w http.ResponseWriter, value any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	encoder := json.NewEncoder(w)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(value); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writeJSONStatus(w, http.StatusOK, value)
 }
 
-func cacheControl(next http.Handler) http.Handler {
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSONStatus(w, status, map[string]string{"error": message})
+}
+
+func writeJSONStatus(w http.ResponseWriter, status int, value any) {
+	body, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	w.Write(append(body, '\n'))
+}
+
+func cacheControl(value string, next http.Handler) http.Handler {
+	if value == "" {
+		return next
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("Cache-Control", value)
 		next.ServeHTTP(w, r)
 	})
 }

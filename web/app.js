@@ -1,3152 +1,1688 @@
+import { createRenderer, MESH_VERTEX_STRIDE, packColor, withTimeout } from './lib/renderer.js';
+import { createCanvasRenderer } from './lib/renderer-canvas.js';
+import { ASYMMETRIC_UNIT_ID, parseStructure } from './lib/parse.js';
+import {
+  MAX_ASSEMBLY_ATOMS,
+  assignSecondary,
+  buildSearchItems,
+  deriveStructure,
+  materializeAssemblyModels,
+  prepareAssemblyEstimates,
+  residueForUniprotPosition,
+  uniprotPositionForResidue,
+} from './lib/structure.js';
+import { buildScene, focusNeighborhood } from './lib/scene.js';
+import { buildCartoon } from './lib/cartoon.js';
+import { COLOR_SCHEMES, computeAtomColors, titleCase } from './lib/coloring.js';
+import {
+  BACKGROUNDS,
+  CHAIN_PALETTES,
+  COLORMAPS,
+  PLDDT_BANDS,
+  chainPaletteColor,
+  colorToHex,
+  colormapGradientCSS,
+  hexColor,
+  sampleColormap,
+} from './lib/colors.js';
+import {
+  cameraBasis,
+  cameraMatrices,
+  cloneCamera,
+  createCamera,
+  fitCameraToPoints,
+  interpolateCamera,
+  orbitCamera,
+  panCamera,
+  projectToScreen,
+  rollCamera,
+  spinCamera,
+  zoomCamera,
+} from './lib/camera.js';
+import { add, angleBetween, dihedralAngle, normalize, scale, sub } from './lib/math3d.js';
+import { createSequenceView } from './lib/sequence-view.js';
+import { drawPAE, drawProfile, drawRamachandran } from './lib/plots.js';
+import { dsspSummary } from './lib/dssp.js';
+import { KYTE_DOOLITTLE, MAX_ASA } from './lib/residues.js';
+import { elementInfo } from './lib/elements.js';
+
 const els = {
+  app: document.querySelector('#app'),
   canvas: document.querySelector('#viewport'),
+  labelLayer: document.querySelector('#label-layer'),
   loading: document.querySelector('#loading'),
   loadingStatus: document.querySelector('#loading-status'),
-  sampleSelect: document.querySelector('#sample-select'),
-  assemblyField: document.querySelector('#assembly-field'),
-  assemblySelect: document.querySelector('#assembly-select'),
-  fileInput: document.querySelector('#file-input'),
+  leftToggle: document.querySelector('#left-toggle'),
+  rightToggle: document.querySelector('#right-toggle'),
   title: document.querySelector('#structure-title'),
+  subtitle: document.querySelector('#structure-subtitle'),
   gpuBadge: document.querySelector('#gpu-badge'),
-  metaFormat: document.querySelector('#meta-format'),
+  searchInput: document.querySelector('#search-input'),
+  searchResults: document.querySelector('#search-results'),
+  fetchForm: document.querySelector('#fetch-form'),
+  fetchInput: document.querySelector('#fetch-input'),
+  sampleSelect: document.querySelector('#sample-select'),
+  fileInput: document.querySelector('#file-input'),
   metaMethod: document.querySelector('#meta-method'),
   metaResolution: document.querySelector('#meta-resolution'),
+  metaRFree: document.querySelector('#meta-rfree'),
   metaEntry: document.querySelector('#meta-entry'),
+  metaOrganism: document.querySelector('#meta-organism'),
+  metaFormat: document.querySelector('#meta-format'),
+  metaDate: document.querySelector('#meta-date'),
   metaAssembly: document.querySelector('#meta-assembly'),
+  confidenceSummary: document.querySelector('#confidence-summary'),
+  assemblyField: document.querySelector('#assembly-field'),
+  assemblySelect: document.querySelector('#assembly-select'),
   atomsLabel: document.querySelector('#metric-atoms-label'),
   atomsMetric: document.querySelector('#metric-atoms'),
-  totalAtomsMetric: document.querySelector('#metric-total-atoms'),
   residuesMetric: document.querySelector('#metric-residues'),
   chainsMetric: document.querySelector('#metric-chains'),
   modelsMetric: document.querySelector('#metric-models'),
-  searchInput: document.querySelector('#search-input'),
-  searchResults: document.querySelector('#search-results'),
-  chainList: document.querySelector('#chain-list'),
-  isolateClear: document.querySelector('#isolate-clear'),
-  atomScale: document.querySelector('#atom-scale'),
-  bondScale: document.querySelector('#bond-scale'),
-  cartoonWidth: document.querySelector('#cartoon-width'),
-  cartoonQuality: document.querySelector('#cartoon-quality'),
-  glowScale: document.querySelector('#glow-scale'),
-  clipDepth: document.querySelector('#clip-depth'),
-  showHetero: document.querySelector('#show-hetero'),
+  entityList: document.querySelector('#entity-list'),
+  ssSummary: document.querySelector('#ss-summary'),
+  polymerRep: document.querySelector('#polymer-rep'),
+  ligandRep: document.querySelector('#ligand-rep'),
+  sidechainMode: document.querySelector('#sidechain-mode'),
   showWater: document.querySelector('#show-water'),
   showHydrogen: document.querySelector('#show-hydrogen'),
-  autoRotate: document.querySelector('#auto-rotate'),
+  surfaceKind: document.querySelector('#surface-kind'),
+  surfaceColor: document.querySelector('#surface-color'),
+  surfaceOpacity: document.querySelector('#surface-opacity'),
+  surfaceOpacityValue: document.querySelector('#surface-opacity-value'),
+  surfaceStatus: document.querySelector('#surface-status'),
+  colorScheme: document.querySelector('#color-scheme'),
+  chainPalette: document.querySelector('#chain-palette'),
+  paletteField: document.querySelector('#palette-field'),
+  colormap: document.querySelector('#colormap'),
+  colormapField: document.querySelector('#colormap-field'),
+  uniformColor: document.querySelector('#uniform-color'),
+  uniformField: document.querySelector('#uniform-field'),
+  heteroElement: document.querySelector('#hetero-element'),
+  chainList: document.querySelector('#chain-list'),
+  chainsAll: document.querySelector('#chains-all'),
+  chainsInvert: document.querySelector('#chains-invert'),
   selectionTitle: document.querySelector('#selection-title'),
-  selectionMeta: document.querySelector('#selection-meta'),
-  frameSelection: document.querySelector('#frame-selection'),
-  measureReset: document.querySelector('#measure-reset'),
+  selectionHint: document.querySelector('#selection-hint'),
+  selectionDetails: document.querySelector('#selection-details'),
+  selectionClear: document.querySelector('#selection-clear'),
+  focusSelection: document.querySelector('#focus-selection'),
+  labelSelection: document.querySelector('#label-selection'),
+  isolateSelection: document.querySelector('#isolate-selection'),
+  interactionsCard: document.querySelector('#interactions-card'),
+  interactionCount: document.querySelector('#interaction-count'),
+  interactionSummary: document.querySelector('#interaction-summary'),
+  interactionList: document.querySelector('#interaction-list'),
+  interactionTypes: document.querySelector('#interaction-types'),
+  interfaceA: document.querySelector('#interface-a'),
+  interfaceB: document.querySelector('#interface-b'),
+  interfaceRun: document.querySelector('#interface-run'),
+  interfaceResult: document.querySelector('#interface-result'),
+  interactionsClear: document.querySelector('#interactions-clear'),
+  interactionsExport: document.querySelector('#interactions-export'),
+  measureClear: document.querySelector('#measure-clear'),
   measurementList: document.querySelector('#measurement-list'),
-  resetView: document.querySelector('#reset-view'),
-  screenshot: document.querySelector('#screenshot'),
+  sasaRun: document.querySelector('#sasa-run'),
+  sasaColor: document.querySelector('#sasa-color'),
+  sasaResult: document.querySelector('#sasa-result'),
+  ramaChain: document.querySelector('#rama-chain'),
+  ramaCanvas: document.querySelector('#rama-canvas'),
+  ramaSummary: document.querySelector('#rama-summary'),
+  profileChain: document.querySelector('#profile-chain'),
+  profileMetric: document.querySelector('#profile-metric'),
+  profileCanvas: document.querySelector('#profile-canvas'),
+  paeCanvas: document.querySelector('#pae-canvas'),
+  paeHint: document.querySelector('#pae-hint'),
+  paeSummary: document.querySelector('#pae-summary'),
+  uniprotChain: document.querySelector('#uniprot-chain'),
+  uniprotLoad: document.querySelector('#uniprot-load'),
+  uniprotResult: document.querySelector('#uniprot-result'),
+  protparamChain: document.querySelector('#protparam-chain'),
+  protparam: document.querySelector('#protparam'),
+  peptideInput: document.querySelector('#peptide-input'),
+  peptideIL: document.querySelector('#peptide-il'),
+  peptideMap: document.querySelector('#peptide-map'),
+  peptideResult: document.querySelector('#peptide-result'),
+  digestEnzyme: document.querySelector('#digest-enzyme'),
+  digestMissed: document.querySelector('#digest-missed'),
+  digestRun: document.querySelector('#digest-run'),
+  siteInput: document.querySelector('#site-input'),
+  siteNumbering: document.querySelector('#site-numbering'),
+  siteMap: document.querySelector('#site-map'),
+  siteResult: document.querySelector('#site-result'),
+  xlInput: document.querySelector('#xl-input'),
+  xlCrosslinker: document.querySelector('#xl-crosslinker'),
+  xlMax: document.querySelector('#xl-max'),
+  xlMap: document.querySelector('#xl-map'),
+  xlResult: document.querySelector('#xl-result'),
+  dataInput: document.querySelector('#data-input'),
+  dataColormap: document.querySelector('#data-colormap'),
+  dataSymmetric: document.querySelector('#data-symmetric'),
+  dataApply: document.querySelector('#data-apply'),
+  dataResult: document.querySelector('#data-result'),
+  legend: document.querySelector('#legend'),
+  modeBanner: document.querySelector('#mode-banner'),
   modelStrip: document.querySelector('#model-strip'),
   modelSlider: document.querySelector('#model-slider'),
   modelLabel: document.querySelector('#model-label'),
+  modelPlay: document.querySelector('#model-play'),
+  sequencePanel: document.querySelector('#sequence-panel'),
+  sequenceToggle: document.querySelector('#sequence-toggle'),
+  sequenceChain: document.querySelector('#sequence-chain'),
+  sequenceInfo: document.querySelector('#sequence-info'),
+  sequenceTrack: document.querySelector('#sequence-track'),
   tooltip: document.querySelector('#tooltip'),
+  toast: document.querySelector('#toast'),
+  dropOverlay: document.querySelector('#drop-overlay'),
+  resetView: document.querySelector('#reset-view'),
+  focusButton: document.querySelector('#focus-button'),
+  spinToggle: document.querySelector('#spin-toggle'),
+  screenshot: document.querySelector('#screenshot'),
+  fullscreen: document.querySelector('#fullscreen'),
+  helpButton: document.querySelector('#help-button'),
+  exportDialog: document.querySelector('#export-dialog'),
+  exportSize: document.querySelector('#export-size'),
+  exportSupersample: document.querySelector('#export-supersample'),
+  exportTransparent: document.querySelector('#export-transparent'),
+  exportLegend: document.querySelector('#export-legend'),
+  exportLabels: document.querySelector('#export-labels'),
+  exportInfo: document.querySelector('#export-info'),
+  exportConfirm: document.querySelector('#export-confirm'),
+  exportCopy: document.querySelector('#export-copy'),
+  exportMovie: document.querySelector('#export-movie'),
+  helpDialog: document.querySelector('#help-dialog'),
 };
 
-const ELEMENTS = {
-  H: { covalent: 0.31, vdw: 1.2, color: [0.92, 0.94, 0.96] },
-  C: { covalent: 0.76, vdw: 1.7, color: [0.62, 0.66, 0.7] },
-  N: { covalent: 0.71, vdw: 1.55, color: [0.26, 0.5, 1.0] },
-  O: { covalent: 0.66, vdw: 1.52, color: [1.0, 0.24, 0.22] },
-  S: { covalent: 1.05, vdw: 1.8, color: [1.0, 0.78, 0.24] },
-  P: { covalent: 1.07, vdw: 1.8, color: [1.0, 0.5, 0.18] },
-  F: { covalent: 0.57, vdw: 1.47, color: [0.5, 0.96, 0.52] },
-  CL: { covalent: 1.02, vdw: 1.75, color: [0.2, 0.88, 0.24] },
-  BR: { covalent: 1.2, vdw: 1.85, color: [0.62, 0.24, 0.16] },
-  I: { covalent: 1.39, vdw: 1.98, color: [0.58, 0.32, 0.86] },
-  FE: { covalent: 1.24, vdw: 1.94, color: [0.94, 0.42, 0.2] },
-  MG: { covalent: 1.3, vdw: 1.73, color: [0.45, 0.84, 1.0] },
-  ZN: { covalent: 1.22, vdw: 1.39, color: [0.55, 0.62, 0.95] },
-  CA: { covalent: 1.74, vdw: 2.31, color: [0.32, 0.82, 0.42] },
-  NA: { covalent: 1.66, vdw: 2.27, color: [0.5, 0.42, 1.0] },
-  K: { covalent: 2.03, vdw: 2.75, color: [0.64, 0.36, 1.0] },
+const LIGHTING_PRESETS = {
+  standard: { ambient: 0.42, diffuse: 0.62, specular: 0.22, shininess: 36, ao: 0.75, aoRadius: 5, outline: 0, fog: 0.45, glow: 0, flat: false },
+  soft: { ambient: 0.66, diffuse: 0.4, specular: 0.06, shininess: 18, ao: 1, aoRadius: 7, outline: 0, fog: 0.35, glow: 0, flat: false },
+  illustrative: { ambient: 1, diffuse: 0, specular: 0, shininess: 10, ao: 0.85, aoRadius: 6, outline: 0.9, fog: 0.15, glow: 0, flat: true },
+  glossy: { ambient: 0.34, diffuse: 0.7, specular: 0.6, shininess: 72, ao: 0.6, aoRadius: 5, outline: 0, fog: 0.4, glow: 0, flat: false },
+  neon: { ambient: 0.5, diffuse: 0.52, specular: 0.3, shininess: 40, ao: 0.35, aoRadius: 4, outline: 0, fog: 0.55, glow: 0.45, flat: false },
+  flat: { ambient: 1, diffuse: 0, specular: 0, shininess: 10, ao: 0, aoRadius: 5, outline: 0.7, fog: 0, glow: 0, flat: true },
 };
 
-const CHAIN_PALETTE = [
-  [0.26, 0.78, 0.95],
-  [0.98, 0.29, 0.55],
-  [1.0, 0.77, 0.27],
-  [0.35, 0.91, 0.61],
-  [0.72, 0.55, 1.0],
-  [1.0, 0.54, 0.33],
-  [0.63, 0.95, 0.4],
-  [0.39, 0.61, 1.0],
-  [0.98, 0.47, 0.92],
-  [0.79, 0.9, 1.0],
+const DEFAULT_SPIN_RATE = 0.25;
+
+const REPRESENTATION_PRESETS = {
+  cartoon: { polymer: 'cartoon', ligand: 'ball-stick', surface: 'off' },
+  'ball-stick': { polymer: 'ball-stick', ligand: 'ball-stick', surface: 'off' },
+  sticks: { polymer: 'sticks', ligand: 'sticks', surface: 'off' },
+  spacefill: { polymer: 'spacefill', ligand: 'spacefill', surface: 'off' },
+  trace: { polymer: 'trace', ligand: 'ball-stick', surface: 'off' },
+  surface: { polymer: 'cartoon', ligand: 'ball-stick', surface: 'ses' },
+};
+
+const INTERACTION_FALLBACK_TYPES = [
+  { id: 'hydrogen-bond', label: 'H-bond', color: '#3fa7ff' },
+  { id: 'salt-bridge', label: 'Salt bridge', color: '#ff5fa2' },
+  { id: 'pi-stacking', label: 'π-stacking', color: '#39d98a' },
+  { id: 'cation-pi', label: 'Cation-π', color: '#ffb347' },
+  { id: 'hydrophobic', label: 'Hydrophobic', color: '#9aa3ad' },
+  { id: 'halogen-bond', label: 'Halogen bond', color: '#40e0d0' },
+  { id: 'metal-coordination', label: 'Metal', color: '#b388ff' },
+  { id: 'water-bridge', label: 'Water bridge', color: '#7ec8ff' },
 ];
-
-const RESIDUE_CLASSES = {
-  hydrophobic: new Set(['ALA', 'VAL', 'ILE', 'LE', 'LEU', 'MET', 'PHE', 'TRP', 'PRO', 'TYR']),
-  polar: new Set(['SER', 'THR', 'ASN', 'GLN', 'CYS', 'GLY']),
-  positive: new Set(['LYS', 'ARG', 'HIS']),
-  negative: new Set(['ASP', 'GLU']),
-  nucleic: new Set(['A', 'C', 'G', 'T', 'U', 'DA', 'DC', 'DG', 'DT', 'DU', 'DI']),
-};
-
-const WATER_RESIDUES = new Set(['HOH', 'WAT', 'H2O', 'DOD']);
-const PROTEIN_BACKBONE = new Set(['CA']);
-const NUCLEIC_BACKBONE = new Set(['P', "C4'", "C3'", "C5'"]);
-const ASYMMETRIC_UNIT_ID = 'asym';
-const MAX_ASSEMBLY_ATOMS = 300000;
-const SECONDARY_COLORS = {
-  helix: [0.95, 0.32, 0.42],
-  sheet: [0.98, 0.78, 0.24],
-  turn: [0.32, 0.74, 0.95],
-  coil: [0.72, 0.78, 0.82],
-};
-const SECONDARY_LABELS = {
-  helix: 'Alpha helix',
-  sheet: 'Beta strand',
-  turn: 'Turn',
-  coil: 'Coil',
-};
-const CARTOON_DEFAULTS = {
-  ribbonWidth: 1.0,
-  helixWidth: 1.05,
-  sheetWidth: 1.18,
-  sheetArrowWidth: 1.78,
-  ribbonThickness: 0.16,
-  helixThickness: 0.36,
-  tubeRadius: 0.24,
-  turnRadius: 0.28,
-  maxPeptideDistance: 5.0,
-  tubeSides: 8,
-};
 
 const state = {
   samples: [],
+  startup: null,
   structure: null,
+  sourceLabel: '',
   activeModel: 0,
-  representation: 'ball-stick',
-  colorScheme: 'chain',
-  atomScale: 0.72,
-  bondScale: 0.52,
-  cartoonWidth: 1,
-  cartoonQuality: 5,
-  glowScale: 0.36,
-  clipDepth: 1,
-  showHetero: true,
-  showWater: false,
-  showHydrogen: false,
-  autoRotate: true,
-  visibleChains: null,
+  display: {
+    polymer: 'cartoon',
+    ligand: 'ball-stick',
+    sidechains: 'focus',
+    showWater: false,
+    showHydrogen: false,
+    atomScale: 1,
+    bondScale: 1,
+    cartoonWidth: 1,
+    cartoonQuality: 6,
+    visibleChains: null,
+  },
+  color: { scheme: 'chain', palette: 'vivid', colormap: '', uniformColor: '#b8c4d0', heteroByElement: true },
+  surface: { kind: 'off', color: 'scheme', opacity: 1, key: '', pending: 0, data: null },
+  lighting: { preset: 'standard', ...LIGHTING_PRESETS.standard },
+  background: 'dark',
+  clip: { near: 0, far: 1 },
+  secondaryMode: 'auto',
+  camera: createCamera(),
+  cameraAnimation: null,
+  spin: false,
+  selection: new Set(),
   selectedAtom: null,
-  hoveredAtom: null,
-  lastMeasureAtom: null,
+  hover: { atom: -1, residueKey: null },
+  focus: null,
+  measureMode: null,
+  measurePending: [],
   measurements: [],
-  visibleAtoms: [],
-  visibleBonds: [],
-  visibleCartoon: null,
-  visibleAtomRecords: [],
-  camera: {
-    target: [0, 0, 0],
-    radius: 80,
-    yaw: -0.72,
-    pitch: 0.34,
-    fov: Math.PI / 4.2,
-    near: 0.05,
-    far: 2000,
-    eye: [0, 0, 0],
-    forward: [0, 0, -1],
-    right: [1, 0, 0],
-    up: [0, 1, 0],
-  },
-  pointer: {
-    x: 0,
-    y: 0,
-    lastX: 0,
-    lastY: 0,
-    dragging: false,
-    panning: false,
-    moved: false,
-  },
+  labels: new Set(),
+  interactions: { list: [], title: '', enabled: new Set(INTERACTION_FALLBACK_TYPES.map((type) => type.id)) },
+  interactionTypes: INTERACTION_FALLBACK_TYPES,
+  sasa: null,
+  proteomics: { coverage: null, data: null, dataLabel: '', sites: [], siteOverrides: null, crosslinks: [] },
+  pae: null,
+  paeSelection: null,
+  legend: null,
+  atomColors: null,
+  atomFlags: null,
+  sceneResult: null,
+  cartoonKey: '',
+  dirty: { scene: true, colors: true, flags: true, render: true, surface: false, panels: true },
+  pointers: new Map(),
+  drag: null,
+  modelTimer: null,
+  lastHoverPick: 0,
+  pickPending: false,
+  renderer: null,
+  workers: null,
 };
 
-const gpu = {
-  adapter: null,
-  device: null,
-  context: null,
-  format: null,
-  depthTexture: null,
-  uniformBuffer: null,
-  atomBuffer: null,
-  glowBuffer: null,
-  bondBuffer: null,
-  cartoonBuffer: null,
-  atomBindGroup: null,
-  glowBindGroup: null,
-  bondBindGroup: null,
-  cartoonBindGroup: null,
-  atomPipeline: null,
-  glowPipeline: null,
-  bondPipeline: null,
-  cartoonPipeline: null,
-  uniformData: new Float32Array(36),
-  atomCount: 0,
-  glowCount: 0,
-  bondCount: 0,
-  cartoonVertexCount: 0,
-  fallback: false,
-  ctx2d: null,
-};
+let sequenceView = null;
+let ramaPoints = null;
+let profilePoints = null;
+let paeLayout = null;
+let lazyModules = {};
 
 if (!globalThis.__PROTEOSCOPE_TEST__) {
   init().catch((error) => {
     console.error(error);
-    els.loading.classList.add('is-error');
-    els.loadingStatus.textContent = error.message;
+    showLoadingError(error.message);
   });
 }
 
 async function init() {
+  if (window.innerWidth <= 900) els.app.classList.remove('left-open', 'right-open');
+  if (window.innerWidth <= 600) els.app.classList.remove('sequence-open');
   setLoading('Starting renderer');
   await initRenderer();
+  populateStaticControls();
   bindEvents();
+  sequenceView = createSequenceView(els.sequenceTrack, {
+    onHover: (key) => setHoverResidue(key, true),
+    onSelect: (keys, options) => selectResidues(keys, options),
+    onFocus: (key) => focusResidues([key]),
+  });
+  requestAnimationFrame(frame);
 
   setLoading('Loading bundled structures');
-  const manifest = await fetch('/api/samples').then((response) => response.json());
+  const [manifest, startup] = await Promise.all([
+    fetch('/api/samples').then((response) => response.json()).catch(() => ({ samples: [] })),
+    fetch('/api/startup').then((response) => (response.ok ? response.json() : null)).catch(() => null),
+  ]);
   state.samples = manifest.samples ?? [];
+  state.startup = startup;
   populateSamples();
 
-  const first = state.samples[0];
-  if (!first) throw new Error('No embedded structure files were found.');
-  await loadStructureFromURL(first.url, first.name);
-
-  setLoading('Rendering');
-  requestAnimationFrame(() => els.loading.classList.add('is-hidden'));
-  requestAnimationFrame(frame);
+  const hashRequest = new URLSearchParams(location.hash.slice(1));
+  const fetchRequest = hashRequest.get('fetch') || hashRequest.get('pdb') || hashRequest.get('af') || hashRequest.get('uniprot');
+  if (startup?.files?.length) {
+    await loadStructureFromURL(startup.files[0].url, startup.files[0].name);
+  } else if (fetchRequest) {
+    await fetchStructure(fetchRequest);
+  } else {
+    const preferred = state.samples.find((sample) => sample.id.startsWith('1m17')) ?? state.samples[0];
+    if (!preferred) throw new Error('No embedded structure files were found.');
+    els.sampleSelect.value = preferred.id;
+    await loadStructureFromURL(preferred.url, preferred.name);
+  }
+  hideLoading();
 }
 
 async function initRenderer() {
   try {
-    await withTimeout(initWebGPU(), 4500, 'WebGPU initialization timed out');
+    if (new URLSearchParams(location.search).get('renderer') === 'canvas') throw new Error('Canvas renderer requested');
+    state.renderer = await withTimeout(createRenderer(els.canvas, {
+      onDeviceLost: (info) => showToast(`The GPU device was lost (${info?.message || 'unknown reason'}). Reload the page to continue.`, true),
+    }), 5000, 'WebGPU initialization timed out');
+    els.gpuBadge.textContent = 'WebGPU';
+    els.gpuBadge.title = `WebGPU · ${state.renderer.label}`;
   } catch (error) {
-    gpu.fallback = true;
-    gpu.ctx2d = els.canvas.getContext('2d');
+    console.warn('WebGPU unavailable, using canvas preview:', error);
+    state.renderer = createCanvasRenderer(els.canvas);
     els.gpuBadge.textContent = 'Canvas preview';
-    els.gpuBadge.title = 'WebGPU was not available in this browser, so Proteoscope is using a compatibility preview.';
+    els.gpuBadge.classList.add('is-fallback');
+    els.gpuBadge.title = 'WebGPU is not available in this browser, so Proteoscope uses a simplified compatibility renderer without surfaces, ambient occlusion or outlines. Use a current Chrome, Edge, Safari 26+ or Firefox 141+ (Windows) for full quality.';
   }
 }
 
-async function initWebGPU() {
-  if (!navigator.gpu) {
-    throw new Error('WebGPU is not available in this browser. Try current Chrome, Edge, or another WebGPU-enabled browser.');
+function populateStaticControls() {
+  const groups = new Map();
+  for (const scheme of COLOR_SCHEMES) {
+    if (!groups.has(scheme.group)) {
+      const group = document.createElement('optgroup');
+      group.label = scheme.group;
+      groups.set(scheme.group, group);
+      els.colorScheme.appendChild(group);
+    }
+    const option = document.createElement('option');
+    option.value = scheme.id;
+    option.textContent = scheme.label;
+    groups.get(scheme.group).appendChild(option);
   }
-  gpu.adapter = await withTimeout(navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }), 2500, 'No WebGPU adapter responded.');
-  if (!gpu.adapter) throw new Error('No WebGPU adapter was found.');
-  gpu.device = await withTimeout(gpu.adapter.requestDevice(), 2500, 'No WebGPU device responded.');
-  gpu.context = els.canvas.getContext('webgpu');
-  gpu.format = navigator.gpu.getPreferredCanvasFormat();
-  gpu.context.configure({
-    device: gpu.device,
-    format: gpu.format,
-    alphaMode: 'opaque',
-  });
-  gpu.uniformBuffer = gpu.device.createBuffer({
-    label: 'uniforms',
-    size: gpu.uniformData.byteLength,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-  createPipelines();
-  els.gpuBadge.textContent = gpu.adapter.info?.description || 'WebGPU';
-}
-
-function createPipelines() {
-  const atomModule = gpu.device.createShaderModule({
-    label: 'atom impostor shader',
-    code: `
-struct Uniforms {
-  viewProj: mat4x4<f32>,
-  cameraRight: vec4<f32>,
-  cameraUp: vec4<f32>,
-  cameraForward: vec4<f32>,
-  lightDir: vec4<f32>,
-  params: vec4<f32>,
-};
-struct Atom {
-  positionRadius: vec4<f32>,
-  color: vec4<f32>,
-};
-struct VertexOut {
-  @builtin(position) position: vec4<f32>,
-  @location(0) uv: vec2<f32>,
-  @location(1) color: vec4<f32>,
-};
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var<storage, read> atoms: array<Atom>;
-
-const corners = array<vec2<f32>, 6>(
-  vec2<f32>(-1.0, -1.0),
-  vec2<f32>( 1.0, -1.0),
-  vec2<f32>(-1.0,  1.0),
-  vec2<f32>(-1.0,  1.0),
-  vec2<f32>( 1.0, -1.0),
-  vec2<f32>( 1.0,  1.0)
-);
-
-@vertex
-fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOut {
-  let atom = atoms[instanceIndex];
-  let corner = corners[vertexIndex];
-  let world = atom.positionRadius.xyz
-    + uniforms.cameraRight.xyz * corner.x * atom.positionRadius.w
-    + uniforms.cameraUp.xyz * corner.y * atom.positionRadius.w;
-  var out: VertexOut;
-  out.position = uniforms.viewProj * vec4<f32>(world, 1.0);
-  out.uv = corner;
-  out.color = atom.color;
-  return out;
-}
-
-@fragment
-fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-  let r2 = dot(in.uv, in.uv);
-  if (r2 > 1.0) {
-    discard;
+  els.colorScheme.value = state.color.scheme;
+  for (const [id, palette] of Object.entries(CHAIN_PALETTES)) {
+    els.chainPalette.appendChild(new Option(palette.label, id));
   }
-  let z = sqrt(max(0.0, 1.0 - r2));
-  let normal = normalize(
-    uniforms.cameraRight.xyz * in.uv.x +
-    uniforms.cameraUp.xyz * in.uv.y -
-    uniforms.cameraForward.xyz * z
-  );
-  let view = normalize(-uniforms.cameraForward.xyz);
-  let front = max(dot(normal, view), 0.0);
-  let diffuse = pow(front, 0.55);
-  let specular = pow(front, 34.0);
-  let rim = pow(1.0 - front, 2.2);
-  let shade = 0.66 + 0.34 * diffuse + 0.16 * specular + 0.06 * rim;
-  let color = in.color.rgb * shade + vec3<f32>(0.025, 0.035, 0.038);
-  return vec4<f32>(color, in.color.a);
-}`,
-  });
-
-  const glowModule = gpu.device.createShaderModule({
-    label: 'atom glow shader',
-    code: `
-struct Uniforms {
-  viewProj: mat4x4<f32>,
-  cameraRight: vec4<f32>,
-  cameraUp: vec4<f32>,
-  cameraForward: vec4<f32>,
-  lightDir: vec4<f32>,
-  params: vec4<f32>,
-};
-struct Atom {
-  positionRadius: vec4<f32>,
-  color: vec4<f32>,
-};
-struct VertexOut {
-  @builtin(position) position: vec4<f32>,
-  @location(0) uv: vec2<f32>,
-  @location(1) color: vec4<f32>,
-};
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var<storage, read> atoms: array<Atom>;
-const corners = array<vec2<f32>, 6>(
-  vec2<f32>(-1.0, -1.0),
-  vec2<f32>( 1.0, -1.0),
-  vec2<f32>(-1.0,  1.0),
-  vec2<f32>(-1.0,  1.0),
-  vec2<f32>( 1.0, -1.0),
-  vec2<f32>( 1.0,  1.0)
-);
-@vertex
-fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOut {
-  let atom = atoms[instanceIndex];
-  let corner = corners[vertexIndex];
-  let pulse = 1.0 + 0.03 * sin(uniforms.params.x * 1.3 + f32(instanceIndex % 17u));
-  let world = atom.positionRadius.xyz
-    + uniforms.cameraRight.xyz * corner.x * atom.positionRadius.w * pulse
-    + uniforms.cameraUp.xyz * corner.y * atom.positionRadius.w * pulse;
-  var out: VertexOut;
-  out.position = uniforms.viewProj * vec4<f32>(world, 1.0);
-  out.uv = corner;
-  out.color = atom.color;
-  return out;
-}
-@fragment
-fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-  let r2 = dot(in.uv, in.uv);
-  if (r2 > 1.0) {
-    discard;
+  for (const select of [els.colormap, els.dataColormap]) {
+    if (select === els.colormap) select.appendChild(new Option('Default', ''));
+    for (const [id, map] of Object.entries(COLORMAPS)) select.appendChild(new Option(map.label, id));
   }
-  let feather = pow(max(0.0, 1.0 - r2), 2.2);
-  return vec4<f32>(in.color.rgb * feather, in.color.a * feather);
-}`,
-  });
-
-  const bondModule = gpu.device.createShaderModule({
-    label: 'bond billboard shader',
-    code: `
-struct Uniforms {
-  viewProj: mat4x4<f32>,
-  cameraRight: vec4<f32>,
-  cameraUp: vec4<f32>,
-  cameraForward: vec4<f32>,
-  lightDir: vec4<f32>,
-  params: vec4<f32>,
-};
-struct Bond {
-  startRadius: vec4<f32>,
-  endRadius: vec4<f32>,
-  color: vec4<f32>,
-};
-struct VertexOut {
-  @builtin(position) position: vec4<f32>,
-  @location(0) color: vec4<f32>,
-  @location(1) side: f32,
-};
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var<storage, read> bonds: array<Bond>;
-const corners = array<vec2<f32>, 6>(
-  vec2<f32>(-1.0, 0.0),
-  vec2<f32>( 1.0, 0.0),
-  vec2<f32>(-1.0, 1.0),
-  vec2<f32>(-1.0, 1.0),
-  vec2<f32>( 1.0, 0.0),
-  vec2<f32>( 1.0, 1.0)
-);
-@vertex
-fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOut {
-  let bond = bonds[instanceIndex];
-  let corner = corners[vertexIndex];
-  let start = bond.startRadius.xyz;
-  let end = bond.endRadius.xyz;
-  let axis = normalize(end - start);
-  var side = cross(axis, uniforms.cameraForward.xyz);
-  if (dot(side, side) < 0.0001) {
-    side = uniforms.cameraRight.xyz;
-  }
-  side = normalize(side);
-  let radius = mix(bond.startRadius.w, bond.endRadius.w, corner.y);
-  let world = mix(start, end, corner.y) + side * corner.x * radius;
-  var out: VertexOut;
-  out.position = uniforms.viewProj * vec4<f32>(world, 1.0);
-  out.color = bond.color;
-  out.side = abs(corner.x);
-  return out;
-}
-@fragment
-fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-  let edge = smoothstep(1.0, 0.55, in.side);
-  return vec4<f32>(in.color.rgb * (0.62 + 0.38 * edge), in.color.a);
-}`,
-  });
-
-  const cartoonModule = gpu.device.createShaderModule({
-    label: 'cartoon mesh shader',
-    code: `
-struct Uniforms {
-  viewProj: mat4x4<f32>,
-  cameraRight: vec4<f32>,
-  cameraUp: vec4<f32>,
-  cameraForward: vec4<f32>,
-  lightDir: vec4<f32>,
-  params: vec4<f32>,
-};
-struct CartoonVertex {
-  position: vec4<f32>,
-  normal: vec4<f32>,
-  color: vec4<f32>,
-};
-struct VertexOut {
-  @builtin(position) position: vec4<f32>,
-  @location(0) normal: vec3<f32>,
-  @location(1) color: vec4<f32>,
-};
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var<storage, read> vertices: array<CartoonVertex>;
-
-@vertex
-fn vs(@builtin(vertex_index) vertexIndex: u32) -> VertexOut {
-  let vertex = vertices[vertexIndex];
-  var out: VertexOut;
-  out.position = uniforms.viewProj * vec4<f32>(vertex.position.xyz, 1.0);
-  out.normal = normalize(vertex.normal.xyz);
-  out.color = vertex.color;
-  return out;
-}
-
-@fragment
-fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-  let view = normalize(-uniforms.cameraForward.xyz);
-  let light = normalize(uniforms.lightDir.xyz);
-  let normal = normalize(select(in.normal, -in.normal, dot(in.normal, view) < 0.0));
-  let diffuse = max(dot(normal, light), 0.0);
-  let front = max(dot(normal, view), 0.0);
-  let rim = pow(1.0 - front, 2.0);
-  let shade = 0.52 + 0.34 * diffuse + 0.20 * front + 0.08 * rim;
-  let color = in.color.rgb * shade + vec3<f32>(0.018, 0.024, 0.026);
-  return vec4<f32>(color, in.color.a);
-}`,
-  });
-
-  const atomLayout = gpu.device.createBindGroupLayout({
-    entries: [
-      { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
-      { binding: 1, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
-    ],
-  });
-  const pipelineLayout = gpu.device.createPipelineLayout({ bindGroupLayouts: [atomLayout] });
-  const blend = {
-    color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-    alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-  };
-  const additiveBlend = {
-    color: { srcFactor: 'src-alpha', dstFactor: 'one', operation: 'add' },
-    alpha: { srcFactor: 'zero', dstFactor: 'one', operation: 'add' },
-  };
-  gpu.atomPipeline = gpu.device.createRenderPipeline({
-    label: 'atoms',
-    layout: pipelineLayout,
-    vertex: { module: atomModule, entryPoint: 'vs' },
-    fragment: { module: atomModule, entryPoint: 'fs', targets: [{ format: gpu.format, blend }] },
-    primitive: { topology: 'triangle-list' },
-    depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' },
-  });
-  gpu.glowPipeline = gpu.device.createRenderPipeline({
-    label: 'glow',
-    layout: pipelineLayout,
-    vertex: { module: glowModule, entryPoint: 'vs' },
-    fragment: { module: glowModule, entryPoint: 'fs', targets: [{ format: gpu.format, blend: additiveBlend }] },
-    primitive: { topology: 'triangle-list' },
-    depthStencil: { depthWriteEnabled: false, depthCompare: 'less-equal', format: 'depth24plus' },
-  });
-  gpu.bondPipeline = gpu.device.createRenderPipeline({
-    label: 'bonds',
-    layout: pipelineLayout,
-    vertex: { module: bondModule, entryPoint: 'vs' },
-    fragment: { module: bondModule, entryPoint: 'fs', targets: [{ format: gpu.format, blend }] },
-    primitive: { topology: 'triangle-list' },
-    depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' },
-  });
-  gpu.cartoonPipeline = gpu.device.createRenderPipeline({
-    label: 'cartoon mesh',
-    layout: pipelineLayout,
-    vertex: { module: cartoonModule, entryPoint: 'vs' },
-    fragment: { module: cartoonModule, entryPoint: 'fs', targets: [{ format: gpu.format, blend }] },
-    primitive: { topology: 'triangle-list', cullMode: 'none' },
-    depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' },
-  });
-  gpu.atomBindLayout = atomLayout;
+  els.dataColormap.value = 'viridis';
+  renderInteractionTypeToggles();
+  syncControlOutputs();
 }
 
 function bindEvents() {
-  window.addEventListener('resize', resize);
+  window.addEventListener('resize', () => {
+    updateViewOffset();
+    requestRender();
+  });
   window.addEventListener('keydown', onKeyDown);
+  els.leftToggle.addEventListener('click', () => togglePanel('left-open'));
+  els.rightToggle.addEventListener('click', () => togglePanel('right-open'));
+  els.sequenceToggle.addEventListener('click', () => {
+    togglePanel('sequence-open');
+    els.sequenceToggle.setAttribute('aria-expanded', String(els.app.classList.contains('sequence-open')));
+  });
+  document.querySelectorAll('[data-tab]').forEach((button) => {
+    button.addEventListener('click', () => activateTab(button.dataset.tab));
+  });
+
+  els.fetchForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const query = els.fetchInput.value.trim();
+    if (query) await fetchStructure(query);
+  });
+  document.querySelectorAll('[data-fetch]').forEach((button) => {
+    button.addEventListener('click', () => {
+      els.fetchInput.value = button.dataset.fetch;
+      fetchStructure(button.dataset.fetch);
+    });
+  });
   els.sampleSelect.addEventListener('change', async () => {
     const sample = state.samples.find((item) => item.id === els.sampleSelect.value);
-    if (sample) await loadStructureFromURL(sample.url, sample.name);
-  });
-  els.assemblySelect.addEventListener('change', async () => {
-    await activateAssembly(els.assemblySelect.value);
+    if (!sample) return;
+    history.replaceState(null, '', location.pathname + location.search);
+    await guardedLoad(() => loadStructureFromURL(sample.url, sample.name));
   });
   els.fileInput.addEventListener('change', async () => {
-    const file = els.fileInput.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    await loadStructureFromText(text, file.name);
-    els.sampleSelect.value = '';
+    const files = [...(els.fileInput.files ?? [])];
+    els.fileInput.value = '';
+    await openFiles(files);
   });
-  document.querySelectorAll('[data-representation]').forEach((button) => {
+  els.assemblySelect.addEventListener('change', () => activateAssembly(els.assemblySelect.value));
+  document.querySelectorAll('[data-ss-mode]').forEach((button) => {
     button.addEventListener('click', () => {
-      setActiveButton('[data-representation]', button);
-      state.representation = button.dataset.representation;
-      rebuildScene();
+      setActiveButton('[data-ss-mode]', button);
+      state.secondaryMode = button.dataset.ssMode;
+      reassignSecondary();
     });
   });
-  document.querySelectorAll('[data-color-scheme]').forEach((button) => {
-    button.addEventListener('click', () => {
-      setActiveButton('[data-color-scheme]', button);
-      state.colorScheme = button.dataset.colorScheme;
-      rebuildScene();
-    });
+
+  document.querySelectorAll('[data-preset]').forEach((button) => {
+    button.addEventListener('click', () => applyRepresentationPreset(button.dataset.preset));
   });
+  els.polymerRep.addEventListener('change', () => updateDisplay({ polymer: els.polymerRep.value }));
+  els.ligandRep.addEventListener('change', () => updateDisplay({ ligand: els.ligandRep.value }));
+  els.sidechainMode.addEventListener('change', () => updateDisplay({ sidechains: els.sidechainMode.value }));
+  els.showWater.addEventListener('change', () => updateDisplay({ showWater: els.showWater.checked }));
+  els.showHydrogen.addEventListener('change', () => updateDisplay({ showHydrogen: els.showHydrogen.checked }));
   for (const [input, key] of [
-    [els.atomScale, 'atomScale'],
-    [els.bondScale, 'bondScale'],
-    [els.cartoonWidth, 'cartoonWidth'],
-    [els.cartoonQuality, 'cartoonQuality'],
-    [els.glowScale, 'glowScale'],
-    [els.clipDepth, 'clipDepth'],
+    [document.querySelector('#atom-scale'), 'atomScale'],
+    [document.querySelector('#bond-scale'), 'bondScale'],
+    [document.querySelector('#cartoon-width'), 'cartoonWidth'],
+    [document.querySelector('#cartoon-quality'), 'cartoonQuality'],
   ]) {
     input.addEventListener('input', () => {
-      state[key] = Number(input.value);
-      rebuildScene();
+      updateDisplay({ [key]: Number(input.value) });
+      syncControlOutputs();
     });
   }
-  for (const [input, key] of [
-    [els.showHetero, 'showHetero'],
-    [els.showWater, 'showWater'],
-    [els.showHydrogen, 'showHydrogen'],
-    [els.autoRotate, 'autoRotate'],
-  ]) {
-    input.addEventListener('change', () => {
-      state[key] = input.checked;
-      if (key === 'autoRotate') return;
-      rebuildScene();
-    });
-  }
-  els.searchInput.addEventListener('input', renderSearch);
-  els.searchInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      const first = els.searchResults.querySelector('[data-atom-id]');
-      if (first) selectAtomByID(Number(first.dataset.atomId), true, false);
-    }
-    if (event.key === 'Escape') {
-      clearSearch();
-    }
+
+  els.surfaceKind.addEventListener('change', () => {
+    state.surface.kind = els.surfaceKind.value;
+    refreshSurface();
   });
-  els.isolateClear.addEventListener('click', () => {
-    state.visibleChains = null;
+  els.surfaceColor.addEventListener('change', () => {
+    state.surface.color = els.surfaceColor.value;
+    applySurfaceColors();
+  });
+  els.surfaceOpacity.addEventListener('input', () => {
+    state.surface.opacity = Number(els.surfaceOpacity.value);
+    els.surfaceOpacityValue.textContent = `${Math.round(state.surface.opacity * 100)}%`;
+    state.renderer.setMeshOpacity('surface', state.surface.opacity);
+    requestRender();
+  });
+
+  els.colorScheme.addEventListener('change', () => setColorScheme(els.colorScheme.value));
+  els.chainPalette.addEventListener('change', () => {
+    state.color.palette = els.chainPalette.value;
+    markColorsDirty();
     renderChains();
-    rebuildScene();
   });
-  els.frameSelection.addEventListener('click', () => {
-    if (state.selectedAtom) frameAtom(state.selectedAtom);
+  els.colormap.addEventListener('change', () => {
+    state.color.colormap = els.colormap.value;
+    markColorsDirty();
   });
-  els.measureReset.addEventListener('click', clearMeasurements);
-  els.resetView.addEventListener('click', resetView);
-  els.screenshot.addEventListener('click', exportPNG);
-  els.modelSlider.addEventListener('input', () => {
-    state.activeModel = Number(els.modelSlider.value) - 1;
-    state.selectedAtom = null;
-    state.hoveredAtom = null;
-    state.lastMeasureAtom = null;
-    clearMeasurements();
-    fitModel(false);
-    rebuildScene();
-    updateModelLabel();
+  els.uniformColor.addEventListener('input', () => {
+    state.color.uniformColor = els.uniformColor.value;
+    markColorsDirty();
   });
+  els.heteroElement.addEventListener('change', () => {
+    state.color.heteroByElement = els.heteroElement.checked;
+    markColorsDirty();
+  });
+
+  document.querySelectorAll('[data-lighting]').forEach((button) => {
+    button.addEventListener('click', () => applyLightingPreset(button.dataset.lighting));
+  });
+  for (const [id, key] of [
+    ['ao-strength', 'ao'],
+    ['outline-strength', 'outline'],
+    ['fog-strength', 'fog'],
+    ['glow-scale', 'glow'],
+    ['specular', 'specular'],
+    ['ao-radius', 'aoRadius'],
+  ]) {
+    const input = document.querySelector(`#${id}`);
+    input.addEventListener('input', () => {
+      state.lighting[key] = Number(input.value);
+      syncControlOutputs();
+      requestRender();
+    });
+  }
+  document.querySelectorAll('[data-background]').forEach((button) => {
+    button.addEventListener('click', () => {
+      setActiveButton('[data-background]', button);
+      state.background = button.dataset.background;
+      requestRender();
+    });
+  });
+  document.querySelectorAll('[data-projection]').forEach((button) => {
+    button.addEventListener('click', () => setProjection(button.dataset.projection === 'orthographic'));
+  });
+  for (const [id, key] of [['clip-near', 'near'], ['clip-far', 'far']]) {
+    const input = document.querySelector(`#${id}`);
+    input.addEventListener('input', () => {
+      state.clip[key] = Number(input.value);
+      if (state.clip.near > state.clip.far - 0.02) {
+        if (key === 'near') state.clip.far = Math.min(1, state.clip.near + 0.02);
+        else state.clip.near = Math.max(0, state.clip.far - 0.02);
+        document.querySelector('#clip-near').value = String(state.clip.near);
+        document.querySelector('#clip-far').value = String(state.clip.far);
+      }
+      syncControlOutputs();
+      requestRender();
+    });
+  }
+
+  els.searchInput.addEventListener('input', renderSearch);
+  els.searchInput.addEventListener('keydown', onSearchKey);
+  els.searchInput.addEventListener('blur', () => setTimeout(() => els.searchResults.classList.remove('is-visible'), 150));
+  els.chainsAll.addEventListener('click', () => setVisibleChains(null));
+  els.chainsInvert.addEventListener('click', invertChains);
+  els.selectionClear.addEventListener('click', () => clearSelection(true));
+  els.focusSelection.addEventListener('click', () => focusResidues([...state.selection]));
+  els.focusButton.addEventListener('click', () => focusResidues([...state.selection]));
+  els.labelSelection.addEventListener('click', toggleSelectionLabels);
+  els.isolateSelection.addEventListener('click', isolateSelectionChains);
+  els.measureClear.addEventListener('click', clearMeasurements);
+  document.querySelectorAll('[data-measure]').forEach((button) => {
+    button.addEventListener('click', () => setMeasureMode(state.measureMode === button.dataset.measure ? null : button.dataset.measure));
+  });
+  els.resetView.addEventListener('click', () => resetView(true));
+  els.spinToggle.addEventListener('click', () => setSpin(!state.spin));
+  els.screenshot.addEventListener('click', openExportDialog);
+  els.fullscreen.addEventListener('click', toggleFullscreen);
+  els.helpButton.addEventListener('click', () => els.helpDialog.showModal());
+  els.exportConfirm.addEventListener('click', (event) => {
+    event.preventDefault();
+    exportImage('download');
+  });
+  els.exportCopy.addEventListener('click', () => exportImage('clipboard'));
+  els.exportMovie.addEventListener('click', recordSpinMovie);
+  els.exportSize.addEventListener('change', updateExportInfo);
+  els.exportSupersample.addEventListener('change', updateExportInfo);
+
+  els.modelSlider.addEventListener('input', () => setActiveModel(Number(els.modelSlider.value) - 1));
+  els.modelPlay.addEventListener('click', toggleModelPlayback);
+  els.sequenceChain.addEventListener('change', renderSequence);
+
+  els.interfaceRun.addEventListener('click', runInterfaceAnalysis);
+  els.interactionsClear.addEventListener('click', () => {
+    state.interactions = { ...state.interactions, list: [], title: '' };
+    renderInteractions();
+    markSceneDirty();
+  });
+  els.interactionsExport.addEventListener('click', exportInteractionsCSV);
+  els.sasaRun.addEventListener('click', runSASA);
+  els.sasaColor.addEventListener('click', () => setColorScheme('exposure'));
+  els.ramaChain.addEventListener('change', renderRamachandran);
+  els.ramaCanvas.addEventListener('click', onRamaClick);
+  els.profileChain.addEventListener('change', renderProfile);
+  els.profileMetric.addEventListener('change', renderProfile);
+  els.profileCanvas.addEventListener('click', onProfileClick);
+  bindPAEEvents();
+
+  els.protparamChain.addEventListener('change', renderProtParam);
+  els.uniprotLoad.addEventListener('click', loadUniProtFeatures);
+  els.peptideMap.addEventListener('click', mapPeptidesFromInput);
+  els.digestRun.addEventListener('click', runDigest);
+  els.siteMap.addEventListener('click', mapSitesFromInput);
+  els.xlMap.addEventListener('click', mapCrosslinksFromInput);
+  els.xlCrosslinker.addEventListener('change', () => {
+    const preset = lazyModules.proteomics?.CROSSLINKERS?.find((item) => item.id === els.xlCrosslinker.value);
+    if (preset?.maxCaCa) els.xlMax.value = String(preset.maxCaCa);
+  });
+  els.dataApply.addEventListener('click', applyResidueDataFromInput);
+
   els.canvas.addEventListener('pointerdown', onPointerDown);
   els.canvas.addEventListener('pointermove', onPointerMove);
   els.canvas.addEventListener('pointerup', onPointerUp);
+  els.canvas.addEventListener('pointercancel', onPointerUp);
   els.canvas.addEventListener('pointerleave', () => {
-    state.hoveredAtom = null;
+    if (!state.drag) setHoverAtom(-1);
     els.tooltip.classList.remove('is-visible');
   });
+  els.canvas.addEventListener('dblclick', onDoubleClick);
+  els.legend.addEventListener('click', (event) => {
+    if (!event.target.closest('h4') && !state.legendCollapsed) return;
+    state.legendCollapsed = !state.legendCollapsed;
+    renderLegend();
+  });
   els.canvas.addEventListener('wheel', onWheel, { passive: false });
+  els.canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+
+  for (const type of ['dragenter', 'dragover']) {
+    window.addEventListener(type, (event) => {
+      if (!event.dataTransfer?.types?.includes('Files')) return;
+      event.preventDefault();
+      els.dropOverlay.hidden = false;
+    });
+  }
+  window.addEventListener('dragleave', (event) => {
+    if (event.relatedTarget === null) els.dropOverlay.hidden = true;
+  });
+  window.addEventListener('drop', async (event) => {
+    event.preventDefault();
+    els.dropOverlay.hidden = true;
+    await openFiles([...(event.dataTransfer?.files ?? [])]);
+  });
+}
+
+/* ---------- Loading ---------- */
+
+async function guardedLoad(task) {
+  try {
+    await task();
+  } catch (error) {
+    console.error(error);
+    hideLoading();
+    showToast(error.message || String(error), true);
+  }
+}
+
+async function fetchStructure(query) {
+  const request = normalizeFetchQuery(query);
+  if (!request) {
+    showToast(`"${query}" is not a PDB ID (e.g. 4HHB) or UniProt accession (e.g. P69905).`, true);
+    return;
+  }
+  await guardedLoad(async () => {
+    showLoading(`Fetching ${request.label}`);
+    const response = await fetch(request.url);
+    if (!response.ok) {
+      let message = `Could not fetch ${request.label} (HTTP ${response.status}).`;
+      try {
+        const body = await response.json();
+        if (body.error) message = body.error;
+      } catch {
+        // Non-JSON error body.
+      }
+      throw new Error(message);
+    }
+    const text = await response.text();
+    const filename = response.headers.get('X-Proteoscope-Filename') || request.filename;
+    await loadStructureFromText(text, filename, { source: request.label });
+    applyRemoteMetadata(response.headers.get('X-Proteoscope-Meta-B64'));
+    els.sampleSelect.value = '';
+    history.replaceState(null, '', `#fetch=${encodeURIComponent(request.id)}`);
+    const paeURL = response.headers.get('X-Proteoscope-Pae');
+    if (paeURL) loadPAEFromURL(paeURL);
+  });
+}
+
+function applyRemoteMetadata(encoded) {
+  if (!encoded || !state.structure) return;
+  try {
+    const bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
+    const meta = JSON.parse(new TextDecoder().decode(bytes));
+    const structureMeta = state.structure.meta;
+    if (meta.uniprotDescription) {
+      structureMeta.title = `${meta.entryId || structureMeta.code}: ${meta.uniprotDescription}${meta.gene ? ` (${meta.gene})` : ''}`;
+    }
+    if (meta.organismScientificName) structureMeta.organism = meta.organismScientificName;
+    if (!structureMeta.method) structureMeta.method = `AlphaFold DB v${meta.latestVersion ?? ''} prediction`.replace(' v prediction', ' prediction');
+    updateStructureUI();
+  } catch (error) {
+    console.warn('Could not decode remote metadata', error);
+  }
+}
+
+function normalizeFetchQuery(query) {
+  const clean = String(query || '').trim();
+  const afMatch = clean.match(/^AF-([A-Z0-9-]+?)-F\d+/i);
+  const accession = (afMatch ? afMatch[1] : clean).toUpperCase();
+  if (/^[0-9][A-Z0-9]{3}$/i.test(clean)) {
+    const id = clean.toUpperCase();
+    return { id, label: `PDB ${id}`, url: `/api/fetch/pdb/${id}`, filename: `${id}.cif` };
+  }
+  if (/^pdb_[0-9a-z]{8}$/i.test(clean)) {
+    const id = clean.toLowerCase();
+    return { id, label: `PDB ${id}`, url: `/api/fetch/pdb/${id}`, filename: `${id}.cif` };
+  }
+  if (/^([OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2})(-[0-9]+)?$/.test(accession)) {
+    return { id: accession, label: `AlphaFold ${accession}`, url: `/api/fetch/afdb/${accession}`, filename: `AF-${accession}-F1.cif` };
+  }
+  return null;
+}
+
+async function openFiles(files) {
+  const structures = files.filter((file) => !/\.json$/i.test(file.name));
+  const jsonFiles = files.filter((file) => /\.json$/i.test(file.name));
+  await guardedLoad(async () => {
+    if (structures.length) {
+      const file = structures[0];
+      showLoading(`Reading ${file.name}`);
+      const text = await readFileText(file);
+      await loadStructureFromText(text, file.name.replace(/\.gz$/i, ''), { source: 'Local file' });
+      els.sampleSelect.value = '';
+      history.replaceState(null, '', location.pathname);
+      if (structures.length > 1) showToast(`Opened ${file.name}. Proteoscope shows one structure at a time; the other ${structures.length - 1} file(s) were skipped.`);
+    }
+    for (const file of jsonFiles) {
+      const text = await readFileText(file);
+      loadPAEFromJSON(JSON.parse(text), file.name);
+    }
+  });
+}
+
+async function readFileText(file) {
+  if (/\.gz$/i.test(file.name)) {
+    if (typeof DecompressionStream === 'undefined') throw new Error('This browser cannot decompress .gz files. Please decompress the file first.');
+    const stream = file.stream().pipeThrough(new DecompressionStream('gzip'));
+    return new Response(stream).text();
+  }
+  return file.text();
 }
 
 async function loadStructureFromURL(url, label) {
-  setLoading(`Loading ${label}`);
-  els.loading.classList.remove('is-hidden', 'is-error');
+  showLoading(`Loading ${label}`);
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`Could not load ${url}`);
+  if (!response.ok) throw new Error(`Could not load ${label} (HTTP ${response.status}).`);
   const text = await response.text();
-  await loadStructureFromText(text, label);
+  const filename = response.headers.get('X-Proteoscope-Filename') || url.split('/').pop() || label;
+  await loadStructureFromText(text, filename, { source: label });
 }
 
-async function loadStructureFromText(text, label) {
-  const format = detectStructureFormat(text, label);
-  setLoading(`Parsing ${format.label} records`);
-  const structure = format.kind === 'mmcif' ? parseMMCIF(text, label) : parsePDB(text, label);
+async function loadStructureFromText(text, label, options = {}) {
+  showLoading(`Parsing ${label}`);
+  await nextFrame();
+  const structure = parseStructure(text, label);
   structure.baseModels = structure.models;
   prepareAssemblyEstimates(structure);
-  setLoading('Inferring bonds');
-  deriveStructure(structure);
+  showLoading('Deriving residues, bonds and secondary structure');
+  await nextFrame();
+  deriveStructure(structure, { secondaryMode: state.secondaryMode });
+  resetStructureState();
   state.structure = structure;
-  state.activeModel = 0;
-  state.selectedAtom = null;
-  state.hoveredAtom = null;
-  state.lastMeasureAtom = null;
-  state.measurements = [];
-  state.visibleChains = null;
+  state.sourceLabel = options.source || '';
+  state.legendCollapsed = structure.chains.filter((chain) => chain.polymerKind).length > 8;
+  if (structure.meta.isPredicted && state.color.scheme === 'chain') {
+    state.color.scheme = 'plddt';
+    els.colorScheme.value = 'plddt';
+  } else if (!structure.meta.isPredicted && state.color.scheme === 'plddt') {
+    state.color.scheme = 'chain';
+    els.colorScheme.value = 'chain';
+  }
   updateStructureUI();
-  fitModel(true);
-  rebuildScene();
-  els.loading.classList.add('is-hidden');
+  fitView(false, true);
+  markSceneDirty();
+  refreshSurface();
+  hideLoading();
 }
 
-function detectStructureFormat(text, label) {
-  const name = String(label || '').toLowerCase();
-  if (name.endsWith('.cif') || name.endsWith('.mmcif')) return { kind: 'mmcif', label: 'PDBx/mmCIF' };
-  if (/^\s*data_/i.test(text) && /_atom_site\./i.test(text)) return { kind: 'mmcif', label: 'PDBx/mmCIF' };
-  return { kind: 'pdb', label: 'PDB' };
-}
-
-function createStructure(label, format) {
-  return {
-    label,
-    format,
-    meta: {
-      title: label,
-      code: '',
-      classification: '',
-      method: '',
-      resolution: '',
-      numModels: 0,
-      keywords: '',
-      entities: [],
-    },
-    secondaryRanges: [],
-    helices: [],
-    sheets: [],
-    turns: [],
-    conect: [],
-    assemblies: [],
-    baseModels: [],
-    activeAssemblyId: ASYMMETRIC_UNIT_ID,
-    models: [],
-    chains: [],
-    residues: [],
-  };
-}
-
-function createModel(number) {
-  return {
-    number,
-    atoms: [],
-    residues: [],
-    residueMap: new Map(),
-    bonds: [],
-    serialToIndex: new Map(),
-    atomKeyToIndex: new Map(),
-    cartoonCache: new Map(),
-  };
-}
-
-function addAtomToModel(model, atom) {
-  model.serialToIndex.set(atom.serial, atom.id);
-  registerAtomKeys(model, atom);
-  model.atoms.push(atom);
-}
-
-function registerAtomKeys(model, atom) {
-  const keys = [
-    atomLookupKey(atom.chain, atom.authSeq ?? atom.resSeq, atom.iCode, atom.resName, atom.name),
-    atom.authKey,
-    atom.labelKey,
-  ].filter(Boolean);
-  for (const key of keys) {
-    if (!model.atomKeyToIndex.has(key)) model.atomKeyToIndex.set(key, atom.id);
+function resetStructureState() {
+  state.activeModel = 0;
+  state.selection = new Set();
+  state.selectedAtom = null;
+  state.hover = { atom: -1, residueKey: null };
+  state.focus = null;
+  state.measurePending = [];
+  state.measurements = [];
+  state.labels = new Set();
+  state.display.visibleChains = null;
+  state.interactions = { ...state.interactions, list: [], title: '' };
+  state.sasa = null;
+  state.proteomics = { coverage: null, data: null, dataLabel: '', sites: [], siteOverrides: null, crosslinks: [] };
+  state.pae = null;
+  state.paeSelection = null;
+  state.surface.data = null;
+  state.surface.key = '';
+  state.renderer?.setMesh('surface', null);
+  stopModelPlayback();
+  if (['coverage', 'data', 'exposure'].includes(state.color.scheme)) {
+    state.color.scheme = 'chain';
+    els.colorScheme.value = 'chain';
   }
-}
-
-function atomLookupKey(chain, seq, iCode, comp, atom) {
-  const parts = [chain, seq, iCode, comp, atom].map((value) => normalizeLookupPart(value));
-  if (!parts[0] || !parts[1] || !parts[4]) return '';
-  return parts.join('|');
-}
-
-function normalizeLookupPart(value) {
-  const clean = cleanCIFValue(value);
-  return clean ? clean.toUpperCase() : '';
-}
-
-function parsePDB(text, label) {
-  const structure = createStructure(label, 'pdb');
-  let currentModel = null;
-  let implicitModel = null;
-  const titleParts = [];
-  const lines = text.split(/\r?\n/);
-
-  for (const line of lines) {
-    const record = line.slice(0, 6).trim();
-    if (record === 'HEADER') {
-      structure.meta.classification = slice(line, 10, 50).trim();
-      structure.meta.code = slice(line, 62, 66).trim();
-    } else if (record === 'TITLE') {
-      const part = slice(line, 10, 80).trim();
-      if (part) titleParts.push(part);
-    } else if (record === 'EXPDTA') {
-      structure.meta.method = slice(line, 10, 80).trim();
-    } else if (line.startsWith('REMARK   2 RESOLUTION.')) {
-      structure.meta.resolution = line.slice(23).trim();
-    } else if (record === 'NUMMDL') {
-      structure.meta.numModels = parseIntSafe(slice(line, 10, 14));
-    } else if (record === 'HELIX') {
-      addSecondaryRange(structure, {
-        kind: 'helix',
-        chain: slice(line, 19, 20).trim(),
-        endChain: slice(line, 31, 32).trim(),
-        start: parseIntSafe(slice(line, 21, 25)),
-        end: parseIntSafe(slice(line, 33, 37)),
-        startICode: slice(line, 25, 26).trim(),
-        endICode: slice(line, 37, 38).trim(),
-        source: 'file annotation',
-      });
-    } else if (record === 'SHEET') {
-      addSecondaryRange(structure, {
-        kind: 'sheet',
-        chain: slice(line, 21, 22).trim(),
-        endChain: slice(line, 32, 33).trim(),
-        start: parseIntSafe(slice(line, 22, 26)),
-        end: parseIntSafe(slice(line, 33, 37)),
-        startICode: slice(line, 26, 27).trim(),
-        endICode: slice(line, 37, 38).trim(),
-        source: 'file annotation',
-      });
-    } else if (record === 'MODEL') {
-      currentModel = createModel(parseIntSafe(slice(line, 10, 14)) || structure.models.length + 1);
-      structure.models.push(currentModel);
-    } else if (record === 'ENDMDL') {
-      currentModel = null;
-    } else if (record === 'ATOM' || record === 'HETATM') {
-      if (!currentModel) {
-        if (!implicitModel) {
-          implicitModel = createModel(1);
-          structure.models.push(implicitModel);
-        }
-        currentModel = implicitModel;
-      }
-      const atom = parseAtomLine(line, record, currentModel.atoms.length);
-      if (atom) addAtomToModel(currentModel, atom);
-      if (implicitModel) currentModel = implicitModel;
-    } else if (record === 'CONECT') {
-      const source = parseIntSafe(slice(line, 6, 11));
-      for (let offset = 11; offset <= 26; offset += 5) {
-        const target = parseIntSafe(slice(line, offset, offset + 5));
-        if (source && target) structure.conect.push([source, target]);
-      }
-    }
+  for (const box of [els.interfaceResult, els.sasaResult, els.peptideResult, els.siteResult, els.xlResult, els.dataResult]) {
+    box.hidden = true;
+    box.replaceChildren();
   }
-
-  if (titleParts.length) structure.meta.title = titleParts.join(' ').replace(/\s+/g, ' ');
-  if (structure.meta.code) structure.meta.title = `${structure.meta.code}: ${structure.meta.title}`;
-  for (const model of structure.models) applyAltLocationPolicy(model);
-  if (!structure.models.length) throw new Error('No ATOM or HETATM records were found in this PDB file.');
-  structure.meta.numModels = structure.models.length;
-  return structure;
-}
-
-function parseAtomLine(line, record, id) {
-  const serial = parseIntSafe(slice(line, 6, 11));
-  const name = slice(line, 12, 16).trim();
-  const altLoc = slice(line, 16, 17).trim();
-  const resName = slice(line, 17, 20).trim();
-  const chain = slice(line, 21, 22).trim() || '_';
-  const resSeq = parseIntSafe(slice(line, 22, 26));
-  const iCode = slice(line, 26, 27).trim();
-  const x = parseFloatSafe(slice(line, 30, 38));
-  const y = parseFloatSafe(slice(line, 38, 46));
-  const z = parseFloatSafe(slice(line, 46, 54));
-  if (![x, y, z].every(Number.isFinite)) return null;
-  const occupancy = parseFloatSafe(slice(line, 54, 60));
-  const bFactor = parseFloatSafe(slice(line, 60, 66));
-  const element = inferElement(slice(line, 76, 78).trim(), name);
-  const isWater = WATER_RESIDUES.has(resName);
-  const isHydrogen = element === 'H' || name.startsWith('H');
-  const residueKey = `${chain}:${resSeq}${iCode}:${resName}`;
-  const isHet = record === 'HETATM';
-  const polymerType = inferPolymerType(resName);
-  const authSeq = String(resSeq || '');
-  return {
-    id,
-    serial,
-    name,
-    altLoc,
-    resName,
-    chain,
-    resSeq,
-    authSeq,
-    labelSeq: authSeq,
-    iCode,
-    x,
-    y,
-    z,
-    occupancy: Number.isFinite(occupancy) ? occupancy : 0,
-    bFactor: Number.isFinite(bFactor) ? bFactor : 0,
-    element,
-    record,
-    isHet,
-    isWater,
-    isHydrogen,
-    residueKey,
-    authKey: atomLookupKey(chain, authSeq, iCode, resName, name),
-    labelKey: atomLookupKey(chain, authSeq, iCode, resName, name),
-    polymerType,
-    ss: 'coil',
-    ssSource: 'unknown/coil fallback',
-  };
-}
-
-function parseMMCIF(text, label) {
-  const cif = parseCIFDocument(text);
-  const structure = createStructure(label, 'mmcif');
-  applyMMCIFMetadata(structure, cif, label);
-  applyMMCIFSecondaryStructure(structure, cif);
-  applyMMCIFConnections(structure, cif);
-  applyMMCIFAssemblies(structure, cif);
-
-  const atomRows = getCIFRows(cif, 'atom_site');
-  if (!atomRows.length) throw new Error('No _atom_site records were found in this PDBx/mmCIF file.');
-
-  const modelsByNumber = new Map();
-  for (const row of atomRows) {
-    const group = cleanCIFValue(row.group_pdb).toUpperCase();
-    if (group && group !== 'ATOM' && group !== 'HETATM') continue;
-    const record = group === 'HETATM' ? 'HETATM' : 'ATOM';
-    const modelNumber = parseIntSafe(row.pdbx_pdb_model_num) || 1;
-    let model = modelsByNumber.get(modelNumber);
-    if (!model) {
-      model = createModel(modelNumber);
-      modelsByNumber.set(modelNumber, model);
-      structure.models.push(model);
-    }
-    const atom = parseMMCIFAtom(row, record, model.atoms.length);
-    if (atom) addAtomToModel(model, atom);
-  }
-
-  for (const model of structure.models) applyAltLocationPolicy(model);
-  structure.models.sort((a, b) => a.number - b.number);
-  structure.models = structure.models.filter((model) => model.atoms.length > 0);
-  if (!structure.models.length) throw new Error('No usable atom coordinates were found in this PDBx/mmCIF file.');
-  structure.meta.numModels = structure.models.length;
-  return structure;
-}
-
-function parseMMCIFAtom(row, record, id) {
-  const serial = parseIntSafe(row.id) || id + 1;
-  const name = firstCIFValue(row.auth_atom_id, row.label_atom_id, row.type_symbol) || 'X';
-  const resName = (firstCIFValue(row.auth_comp_id, row.label_comp_id) || 'UNK').toUpperCase();
-  const authChain = firstCIFValue(row.auth_asym_id);
-  const labelChain = firstCIFValue(row.label_asym_id);
-  const chain = authChain || labelChain || '_';
-  const authSeq = firstCIFValue(row.auth_seq_id);
-  const labelSeq = firstCIFValue(row.label_seq_id);
-  const seqText = authSeq || labelSeq || '0';
-  const resSeq = parseIntSafe(seqText);
-  const iCode = firstCIFValue(row.pdbx_pdb_ins_code);
-  const x = parseFloatSafe(row.cartn_x);
-  const y = parseFloatSafe(row.cartn_y);
-  const z = parseFloatSafe(row.cartn_z);
-  if (![x, y, z].every(Number.isFinite)) return null;
-  const occupancy = parseFloatSafe(row.occupancy);
-  const bFactor = parseFloatSafe(row.b_iso_or_equiv);
-  const element = inferElement(firstCIFValue(row.type_symbol), name);
-  const isWater = WATER_RESIDUES.has(resName);
-  const isHydrogen = element === 'H' || name.startsWith('H');
-  const residueID = seqText || String(resSeq || 0);
-  const residueKey = `${chain}:${residueID}${iCode}:${resName}`;
-  const isHet = record === 'HETATM';
-  const polymerType = inferPolymerType(resName);
-  const labelComp = firstCIFValue(row.label_comp_id) || resName;
-  const authComp = firstCIFValue(row.auth_comp_id) || resName;
-  const labelAtom = firstCIFValue(row.label_atom_id) || name;
-  const authAtom = firstCIFValue(row.auth_atom_id) || name;
-  return {
-    id,
-    serial,
-    name,
-    altLoc: firstCIFValue(row.label_alt_id),
-    resName,
-    chain,
-    authChain: authChain || chain,
-    labelChain: labelChain || chain,
-    resSeq,
-    authSeq,
-    labelSeq,
-    iCode,
-    x,
-    y,
-    z,
-    occupancy: Number.isFinite(occupancy) ? occupancy : 0,
-    bFactor: Number.isFinite(bFactor) ? bFactor : 0,
-    element,
-    record,
-    isHet,
-    isWater,
-    isHydrogen,
-    residueKey,
-    authKey: atomLookupKey(authChain || chain, authSeq || seqText, iCode, authComp, authAtom),
-    labelKey: atomLookupKey(labelChain || chain, labelSeq || seqText, iCode, labelComp, labelAtom),
-    polymerType,
-    ss: 'coil',
-    ssSource: 'unknown/coil fallback',
-  };
-}
-
-function addSecondaryRange(structure, range) {
-  if (!range?.kind || !range.start || !range.end) return;
-  const normalized = {
-    ...range,
-    kind: range.kind === 'strand' ? 'sheet' : range.kind,
-    chain: range.chain || range.authChain || range.labelChain || '_',
-    endChain: range.endChain || range.endAuthChain || range.endLabelChain || range.chain || range.authChain || range.labelChain || '_',
-    source: range.source || 'file annotation',
-  };
-  structure.secondaryRanges.push(normalized);
-  if (normalized.kind === 'helix') structure.helices.push(normalized);
-  if (normalized.kind === 'sheet') structure.sheets.push(normalized);
-  if (normalized.kind === 'turn') structure.turns.push(normalized);
-}
-
-function applyAltLocationPolicy(model) {
-  const groups = new Map();
-  for (const atom of model.atoms) {
-    const key = altLocationGroupKey(atom);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(atom);
-  }
-  if ([...groups.values()].every((group) => group.length === 1)) return;
-
-  const selected = [];
-  const aliases = [];
-  for (const group of groups.values()) {
-    const best = group.slice().sort(compareAltLocationAtoms)[0];
-    selected.push(best);
-    for (const atom of group) {
-      if (atom !== best) aliases.push({ serial: atom.serial, chosen: best });
-    }
-  }
-  selected.sort((a, b) => a.id - b.id);
-  model.atoms = [];
-  model.serialToIndex = new Map();
-  model.atomKeyToIndex = new Map();
-  for (const atom of selected) {
-    atom.id = model.atoms.length;
-    addAtomToModel(model, atom);
-  }
-  const chosenIDs = new Map(selected.map((atom) => [atom, atom.id]));
-  for (const alias of aliases) {
-    const id = chosenIDs.get(alias.chosen);
-    if (id !== undefined) model.serialToIndex.set(alias.serial, id);
-  }
-}
-
-function altLocationGroupKey(atom) {
-  return [
-    atom.record,
-    atom.chain,
-    atom.authChain || '',
-    atom.labelChain || '',
-    atom.authSeq || atom.resSeq || '',
-    atom.labelSeq || '',
-    atom.iCode || '',
-    atom.resName,
-    atom.name,
-  ].join('|').toUpperCase();
-}
-
-function compareAltLocationAtoms(a, b) {
-  const occupancyDelta = (b.occupancy || 0) - (a.occupancy || 0);
-  if (Math.abs(occupancyDelta) > 0.0001) return occupancyDelta;
-  const aRank = altLocationRank(a.altLoc);
-  const bRank = altLocationRank(b.altLoc);
-  if (aRank !== bRank) return aRank - bRank;
-  return a.id - b.id;
-}
-
-function altLocationRank(value) {
-  const alt = String(value || '').trim().toUpperCase();
-  if (alt === 'A' || alt === '1') return 0;
-  if (!alt) return 1;
-  return 2;
-}
-
-function applyMMCIFMetadata(structure, cif, label) {
-  const code = getCIFValue(cif, ['_entry.id']) || cif.dataBlock || '';
-  const title = getCIFValue(cif, ['_struct.title']) || label;
-  const methods = getCIFColumnValues(cif, 'exptl', 'method');
-  const resolution = getCIFValue(cif, [
-    '_refine.ls_d_res_high',
-    '_em_3d_reconstruction.resolution',
-    '_reflns.d_resolution_high',
-  ]);
-  structure.meta.code = code;
-  structure.meta.title = code ? `${code}: ${collapseWhitespace(title)}` : collapseWhitespace(title);
-  structure.meta.classification = getCIFValue(cif, ['_struct_keywords.pdbx_keywords', '_struct_keywords.text']);
-  structure.meta.keywords = getCIFValue(cif, ['_struct_keywords.text', '_struct_keywords.pdbx_keywords']);
-  structure.meta.method = methods.join('; ') || getCIFValue(cif, ['_exptl.method']);
-  structure.meta.resolution = resolution ? formatResolution(resolution) : '';
-  structure.meta.entities = getCIFRows(cif, 'entity').map((row) => ({
-    id: cleanCIFValue(row.id),
-    type: cleanCIFValue(row.type),
-    description: cleanCIFValue(row.pdbx_description),
-  })).filter((entity) => entity.id || entity.description);
-}
-
-function applyMMCIFSecondaryStructure(structure, cif) {
-  for (const row of getCIFRows(cif, 'struct_conf')) {
-    const type = cleanCIFValue(row.conf_type_id).toUpperCase();
-    const range = cifResidueRange(row);
-    if (!range) continue;
-    if (type.startsWith('HELX') || type.includes('HELIX')) {
-      addSecondaryRange(structure, { ...range, kind: 'helix', source: 'file annotation' });
-    } else if (type.startsWith('STRN') || type.includes('SHEET') || type.includes('BETA')) {
-      addSecondaryRange(structure, { ...range, kind: 'sheet', source: 'file annotation' });
-    } else if (type.startsWith('TURN') || type.includes('TURN')) {
-      addSecondaryRange(structure, { ...range, kind: 'turn', source: 'file annotation' });
-    }
-  }
-  for (const row of getCIFRows(cif, 'struct_sheet_range')) {
-    const range = cifResidueRange(row);
-    if (range) addSecondaryRange(structure, { ...range, kind: 'sheet', source: 'file annotation' });
-  }
-}
-
-function cifResidueRange(row) {
-  const authChain = firstCIFValue(row.beg_auth_asym_id);
-  const labelChain = firstCIFValue(row.beg_label_asym_id);
-  const endAuthChain = firstCIFValue(row.end_auth_asym_id);
-  const endLabelChain = firstCIFValue(row.end_label_asym_id);
-  const authStart = parseIntSafe(firstCIFValue(row.beg_auth_seq_id));
-  const authEnd = parseIntSafe(firstCIFValue(row.end_auth_seq_id));
-  const labelStart = parseIntSafe(firstCIFValue(row.beg_label_seq_id));
-  const labelEnd = parseIntSafe(firstCIFValue(row.end_label_seq_id));
-  const chain = authChain || labelChain;
-  const start = authStart || labelStart;
-  const end = authEnd || labelEnd;
-  if (!chain || !start || !end) return null;
-  return {
-    chain,
-    endChain: endAuthChain || endLabelChain || chain,
-    authChain,
-    labelChain,
-    endAuthChain,
-    endLabelChain,
-    start,
-    end,
-    authStart,
-    authEnd,
-    labelStart,
-    labelEnd,
-    startICode: firstCIFValue(row.pdbx_beg_pdb_ins_code, row.beg_pdb_ins_code),
-    endICode: firstCIFValue(row.pdbx_end_pdb_ins_code, row.end_pdb_ins_code),
-  };
-}
-
-function applyMMCIFConnections(structure, cif) {
-  for (const row of getCIFRows(cif, 'struct_conn')) {
-    const aKeys = cifPartnerKeys(row, 'ptnr1');
-    const bKeys = cifPartnerKeys(row, 'ptnr2');
-    if (aKeys.length && bKeys.length) {
-      structure.conect.push({
-        aKeys,
-        bKeys,
-        type: cleanCIFValue(row.conn_type_id),
-      });
-    }
-  }
-}
-
-function applyMMCIFAssemblies(structure, cif) {
-  const operations = parseAssemblyOperations(cif);
-  const assemblies = new Map();
-  for (const row of getCIFRows(cif, 'pdbx_struct_assembly')) {
-    const id = firstCIFValue(row.id);
-    if (!id) continue;
-    assemblies.set(id, {
-      id,
-      details: firstCIFValue(row.details),
-      methodDetails: firstCIFValue(row.method_details),
-      oligomericDetails: firstCIFValue(row.oligomeric_details),
-      oligomericCount: firstCIFValue(row.oligomeric_count),
-      generators: [],
-      estimatedAtoms: 0,
-    });
-  }
-  for (const row of getCIFRows(cif, 'pdbx_struct_assembly_gen')) {
-    const assemblyID = firstCIFValue(row.assembly_id);
-    if (!assemblyID) continue;
-    if (!assemblies.has(assemblyID)) {
-      assemblies.set(assemblyID, {
-        id: assemblyID,
-        details: '',
-        methodDetails: '',
-        oligomericDetails: '',
-        oligomericCount: '',
-        generators: [],
-        estimatedAtoms: 0,
-      });
-    }
-    const combos = parseOperationExpression(firstCIFValue(row.oper_expression));
-    const transforms = combos.map((combo) => resolveOperationCombo(combo, operations)).filter(Boolean);
-    assemblies.get(assemblyID).generators.push({
-      asymIDs: new Set(splitCIFList(row.asym_id_list)),
-      authAsymIDs: new Set(splitCIFList(row.auth_asym_id_list)),
-      expression: firstCIFValue(row.oper_expression),
-      transforms,
-    });
-  }
-  structure.assemblies = [...assemblies.values()]
-    .filter((assembly) => assembly.generators.some((generator) => generator.transforms.length > 0))
-    .sort((a, b) => naturalCompare(a.id, b.id));
-}
-
-function parseAssemblyOperations(cif) {
-  const operations = new Map();
-  for (const row of getCIFRows(cif, 'pdbx_struct_oper_list')) {
-    const id = firstCIFValue(row.id);
-    if (!id) continue;
-    operations.set(id, {
-      id,
-      matrix: [
-        [parseFloatDefault(row['matrix[1][1]'], 1), parseFloatDefault(row['matrix[1][2]'], 0), parseFloatDefault(row['matrix[1][3]'], 0)],
-        [parseFloatDefault(row['matrix[2][1]'], 0), parseFloatDefault(row['matrix[2][2]'], 1), parseFloatDefault(row['matrix[2][3]'], 0)],
-        [parseFloatDefault(row['matrix[3][1]'], 0), parseFloatDefault(row['matrix[3][2]'], 0), parseFloatDefault(row['matrix[3][3]'], 1)],
-      ],
-      vector: [
-        parseFloatDefault(row['vector[1]'], 0),
-        parseFloatDefault(row['vector[2]'], 0),
-        parseFloatDefault(row['vector[3]'], 0),
-      ],
-    });
-  }
-  if (!operations.has('1')) operations.set('1', identityOperation('1'));
-  return operations;
-}
-
-function parseOperationExpression(expression) {
-  const clean = cleanCIFValue(expression).replace(/\s+/g, '');
-  if (!clean) return [];
-  const groups = [];
-  const matches = clean.matchAll(/\(([^()]+)\)/g);
-  for (const match of matches) groups.push(parseOperationList(match[1]));
-  if (!groups.length) groups.push(parseOperationList(clean));
-  return cartesianProduct(groups).filter((combo) => combo.length > 0);
-}
-
-function parseOperationList(value) {
-  const items = [];
-  for (const part of String(value || '').split(',')) {
-    const clean = part.trim();
-    if (!clean) continue;
-    const range = clean.match(/^(-?\d+)-(-?\d+)$/);
-    if (range) {
-      const start = Number(range[1]);
-      const end = Number(range[2]);
-      const step = start <= end ? 1 : -1;
-      for (let value = start; step > 0 ? value <= end : value >= end; value += step) {
-        items.push(String(value));
-      }
-    } else {
-      items.push(clean);
-    }
-  }
-  return items;
-}
-
-function cartesianProduct(groups) {
-  return groups.reduce((sets, group) => {
-    const next = [];
-    for (const set of sets) {
-      for (const item of group) next.push([...set, item]);
-    }
-    return next;
-  }, [[]]);
-}
-
-function resolveOperationCombo(combo, operations) {
-  let combined = identityOperation(combo.join('x') || '1');
-  for (let index = combo.length - 1; index >= 0; index -= 1) {
-    const operation = operations.get(combo[index]);
-    if (!operation) return null;
-    combined = composeOperations(operation, combined);
-  }
-  combined.id = combo.join('x') || '1';
-  return combined;
-}
-
-function identityOperation(id = '1') {
-  return {
-    id,
-    matrix: [
-      [1, 0, 0],
-      [0, 1, 0],
-      [0, 0, 1],
-    ],
-    vector: [0, 0, 0],
-  };
-}
-
-function composeOperations(a, b) {
-  const matrix = multiplyMatrix3(a.matrix, b.matrix);
-  const rotatedVector = multiplyMatrixVector3(a.matrix, b.vector);
-  return {
-    id: `${a.id}x${b.id}`,
-    matrix,
-    vector: [
-      rotatedVector[0] + a.vector[0],
-      rotatedVector[1] + a.vector[1],
-      rotatedVector[2] + a.vector[2],
-    ],
-  };
-}
-
-function multiplyMatrix3(a, b) {
-  return [
-    [
-      a[0][0] * b[0][0] + a[0][1] * b[1][0] + a[0][2] * b[2][0],
-      a[0][0] * b[0][1] + a[0][1] * b[1][1] + a[0][2] * b[2][1],
-      a[0][0] * b[0][2] + a[0][1] * b[1][2] + a[0][2] * b[2][2],
-    ],
-    [
-      a[1][0] * b[0][0] + a[1][1] * b[1][0] + a[1][2] * b[2][0],
-      a[1][0] * b[0][1] + a[1][1] * b[1][1] + a[1][2] * b[2][1],
-      a[1][0] * b[0][2] + a[1][1] * b[1][2] + a[1][2] * b[2][2],
-    ],
-    [
-      a[2][0] * b[0][0] + a[2][1] * b[1][0] + a[2][2] * b[2][0],
-      a[2][0] * b[0][1] + a[2][1] * b[1][1] + a[2][2] * b[2][1],
-      a[2][0] * b[0][2] + a[2][1] * b[1][2] + a[2][2] * b[2][2],
-    ],
-  ];
-}
-
-function multiplyMatrixVector3(matrix, vector) {
-  return [
-    matrix[0][0] * vector[0] + matrix[0][1] * vector[1] + matrix[0][2] * vector[2],
-    matrix[1][0] * vector[0] + matrix[1][1] * vector[1] + matrix[1][2] * vector[2],
-    matrix[2][0] * vector[0] + matrix[2][1] * vector[1] + matrix[2][2] * vector[2],
-  ];
-}
-
-function applyOperationToPoint(operation, atom) {
-  const rotated = multiplyMatrixVector3(operation.matrix, [atom.x, atom.y, atom.z]);
-  return [
-    rotated[0] + operation.vector[0],
-    rotated[1] + operation.vector[1],
-    rotated[2] + operation.vector[2],
-  ];
-}
-
-function splitCIFList(value) {
-  return cleanCIFValue(value).split(',').map((item) => item.trim()).filter(Boolean);
-}
-
-function cifPartnerKeys(row, prefix) {
-  const keys = [];
-  const ins = firstCIFValue(
-    row[`pdbx_${prefix}_pdb_ins_code`],
-    row[`pdbx_${prefix}_label_pdb_ins_code`],
-    row[`${prefix}_pdb_ins_code`],
-  );
-  const authKey = atomLookupKey(
-    firstCIFValue(row[`${prefix}_auth_asym_id`], row[`pdbx_${prefix}_auth_asym_id`]),
-    firstCIFValue(row[`${prefix}_auth_seq_id`], row[`pdbx_${prefix}_auth_seq_id`]),
-    ins,
-    firstCIFValue(row[`${prefix}_auth_comp_id`], row[`pdbx_${prefix}_auth_comp_id`]),
-    firstCIFValue(row[`${prefix}_auth_atom_id`], row[`pdbx_${prefix}_auth_atom_id`]),
-  );
-  const labelKey = atomLookupKey(
-    firstCIFValue(row[`${prefix}_label_asym_id`]),
-    firstCIFValue(row[`${prefix}_label_seq_id`]),
-    ins,
-    firstCIFValue(row[`${prefix}_label_comp_id`]),
-    firstCIFValue(row[`${prefix}_label_atom_id`]),
-  );
-  if (authKey) keys.push(authKey);
-  if (labelKey && labelKey !== authKey) keys.push(labelKey);
-  return keys;
-}
-
-function parseCIFDocument(text) {
-  const tokens = tokenizeCIF(text);
-  const cif = {
-    dataBlock: '',
-    fields: new Map(),
-    loops: new Map(),
-  };
-  let index = 0;
-  while (index < tokens.length) {
-    const token = tokens[index];
-    const lower = token.toLowerCase();
-    if (lower.startsWith('data_')) {
-      cif.dataBlock = token.slice(5).trim();
-      index += 1;
-    } else if (lower === 'loop_') {
-      index += 1;
-      const headers = [];
-      while (index < tokens.length && tokens[index].startsWith('_')) {
-        headers.push(tokens[index]);
-        index += 1;
-      }
-      if (!headers.length) continue;
-      const parsedHeaders = headers.map(splitCIFTag);
-      const category = parsedHeaders[0]?.category ?? '';
-      const rows = [];
-      while (index < tokens.length && !isCIFControlToken(tokens[index])) {
-        const row = {};
-        let complete = true;
-        for (let column = 0; column < parsedHeaders.length; column += 1) {
-          if (index >= tokens.length || isCIFControlToken(tokens[index])) {
-            complete = false;
-            break;
-          }
-          row[parsedHeaders[column].attribute] = tokens[index];
-          index += 1;
-        }
-        if (complete) rows.push(row);
-      }
-      if (category && rows.length) {
-        if (!cif.loops.has(category)) cif.loops.set(category, []);
-        cif.loops.get(category).push(...rows);
-      }
-    } else if (token.startsWith('_')) {
-      if (index + 1 < tokens.length) cif.fields.set(normalizeCIFTag(token), tokens[index + 1]);
-      index += 2;
-    } else {
-      index += 1;
-    }
-  }
-  return cif;
-}
-
-function tokenizeCIF(text) {
-  const tokens = [];
-  let index = 0;
-  while (index < text.length) {
-    while (index < text.length && /\s/.test(text[index])) index += 1;
-    if (index >= text.length) break;
-    const char = text[index];
-    if (char === '#') {
-      while (index < text.length && text[index] !== '\n') index += 1;
-      continue;
-    }
-    if (char === ';' && (index === 0 || text[index - 1] === '\n')) {
-      let start = index + 1;
-      if (text[start] === '\r') start += 1;
-      if (text[start] === '\n') start += 1;
-      let end = text.length;
-      let cursor = start;
-      while (cursor < text.length) {
-        const next = text.indexOf('\n;', cursor);
-        if (next < 0) break;
-        end = next;
-        index = next + 2;
-        while (index < text.length && text[index] !== '\n') index += 1;
-        if (index < text.length) index += 1;
-        break;
-      }
-      if (end === text.length) index = text.length;
-      tokens.push(text.slice(start, end));
-      continue;
-    }
-    if (char === '\'' || char === '"') {
-      const quote = char;
-      index += 1;
-      const start = index;
-      while (index < text.length && text[index] !== quote) index += 1;
-      tokens.push(text.slice(start, index));
-      if (index < text.length) index += 1;
-      continue;
-    }
-    const start = index;
-    while (index < text.length && !/\s/.test(text[index])) index += 1;
-    tokens.push(text.slice(start, index));
-  }
-  return tokens;
-}
-
-function splitCIFTag(tag) {
-  const key = normalizeCIFTag(tag).replace(/^_/, '');
-  const dot = key.indexOf('.');
-  if (dot < 0) return { category: key, attribute: '' };
-  return {
-    category: key.slice(0, dot),
-    attribute: key.slice(dot + 1),
-  };
-}
-
-function normalizeCIFTag(tag) {
-  return String(tag || '').trim().toLowerCase();
-}
-
-function isCIFControlToken(token) {
-  const lower = token.toLowerCase();
-  return token.startsWith('_') || lower === 'loop_' || lower === 'stop_' || lower.startsWith('data_') || lower.startsWith('save_');
-}
-
-function getCIFRows(cif, category) {
-  const key = String(category).toLowerCase();
-  const loopRows = cif.loops.get(key);
-  if (loopRows?.length) return loopRows;
-  const prefix = `_${key}.`;
-  const row = {};
-  for (const [tag, value] of cif.fields.entries()) {
-    if (tag.startsWith(prefix)) row[tag.slice(prefix.length)] = value;
-  }
-  return Object.keys(row).length ? [row] : [];
-}
-
-function getCIFValue(cif, tags) {
-  for (const tag of tags) {
-    const key = normalizeCIFTag(tag);
-    const direct = cleanCIFValue(cif.fields.get(key));
-    if (direct) return direct;
-    const { category, attribute } = splitCIFTag(key);
-    for (const row of getCIFRows(cif, category)) {
-      const value = cleanCIFValue(row[attribute]);
-      if (value) return value;
-    }
-  }
-  return '';
-}
-
-function getCIFColumnValues(cif, category, attribute) {
-  const values = [];
-  const seen = new Set();
-  for (const row of getCIFRows(cif, category)) {
-    const value = cleanCIFValue(row[String(attribute).toLowerCase()]);
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    values.push(value);
-  }
-  return values;
-}
-
-function firstCIFValue(...values) {
-  for (const value of values) {
-    const clean = cleanCIFValue(value);
-    if (clean) return clean;
-  }
-  return '';
-}
-
-function cleanCIFValue(value) {
-  const clean = String(value ?? '').trim();
-  return clean === '.' || clean === '?' ? '' : clean;
-}
-
-function collapseWhitespace(value) {
-  return String(value || '').replace(/\s+/g, ' ').trim();
-}
-
-function formatResolution(value) {
-  const clean = cleanCIFValue(value);
-  return clean && !/angstrom/i.test(clean) ? `${clean} Angstroms` : clean;
-}
-
-function prepareAssemblyEstimates(structure) {
-  if (!structure.assemblies.length || !structure.baseModels.length) return;
-  const firstModel = structure.baseModels[0];
-  for (const assembly of structure.assemblies) {
-    assembly.estimatedAtoms = estimateAssemblyAtoms(firstModel, assembly);
-  }
-}
-
-function estimateAssemblyAtoms(model, assembly) {
-  let total = 0;
-  for (const generator of assembly.generators) {
-    const selected = model.atoms.filter((atom) => atomMatchesAssemblyGenerator(atom, generator)).length;
-    total += selected * generator.transforms.length;
-  }
-  return total;
+  els.sasaColor.disabled = true;
 }
 
 async function activateAssembly(assemblyID) {
   const structure = state.structure;
   if (!structure || structure.activeAssemblyId === assemblyID) return;
-  const previousAssemblyID = structure.activeAssemblyId;
-  const previousModels = structure.models;
-  const previousActiveModel = state.activeModel;
-  els.loading.classList.remove('is-hidden', 'is-error');
-  setLoading(assemblyID === ASYMMETRIC_UNIT_ID ? 'Restoring asymmetric unit' : `Building assembly ${assemblyID}`);
+  const previous = { id: structure.activeAssemblyId, models: structure.models };
+  showLoading(assemblyID === ASYMMETRIC_UNIT_ID ? 'Restoring asymmetric unit' : `Building assembly ${assemblyID}`);
   await nextFrame();
   try {
     structure.activeAssemblyId = assemblyID;
     structure.models = materializeAssemblyModels(structure, assemblyID);
-    state.activeModel = 0;
-    state.selectedAtom = null;
-    state.hoveredAtom = null;
-    state.lastMeasureAtom = null;
-    state.measurements = [];
-    state.visibleChains = null;
-    deriveStructure(structure);
+    deriveStructure(structure, { secondaryMode: state.secondaryMode });
+    resetStructureState();
     updateStructureUI();
-    fitModel(true);
-    rebuildScene();
-    els.loading.classList.add('is-hidden');
+    fitView(false, true);
+    markSceneDirty();
+    refreshSurface();
   } catch (error) {
-    console.error(error);
-    structure.activeAssemblyId = previousAssemblyID;
-    structure.models = previousModels;
-    state.activeModel = previousActiveModel;
+    structure.activeAssemblyId = previous.id;
+    structure.models = previous.models;
+    showToast(error.message, true);
     updateStructureUI();
-    els.loading.classList.add('is-hidden');
   }
+  hideLoading();
 }
 
-function materializeAssemblyModels(structure, assemblyID) {
-  if (assemblyID === ASYMMETRIC_UNIT_ID) return structure.baseModels;
-  const assembly = structure.assemblies.find((item) => item.id === assemblyID);
-  if (!assembly) return structure.baseModels;
-  if (assembly.estimatedAtoms > MAX_ASSEMBLY_ATOMS) {
-    throw new Error(`Assembly ${assembly.id} would create ${formatNumber(assembly.estimatedAtoms)} atoms/model, above the ${formatNumber(MAX_ASSEMBLY_ATOMS)} atom safety limit.`);
-  }
-  return structure.baseModels.map((baseModel) => materializeAssemblyModel(baseModel, assembly));
-}
-
-function materializeAssemblyModel(baseModel, assembly) {
-  const model = createModel(baseModel.number);
-  model.precomputedBonds = [];
-  const chainCopyCounts = countAssemblyChainCopies(baseModel, assembly);
-  const chainOccurrences = new Map();
-
-  for (const generator of assembly.generators) {
-    const selectedAtoms = baseModel.atoms.filter((atom) => atomMatchesAssemblyGenerator(atom, generator));
-    if (!selectedAtoms.length) continue;
-    const selectedIDs = new Set(selectedAtoms.map((atom) => atom.id));
-    for (const transform of generator.transforms) {
-      const atomIDMap = new Map();
-      const chainLabels = assemblyChainLabels(selectedAtoms, chainCopyCounts, chainOccurrences);
-      for (const atom of selectedAtoms) {
-        const copy = transformAssemblyAtom(atom, model.atoms.length, transform, chainLabels.get(atom.chain) || atom.chain);
-        atomIDMap.set(atom.id, copy.id);
-        addAtomToModel(model, copy);
-      }
-      for (const bond of baseModel.bonds ?? []) {
-        if (!selectedIDs.has(bond.a) || !selectedIDs.has(bond.b)) continue;
-        const a = atomIDMap.get(bond.a);
-        const b = atomIDMap.get(bond.b);
-        if (a !== undefined && b !== undefined) model.precomputedBonds.push({ a, b, explicit: bond.explicit });
-      }
-    }
-  }
-  return model;
-}
-
-function countAssemblyChainCopies(model, assembly) {
-  const counts = new Map();
-  for (const generator of assembly.generators) {
-    const seen = new Set();
-    for (const atom of model.atoms) {
-      if (!atomMatchesAssemblyGenerator(atom, generator)) continue;
-      seen.add(atom.chain);
-    }
-    for (const chain of seen) {
-      counts.set(chain, (counts.get(chain) || 0) + generator.transforms.length);
-    }
-  }
-  return counts;
-}
-
-function assemblyChainLabels(atoms, chainCopyCounts, chainOccurrences) {
-  const labels = new Map();
-  for (const atom of atoms) {
-    if (labels.has(atom.chain)) continue;
-    const copies = chainCopyCounts.get(atom.chain) || 1;
-    if (copies <= 1) {
-      labels.set(atom.chain, atom.chain);
-    } else {
-      const next = (chainOccurrences.get(atom.chain) || 0) + 1;
-      chainOccurrences.set(atom.chain, next);
-      labels.set(atom.chain, `${atom.chain}.${next}`);
-    }
-  }
-  return labels;
-}
-
-function atomMatchesAssemblyGenerator(atom, generator) {
-  if (generator.asymIDs.size && generator.asymIDs.has(atom.labelChain)) return true;
-  if (generator.authAsymIDs.size && generator.authAsymIDs.has(atom.authChain || atom.chain)) return true;
-  return !generator.asymIDs.size && !generator.authAsymIDs.size;
-}
-
-function transformAssemblyAtom(atom, id, transform, chain) {
-  const [x, y, z] = applyOperationToPoint(transform, atom);
-  const copy = {
-    ...atom,
-    id,
-    serial: id + 1,
-    chain,
-    x,
-    y,
-    z,
-  };
-  copy.residueKey = `${copy.chain}:${copy.authSeq || copy.labelSeq || copy.resSeq}${copy.iCode}:${copy.resName}`;
-  copy.authKey = atomLookupKey(copy.chain, copy.authSeq || copy.resSeq, copy.iCode, copy.resName, copy.name);
-  copy.labelKey = atomLookupKey(copy.chain, copy.labelSeq || copy.resSeq, copy.iCode, copy.resName, copy.name);
-  return copy;
-}
-
-function buildModelResidues(model) {
-  const residues = new Map();
-  for (const atom of model.atoms) {
-    if (!residues.has(atom.residueKey)) {
-      residues.set(atom.residueKey, {
-        key: atom.residueKey,
-        modelID: model.number,
-        chain: atom.chain,
-        authChain: atom.authChain || atom.chain,
-        labelChain: atom.labelChain || atom.chain,
-        resName: atom.resName,
-        resSeq: atom.resSeq,
-        authSeq: atom.authSeq || String(atom.resSeq || ''),
-        labelSeq: atom.labelSeq || String(atom.resSeq || ''),
-        iCode: atom.iCode,
-        polymerType: atom.polymerType,
-        isHet: atom.isHet,
-        isWater: atom.isWater,
-        atoms: [],
-        backbone: {},
-        representative: null,
-        ss: 'coil',
-        ssSource: 'unknown/coil fallback',
-        bFactor: 0,
-        occupancy: 0,
-      });
-    }
-    const residue = residues.get(atom.residueKey);
-    residue.atoms.push(atom);
-    residue.bFactor += atom.bFactor;
-    residue.occupancy += atom.occupancy;
-    if (!residue.representative) residue.representative = atom;
-    if (atom.name === 'CA' || atom.name === 'P' || atom.name === "C4'") residue.representative = atom;
-    if (residue.polymerType === 'protein' && ['N', 'CA', 'C', 'O'].includes(atom.name)) {
-      const current = residue.backbone[atom.name];
-      if (!current || compareAltLocationAtoms(atom, current) < 0) residue.backbone[atom.name] = atom;
-    }
-  }
-
-  for (const residue of residues.values()) {
-    const count = Math.max(1, residue.atoms.length);
-    residue.bFactor /= count;
-    residue.occupancy /= count;
-    if (residue.backbone.CA) residue.representative = residue.backbone.CA;
-    residue.normal = residueBackboneNormal(residue);
-  }
-
-  return [...residues.values()].sort(compareResidues);
-}
-
-function deriveStructure(structure) {
-  const firstModel = structure.models[0];
-  const residueMap = new Map();
-  const chainMap = new Map();
-
+function reassignSecondary() {
+  const structure = state.structure;
+  if (!structure) return;
   for (const model of structure.models) {
-    model.residues = buildModelResidues(model);
-    model.residueMap = new Map(model.residues.map((residue) => [residue.key, residue]));
+    assignSecondary(model, structure, state.secondaryMode);
     model.cartoonCache = new Map();
-    assignSecondary(model, structure);
-    model.bonds = buildBonds(model, structure.conect);
-    model.bounds = computeBounds(model.atoms);
-    model.bFactorRange = computeBFactorRange(model.atoms);
   }
-
-  for (const atom of firstModel.atoms) {
-    if (!chainMap.has(atom.chain)) {
-      chainMap.set(atom.chain, {
-        id: atom.chain,
-        atoms: 0,
-        residues: 0,
-        ligands: new Set(),
-        color: CHAIN_PALETTE[chainMap.size % CHAIN_PALETTE.length],
-      });
-    }
-    const chain = chainMap.get(atom.chain);
-    chain.atoms += 1;
-    if (atom.isHet && !atom.isWater) chain.ligands.add(atom.resName);
-
-    if (!residueMap.has(atom.residueKey)) {
-      const modelResidue = firstModel.residueMap.get(atom.residueKey);
-      residueMap.set(atom.residueKey, {
-        key: atom.residueKey,
-        modelID: modelResidue?.modelID ?? firstModel.number,
-        chain: atom.chain,
-        authChain: atom.authChain || atom.chain,
-        labelChain: atom.labelChain || atom.chain,
-        resName: atom.resName,
-        resSeq: atom.resSeq,
-        authSeq: atom.authSeq,
-        labelSeq: atom.labelSeq,
-        iCode: atom.iCode,
-        atoms: [],
-        polymerType: atom.polymerType,
-        isHet: atom.isHet,
-        ss: atom.ss,
-        ssSource: atom.ssSource,
-        backbone: modelResidue?.backbone ?? {},
-        representative: modelResidue?.representative ?? atom,
-        bFactor: modelResidue?.bFactor ?? atom.bFactor,
-        occupancy: modelResidue?.occupancy ?? atom.occupancy,
-      });
-      chain.residues += 1;
-    }
-    residueMap.get(atom.residueKey).atoms.push(atom);
-  }
-
-  structure.chains = [...chainMap.values()].sort((a, b) => a.id.localeCompare(b.id));
-  structure.residues = [...residueMap.values()].sort((a, b) => a.chain.localeCompare(b.chain) || a.resSeq - b.resSeq);
-  structure.searchItems = buildSearchItems(structure);
+  state.cartoonKey = '';
+  updateSecondarySummary();
+  markSceneDirty();
+  markColorsDirty();
+  renderSequence();
+  refreshTabPanels();
 }
 
-function assignSecondary(model, structure) {
-  for (const residue of model.residues) {
-    residue.ss = 'coil';
-    residue.ssSource = 'unknown/coil fallback';
-  }
+/* ---------- Scene ---------- */
 
-  for (const range of structure.secondaryRanges) {
-    for (const residue of model.residues) {
-      if (residue.polymerType !== 'protein') continue;
-      if (!residueInSecondaryRange(residue, range)) continue;
-      residue.ss = range.kind;
-      residue.ssSource = range.source || 'file annotation';
-    }
-  }
-
-  assignComputedSecondary(model.residues);
-
-  for (const residue of model.residues) {
-    for (const atom of residue.atoms) {
-      atom.ss = residue.ss;
-      atom.ssSource = residue.ssSource;
-    }
-  }
+function activeModel() {
+  return state.structure.models[state.activeModel] ?? state.structure.models[0];
 }
 
-function assignComputedSecondary(residues) {
-  const segments = buildProteinCartoonSegments(residues, null, { ignoreVisibility: true });
-  for (const segment of segments) {
-    const residuesWithCA = segment.residues;
-    const computed = new Map();
+function markSceneDirty() {
+  state.dirty.scene = true;
+  state.dirty.colors = true;
+  state.dirty.flags = true;
+  requestRender();
+}
 
-    for (let index = 0; index + 3 < residuesWithCA.length; index += 1) {
-      const d03 = distanceAtoms(residuesWithCA[index].backbone.CA, residuesWithCA[index + 3].backbone.CA);
-      const d04 = index + 4 < residuesWithCA.length
-        ? distanceAtoms(residuesWithCA[index].backbone.CA, residuesWithCA[index + 4].backbone.CA)
-        : Infinity;
-      if (d03 >= 4.7 && d03 <= 6.4 && (!Number.isFinite(d04) || d04 <= 7.4)) {
-        for (let offset = 0; offset <= 3; offset += 1) addComputedSS(computed, index + offset, 'helix');
-      }
-    }
+function markColorsDirty() {
+  state.dirty.colors = true;
+  requestRender();
+}
 
-    for (let index = 1; index + 1 < residuesWithCA.length; index += 1) {
-      const previous = residuesWithCA[index - 1].backbone.CA;
-      const current = residuesWithCA[index].backbone.CA;
-      const next = residuesWithCA[index + 1].backbone.CA;
-      const angle = angleDegrees(sub(atomPoint(previous), atomPoint(current)), sub(atomPoint(next), atomPoint(current)));
-      const span = distanceAtoms(previous, next);
-      if (angle >= 105 && span >= 5.7) addComputedSS(computed, index, 'sheet');
-      if (angle <= 82 && span <= 5.0) addComputedSS(computed, index, 'turn');
-    }
+function markFlagsDirty() {
+  state.dirty.flags = true;
+  requestRender();
+}
 
-    commitComputedRuns(residuesWithCA, computed, 'helix', 4);
-    commitComputedRuns(residuesWithCA, computed, 'sheet', 3);
-    commitComputedRuns(residuesWithCA, computed, 'turn', 2);
+function requestRender() {
+  state.dirty.render = true;
+}
+
+function updateDisplay(patch) {
+  Object.assign(state.display, patch);
+  if ('polymer' in patch || 'ligand' in patch) {
+    const preset = Object.entries(REPRESENTATION_PRESETS).find(([, value]) => value.polymer === state.display.polymer && value.ligand === state.display.ligand && (value.surface === 'off') === (state.surface.kind === 'off'));
+    document.querySelectorAll('[data-preset]').forEach((button) => button.classList.toggle('is-active', preset?.[0] === button.dataset.preset));
   }
+  markSceneDirty();
 }
 
-function addComputedSS(computed, index, kind) {
-  if (!computed.has(index)) computed.set(index, new Set());
-  computed.get(index).add(kind);
-}
-
-function commitComputedRuns(residues, computed, kind, minLength) {
-  let run = [];
-  const flush = () => {
-    if (run.length >= minLength) {
-      for (const index of run) {
-        const residue = residues[index];
-        if (residue.ssSource !== 'unknown/coil fallback') continue;
-        residue.ss = kind;
-        residue.ssSource = 'computed';
-      }
-    }
-    run = [];
-  };
-  for (let index = 0; index < residues.length; index += 1) {
-    if (computed.get(index)?.has(kind)) {
-      run.push(index);
-    } else {
-      flush();
-    }
+function applyRepresentationPreset(name) {
+  const preset = REPRESENTATION_PRESETS[name];
+  if (!preset) return;
+  setActiveButton('[data-preset]', document.querySelector(`[data-preset="${name}"]`));
+  state.display.polymer = preset.polymer;
+  state.display.ligand = preset.ligand;
+  els.polymerRep.value = preset.polymer;
+  els.ligandRep.value = preset.ligand;
+  if (preset.surface !== state.surface.kind) {
+    state.surface.kind = preset.surface;
+    els.surfaceKind.value = preset.surface;
+    refreshSurface();
   }
-  flush();
+  markSceneDirty();
 }
 
-function residueInSecondaryRange(residue, range) {
-  if (!rangeChainMatches(residue, range)) return false;
-  const authStart = range.authStart || range.start;
-  const authEnd = range.authEnd || range.end;
-  if (range.authChain && residue.authChain === range.authChain && residue.authSeq) {
-    return sequenceInRange(parseIntSafe(residue.authSeq), residue.iCode, authStart, range.startICode, authEnd, range.endICode);
-  }
-  const labelStart = range.labelStart || range.start;
-  const labelEnd = range.labelEnd || range.end;
-  if (range.labelChain && residue.labelChain === range.labelChain && residue.labelSeq) {
-    return sequenceInRange(parseIntSafe(residue.labelSeq), residue.iCode, labelStart, range.startICode, labelEnd, range.endICode);
-  }
-  return sequenceInRange(residue.resSeq, residue.iCode, range.start, range.startICode, range.end, range.endICode);
-}
-
-function rangeChainMatches(residue, range) {
-  const starts = new Set([range.chain, range.authChain, range.labelChain].filter(Boolean));
-  const ends = new Set([range.endChain, range.endAuthChain, range.endLabelChain].filter(Boolean));
-  return starts.has(residue.chain) || starts.has(residue.authChain) || starts.has(residue.labelChain) ||
-    ends.has(residue.chain) || ends.has(residue.authChain) || ends.has(residue.labelChain);
-}
-
-function sequenceInRange(seq, iCode, start, startICode, end, endICode) {
-  if (!seq || !start || !end) return false;
-  const low = Math.min(start, end);
-  const high = Math.max(start, end);
-  if (seq < low || seq > high) return false;
-  if (seq === start && compareInsertionCode(iCode, startICode) < 0) return false;
-  if (seq === end && compareInsertionCode(iCode, endICode) > 0) return false;
-  return true;
-}
-
-function compareInsertionCode(a, b) {
-  const left = String(a || '').trim();
-  const right = String(b || '').trim();
-  if (!left && !right) return 0;
-  if (!right) return 0;
-  if (!left) return -1;
-  return left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
-}
-
-function buildProteinCartoonSegments(residues, clipLimit, options = {}) {
-  const proteinResidues = residues
-    .filter((residue) => residue.polymerType === 'protein')
-    .sort(compareResidues);
-  const segments = [];
-  let current = [];
-  let previous = null;
-
-  const flush = () => {
-    if (current.length >= 2) {
-      segments.push({
-        chain: current[0].chain,
-        modelID: current[0].modelID,
-        residues: current,
-      });
-    }
-    current = [];
-  };
-
-  for (const residue of proteinResidues) {
-    if (!residue.backbone.CA || (!options.ignoreVisibility && !residuePassesCartoonFilters(residue, clipLimit))) {
-      flush();
-      previous = null;
-      continue;
-    }
-    if (previous && !residuesAreCartoonContinuous(previous, residue)) flush();
-    current.push(residue);
-    previous = residue;
-  }
-  flush();
-  return segments;
-}
-
-function residuePassesCartoonFilters(residue, clipLimit) {
-  if (state.visibleChains && !state.visibleChains.has(residue.chain)) return false;
-  if (clipLimit && residue.backbone.CA) {
-    const ca = residue.backbone.CA;
-    const relative = [ca.x - clipLimit.center[0], ca.y - clipLimit.center[1], ca.z - clipLimit.center[2]];
-    if (dot(relative, clipLimit.front) > clipLimit.depth) return false;
-  }
-  return true;
-}
-
-function residuesAreCartoonContinuous(a, b) {
-  if (a.modelID !== b.modelID || a.chain !== b.chain) return false;
-  const seqDelta = b.resSeq - a.resSeq;
-  const sequential = seqDelta === 1 || seqDelta === 0;
-  if (!sequential) return false;
-  return distanceAtoms(a.backbone.CA, b.backbone.CA) <= CARTOON_DEFAULTS.maxPeptideDistance;
-}
-
-function compareResidues(a, b) {
-  return a.chain.localeCompare(b.chain, undefined, { numeric: true, sensitivity: 'base' }) ||
-    a.resSeq - b.resSeq ||
-    compareInsertionCode(a.iCode, b.iCode) ||
-    a.resName.localeCompare(b.resName);
-}
-
-function residueBackboneNormal(residue) {
-  const n = residue.backbone.N;
-  const ca = residue.backbone.CA;
-  const c = residue.backbone.C;
-  if (n && ca && c) {
-    const normal = normalize(cross(sub(atomPoint(n), atomPoint(ca)), sub(atomPoint(c), atomPoint(ca))));
-    if (length(normal) > 0.001) return normal;
-  }
-  const o = residue.backbone.O;
-  if (ca && c && o) {
-    const normal = normalize(cross(sub(atomPoint(c), atomPoint(ca)), sub(atomPoint(o), atomPoint(c))));
-    if (length(normal) > 0.001) return normal;
-  }
-  return null;
-}
-
-function buildBonds(model, conectRecords) {
-  const bonds = [];
-  const seen = new Set();
-  for (const bond of model.precomputedBonds ?? []) {
-    addBond(bonds, seen, bond.a, bond.b, bond.explicit);
-  }
-  for (const connection of conectRecords) {
-    const [a, b] = resolveConnection(model, connection);
-    if (a === undefined || b === undefined || a === b) continue;
-    addBond(bonds, seen, a, b, true);
-  }
-
-  const cellSize = 2.35;
-  const cells = new Map();
-  for (const atom of model.atoms) {
-    const key = cellKey(atom, cellSize);
-    if (!cells.has(key)) cells.set(key, []);
-    cells.get(key).push(atom.id);
-  }
-
-  for (const atom of model.atoms) {
-    const gx = Math.floor(atom.x / cellSize);
-    const gy = Math.floor(atom.y / cellSize);
-    const gz = Math.floor(atom.z / cellSize);
-    for (let dx = -1; dx <= 1; dx += 1) {
-      for (let dy = -1; dy <= 1; dy += 1) {
-        for (let dz = -1; dz <= 1; dz += 1) {
-          const bucket = cells.get(`${gx + dx},${gy + dy},${gz + dz}`);
-          if (!bucket) continue;
-          for (const otherID of bucket) {
-            if (otherID <= atom.id) continue;
-            const other = model.atoms[otherID];
-            if (shouldInferBond(atom, other)) addBond(bonds, seen, atom.id, other.id, false);
-          }
-        }
-      }
-    }
-  }
-  return bonds;
-}
-
-function resolveConnection(model, connection) {
-  if (Array.isArray(connection)) {
-    return [model.serialToIndex.get(connection[0]), model.serialToIndex.get(connection[1])];
-  }
-  return [
-    firstMappedIndex(model.atomKeyToIndex, connection.aKeys),
-    firstMappedIndex(model.atomKeyToIndex, connection.bKeys),
-  ];
-}
-
-function firstMappedIndex(map, keys) {
-  for (const key of keys ?? []) {
-    if (map.has(key)) return map.get(key);
-  }
-  return undefined;
-}
-
-function shouldInferBond(a, b) {
-  if (a.isWater || b.isWater) return false;
-  if (a.isHydrogen && b.isHydrogen) return false;
-  if (a.chain !== b.chain && !a.isHet && !b.isHet) return false;
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  const dz = a.z - b.z;
-  const d2 = dx * dx + dy * dy + dz * dz;
-  if (d2 < 0.16 || d2 > 8.2) return false;
-  const ca = elementInfo(a.element).covalent;
-  const cb = elementInfo(b.element).covalent;
-  const max = Math.min(isMetal(a.element) || isMetal(b.element) ? 2.85 : 2.05, (ca + cb) * 1.28 + 0.18);
-  return d2 <= max * max;
-}
-
-function addBond(bonds, seen, a, b, explicit) {
-  const low = Math.min(a, b);
-  const high = Math.max(a, b);
-  const key = `${low}:${high}`;
-  if (seen.has(key)) return;
-  seen.add(key);
-  bonds.push({ a: low, b: high, explicit });
-}
-
-function buildSearchItems(structure) {
-  const items = [];
-  for (const residue of structure.residues) {
-    const representative =
-      residue.atoms.find((atom) => atom.name === 'CA') ??
-      residue.atoms.find((atom) => atom.name === 'P') ??
-      residue.atoms.find((atom) => atom.name === "C4'") ??
-      residue.atoms[0];
-    items.push({
-      type: residue.isHet ? 'Ligand' : 'Residue',
-      label: `${residue.resName} ${residue.chain}${residue.resSeq}${residue.iCode}`,
-      sublabel: `${residue.atoms.length} atoms`,
-      atomID: representative.id,
-      haystack: `${residue.resName} ${ligandAliases(residue.resName)} ${residue.chain} ${residue.resSeq} ${residue.key}`.toLowerCase(),
-    });
-  }
-  for (const atom of structure.models[0].atoms) {
-    items.push({
-      type: 'Atom',
-      label: atomLabel(atom),
-      sublabel: `${atom.element} · ${atom.resName} ${atom.chain}${atom.resSeq}`,
-      atomID: atom.id,
-      haystack: `${atom.name} ${atom.element} ${atom.resName} ${ligandAliases(atom.resName)} ${atom.chain} ${atom.resSeq} ${atom.serial}`.toLowerCase(),
-    });
-  }
-  return items;
-}
-
-function ligandAliases(resName) {
-  const aliases = {
-    HEM: 'heme haem porphyrin iron',
-    PO4: 'phosphate',
-    HOH: 'water solvent',
-    WAT: 'water solvent',
-    TOT: 'toto thiazole orange intercalator ligand',
-  };
-  return aliases[resName] ?? '';
+function cartoonFor(model) {
+  const chains = state.display.visibleChains ? [...state.display.visibleChains].sort().join(',') : '*';
+  const key = [model.number, chains, state.display.cartoonWidth.toFixed(2), state.display.cartoonQuality, state.secondaryMode].join('|');
+  const cached = model.cartoonCache.get(key);
+  if (cached) return cached;
+  const cartoon = buildCartoon(model, {
+    include: (residue) => !state.display.visibleChains || state.display.visibleChains.has(residue.chain),
+    widthScale: state.display.cartoonWidth,
+    quality: state.display.cartoonQuality,
+  });
+  if (model.cartoonCache.size > 6) model.cartoonCache.clear();
+  model.cartoonCache.set(key, cartoon);
+  return cartoon;
 }
 
 function rebuildScene() {
   if (!state.structure) return;
   const model = activeModel();
-  const visibleSet = new Set();
-  const visibleAtoms = [];
-  const atomRecords = [];
-  const clipLimit = computeClipLimit();
-  const cartoon = state.representation === 'cartoon' ? buildCartoonScene(model, clipLimit) : null;
-
-  for (const atom of model.atoms) {
-    if (!atomPassesFilters(atom, clipLimit)) continue;
-    if (state.representation === 'backbone' && !isBackboneAtom(atom) && !(atom.isHet && !atom.isWater)) continue;
-    if (state.representation === 'cartoon' && atom.polymerType === 'protein' && !atom.isHet) continue;
-    const radius = atomRadius(atom);
-    const color = atomColor(atom, model);
-    const selected = state.selectedAtom && state.selectedAtom.id === atom.id;
-    if (selected) {
-      color[0] = Math.min(1, color[0] * 1.1 + 0.35);
-      color[1] = Math.min(1, color[1] * 1.1 + 0.35);
-      color[2] = Math.min(1, color[2] * 1.1 + 0.35);
-    }
-    visibleSet.add(atom.id);
-    visibleAtoms.push({
-      x: atom.x,
-      y: atom.y,
-      z: atom.z,
-      radius,
-      color,
-      alpha: 0.98,
-    });
-    atomRecords.push({ atom, radius });
+  const cartoon = state.display.polymer === 'cartoon' ? cartoonFor(model) : null;
+  const scene = buildScene(model, state.structure, state.display, {
+    cartoon,
+    focusResidues: state.focus?.neighborhood,
+    emphasisResidues: siteResidueKeys(),
+    lines: sceneLines(model),
+  });
+  state.sceneResult = scene;
+  state.renderer.setSpheres(scene.spheres.data, scene.spheres.count);
+  state.renderer.setCylinders(scene.cylinders.data, scene.cylinders.count);
+  if (cartoon) {
+    state.renderer.setMesh('cartoon', { vertices: cartoon.vertices, indices: cartoon.indices, opacity: 1 });
+  } else {
+    state.renderer.setMesh('cartoon', null);
   }
+  state.renderer.setCanvasShapes?.(cartoon?.canvasShapes ?? []);
+  state.dirty.scene = false;
+}
 
-  let bonds = [];
-  if (state.representation === 'backbone') {
-    bonds = buildTraceBonds(atomRecords);
-  } else if (state.representation === 'cartoon') {
-    for (const bond of model.bonds) {
-      if (!visibleSet.has(bond.a) || !visibleSet.has(bond.b)) continue;
-      const a = model.atoms[bond.a];
-      const b = model.atoms[bond.b];
-      bonds.push(makeBondInstance(a, b, 0.08 * state.bondScale, midpointColor(atomColor(a, model), atomColor(b, model)), 0.82));
-    }
-  } else if (state.representation === 'ball-stick') {
-    for (const bond of model.bonds) {
-      if (!visibleSet.has(bond.a) || !visibleSet.has(bond.b)) continue;
-      const a = model.atoms[bond.a];
-      const b = model.atoms[bond.b];
-      bonds.push(makeBondInstance(a, b, 0.08 * state.bondScale, midpointColor(atomColor(a, model), atomColor(b, model)), 0.82));
-    }
-  }
-
+function sceneLines(model) {
+  const lines = [];
   for (const measurement of state.measurements) {
-    const a = model.atoms[measurement.a];
-    const b = model.atoms[measurement.b];
-    if (a && b) bonds.push(makeBondInstance(a, b, 0.09, [1, 0.86, 0.28], 0.96));
-  }
-
-  state.visibleAtoms = visibleAtoms;
-  state.visibleBonds = bonds;
-  state.visibleCartoon = cartoon;
-  if (cartoon) atomRecords.push(...cartoon.pickRecords);
-  state.visibleAtomRecords = atomRecords;
-  uploadScene();
-  updateSelectionPanel();
-  renderChains();
-}
-
-function computeClipLimit() {
-  if (state.clipDepth > 0.995) return null;
-  const model = activeModel();
-  const bounds = model.bounds;
-  const center = bounds.center;
-  const radius = bounds.radius;
-  const front = state.camera.forward;
-  const depth = (state.clipDepth * 2 - 1) * radius;
-  return { center, front, depth };
-}
-
-function atomPassesFilters(atom, clipLimit) {
-  if (state.visibleChains && !state.visibleChains.has(atom.chain)) return false;
-  if (atom.isWater && !state.showWater) return false;
-  if (atom.isHydrogen && !state.showHydrogen) return false;
-  if (atom.isHet && !atom.isWater && !state.showHetero) return false;
-  if (clipLimit) {
-    const relative = [atom.x - clipLimit.center[0], atom.y - clipLimit.center[1], atom.z - clipLimit.center[2]];
-    if (dot(relative, clipLimit.front) > clipLimit.depth) return false;
-  }
-  return true;
-}
-
-function atomRadius(atom) {
-  const info = elementInfo(atom.element);
-  if (state.representation === 'spacefill') return info.vdw * 0.47 * state.atomScale;
-  if (state.representation === 'backbone') return atom.isHet ? info.covalent * 0.36 * state.atomScale : 0.42 * state.atomScale;
-  return Math.max(0.13, info.covalent * 0.34 * state.atomScale);
-}
-
-function atomColor(atom, model) {
-  if (state.colorScheme === 'element') return [...elementInfo(atom.element).color];
-  if (state.colorScheme === 'bfactor') return bFactorColor(atom.bFactor, model.bFactorRange);
-  if (state.colorScheme === 'secondary') return secondaryColor(atom.ss);
-  if (state.colorScheme === 'residue') return residueColor(atom);
-  const chainIndex = state.structure.chains.findIndex((chain) => chain.id === atom.chain);
-  return [...CHAIN_PALETTE[(chainIndex < 0 ? 0 : chainIndex) % CHAIN_PALETTE.length]];
-}
-
-function residueColor(atom) {
-  if (atom.isWater) return [0.55, 0.75, 1.0];
-  if (atom.isHet) return [1.0, 0.58, 0.22];
-  if (RESIDUE_CLASSES.negative.has(atom.resName)) return [1.0, 0.27, 0.3];
-  if (RESIDUE_CLASSES.positive.has(atom.resName)) return [0.28, 0.55, 1.0];
-  if (RESIDUE_CLASSES.polar.has(atom.resName)) return [0.35, 0.92, 0.72];
-  if (RESIDUE_CLASSES.hydrophobic.has(atom.resName)) return [0.92, 0.8, 0.35];
-  if (RESIDUE_CLASSES.nucleic.has(atom.resName)) return [0.74, 0.48, 1.0];
-  if (atom.ss === 'helix') return [0.98, 0.36, 0.48];
-  if (atom.ss === 'sheet') return [0.96, 0.75, 0.28];
-  return [0.76, 0.82, 0.86];
-}
-
-function secondaryColor(kind) {
-  return [...(SECONDARY_COLORS[kind] ?? SECONDARY_COLORS.coil)];
-}
-
-function secondaryLabel(kind) {
-  return SECONDARY_LABELS[kind] ?? SECONDARY_LABELS.coil;
-}
-
-function bFactorColor(value, range) {
-  const span = Math.max(0.0001, range.max - range.min);
-  const t = clamp((value - range.min) / span, 0, 1);
-  if (t < 0.5) return lerpColor([0.1, 0.42, 1.0], [0.92, 0.96, 1.0], t * 2);
-  return lerpColor([0.92, 0.96, 1.0], [1.0, 0.25, 0.18], (t - 0.5) * 2);
-}
-
-function buildTraceBonds(atomRecords) {
-  const byChain = new Map();
-  for (const record of atomRecords) {
-    const atom = record.atom;
-    if (atom.isHet) continue;
-    if (!byChain.has(atom.chain)) byChain.set(atom.chain, []);
-    byChain.get(atom.chain).push(atom);
-  }
-  const bonds = [];
-  for (const atoms of byChain.values()) {
-    atoms.sort((a, b) => a.resSeq - b.resSeq || a.name.localeCompare(b.name));
-    for (let index = 1; index < atoms.length; index += 1) {
-      const a = atoms[index - 1];
-      const b = atoms[index];
-      const maxDistance = a.polymerType === 'nucleic' || b.polymerType === 'nucleic' ? 8.2 : 4.8;
-      if (distance(a, b) <= maxDistance) {
-        bonds.push(makeBondInstance(a, b, 0.16 * state.bondScale, midpointColor(atomColor(a, activeModel()), atomColor(b, activeModel())), 0.9));
-      }
+    const atoms = measurement.atoms.map((id) => model.atoms[id]).filter(Boolean);
+    for (let index = 0; index + 1 < atoms.length; index += 1) {
+      lines.push({ from: point(atoms[index]), to: point(atoms[index + 1]), color: [1, 0.84, 0.3], radius: 0.07, atomA: atoms[index].id, atomB: atoms[index + 1].id });
     }
   }
-  for (const record of atomRecords) {
-    const atom = record.atom;
-    if (!atom.isHet) continue;
-    const color = atomColor(atom, activeModel());
-    for (const bond of activeModel().bonds) {
-      if (bond.a !== atom.id && bond.b !== atom.id) continue;
-      const other = activeModel().atoms[bond.a === atom.id ? bond.b : bond.a];
-      if (other?.isHet) bonds.push(makeBondInstance(atom, other, 0.07 * state.bondScale, color, 0.74));
+  for (const pending of state.measurePending.length > 1 ? [state.measurePending] : []) {
+    for (let index = 0; index + 1 < pending.length; index += 1) {
+      const a = model.atoms[pending[index]];
+      const b = model.atoms[pending[index + 1]];
+      if (a && b) lines.push({ from: point(a), to: point(b), color: [1, 0.84, 0.3], radius: 0.06 });
     }
   }
-  return bonds;
-}
-
-function makeBondInstance(a, b, radius, color, alpha) {
-  return {
-    ax: a.x,
-    ay: a.y,
-    az: a.z,
-    bx: b.x,
-    by: b.y,
-    bz: b.z,
-    radius,
-    color,
-    alpha,
-  };
-}
-
-function buildCartoonScene(model, clipLimit) {
-  const key = cartoonCacheKey(model, clipLimit);
-  const cached = model.cartoonCache.get(key);
-  if (cached) return cached;
-
-  const mesh = {
-    data: [],
-    pickRecords: [],
-    canvasShapes: [],
-  };
-  const segments = buildProteinCartoonSegments(model.residues, clipLimit);
-  for (const segment of segments) {
-    const samples = sampleCartoonSegment(segment.residues, model);
-    if (samples.length < 2) continue;
-    resolveCartoonFrames(samples);
-    for (let index = 0; index < samples.length; index += 2) {
-      const sample = samples[index];
-      mesh.pickRecords.push({
-        atom: sample.residue.backbone.CA,
-        residue: sample.residue,
-        center: sample.position,
-        radius: cartoonPickRadius(sample),
-      });
-    }
-    const lastSample = samples[samples.length - 1];
-    mesh.pickRecords.push({
-      atom: lastSample.residue.backbone.CA,
-      residue: lastSample.residue,
-      center: lastSample.position,
-      radius: cartoonPickRadius(lastSample),
+  const typeColors = new Map(state.interactionTypes.map((type) => [type.id, hexColor(type.color)]));
+  for (const interaction of state.interactions.list) {
+    if (!state.interactions.enabled.has(interaction.type)) continue;
+    lines.push({
+      from: interaction.pointA,
+      to: interaction.pointB,
+      color: typeColors.get(interaction.type) ?? [0.8, 0.8, 0.8],
+      radius: interaction.type === 'hydrophobic' ? 0.07 : 0.11,
     });
-    for (let index = 0; index + 1 < samples.length; index += 1) {
-      addCartoonSpan(mesh, samples[index], samples[index + 1]);
-    }
   }
-
-  const result = {
-    vertices: new Float32Array(mesh.data),
-    vertexCount: mesh.data.length / 12,
-    pickRecords: mesh.pickRecords,
-    canvasShapes: mesh.canvasShapes,
-  };
-  if (model.cartoonCache.size > 18) model.cartoonCache.clear();
-  model.cartoonCache.set(key, result);
-  return result;
-}
-
-function cartoonCacheKey(model, clipLimit) {
-  const chains = state.visibleChains ? [...state.visibleChains].sort(naturalCompare).join(',') : '*';
-  const clip = clipLimit
-    ? `${state.clipDepth.toFixed(3)}:${clipLimit.front.map((value) => value.toFixed(2)).join(',')}:${clipLimit.depth.toFixed(2)}`
-    : 'none';
-  const selected = state.selectedAtom?.residueKey ?? '';
-  return [
-    model.number,
-    state.colorScheme,
-    state.cartoonWidth.toFixed(2),
-    Math.round(state.cartoonQuality),
-    chains,
-    clip,
-    selected,
-  ].join('|');
-}
-
-function sampleCartoonSegment(residues, model) {
-  const quality = clamp(Math.round(state.cartoonQuality), 2, 9);
-  const positions = residues.map((residue) => atomPoint(residue.backbone.CA));
-  const sheetBounds = sheetRunBounds(residues);
-  const samples = [];
-
-  for (let index = 0; index + 1 < residues.length; index += 1) {
-    for (let step = 0; step < quality; step += 1) {
-      if (index > 0 && step === 0) continue;
-      const t = step / quality;
-      const residue = t < 0.5 ? residues[index] : residues[index + 1];
-      samples.push(makeCartoonSample({
-        position: catmullRomPoint(
-          positions[Math.max(0, index - 1)],
-          positions[index],
-          positions[index + 1],
-          positions[Math.min(positions.length - 1, index + 2)],
-          t,
-        ),
-        residue,
-        residueIndex: index + t,
-        normal: interpolateResidueNormal(residues[index], residues[index + 1], t),
-        sheetBounds,
-        model,
-      }));
-    }
+  for (const link of state.proteomics.crosslinks) {
+    if (!link.atomA || !link.atomB) continue;
+    lines.push({
+      from: point(link.atomA),
+      to: point(link.atomB),
+      color: link.satisfied ? [0.32, 0.87, 0.54] : [1, 0.36, 0.36],
+      radius: 0.16,
+      dashed: false,
+      caps: true,
+    });
   }
-
-  const last = residues[residues.length - 1];
-  samples.push(makeCartoonSample({
-    position: positions[positions.length - 1],
-    residue: last,
-    residueIndex: residues.length - 1,
-    normal: last.normal,
-    sheetBounds,
-    model,
-  }));
-  return samples;
+  return lines;
 }
 
-function makeCartoonSample({ position, residue, residueIndex, normal, sheetBounds, model }) {
-  const ss = residue.ss || 'coil';
-  return {
-    position,
-    residue,
-    residueIndex,
-    ss,
-    color: cartoonColor(residue, model),
-    rawNormal: normal,
-    sheetBounds: sheetBounds.get(residue),
-    tangent: [1, 0, 0],
-    side: [0, 1, 0],
-    normal: [0, 0, 1],
-  };
+function updateColors() {
+  if (!state.structure) return;
+  const model = activeModel();
+  const extras = colorExtras();
+  const { colors, legend } = computeAtomColors(model, state.structure, state.color, extras);
+  state.atomColors = colors;
+  state.legend = legend;
+  if (!state.atomFlags || state.atomFlags.length !== model.atoms.length) state.atomFlags = new Uint32Array(model.atoms.length);
+  state.renderer.setAtomData(colors, state.atomFlags);
+  state.dirty.colors = false;
+  state.dirty.flags = true;
+  applySurfaceColors(false);
+  renderLegend();
+  renderChains();
+  sequenceView?.recolor(residueColor);
 }
 
-function sheetRunBounds(residues) {
-  const bounds = new Map();
-  let start = -1;
-  const flush = (end) => {
-    if (start < 0) return;
-    for (let index = start; index <= end; index += 1) bounds.set(residues[index], { start, end });
-    start = -1;
-  };
-  for (let index = 0; index < residues.length; index += 1) {
-    if (residues[index].ss === 'sheet') {
-      if (start < 0) start = index;
-    } else {
-      flush(index - 1);
-    }
+function colorExtras() {
+  const scheme = state.color.scheme;
+  const extras = { overrides: state.proteomics.siteOverrides };
+  if (scheme === 'coverage' && state.proteomics.coverage) extras.residueValues = state.proteomics.coverage;
+  if (scheme === 'data' && state.proteomics.data) {
+    extras.residueValues = state.proteomics.data;
+    extras.dataLabel = state.proteomics.dataLabel;
+    extras.symmetric = els.dataSymmetric.checked;
   }
-  flush(residues.length - 1);
-  return bounds;
+  if (scheme === 'exposure' && state.sasa?.relative) extras.residueValues = state.sasa.relative;
+  return extras;
 }
 
-function resolveCartoonFrames(samples) {
-  let previousSide = null;
-  let previousNormal = null;
-  for (let index = 0; index < samples.length; index += 1) {
-    const before = samples[Math.max(0, index - 1)].position;
-    const after = samples[Math.min(samples.length - 1, index + 1)].position;
-    const tangent = normalize(sub(after, before));
-    let normal = samples[index].rawNormal || previousNormal || choosePerpendicular(tangent);
-    normal = sub(normal, scale(tangent, dot(normal, tangent)));
-    if (length(normal) < 0.001) normal = previousNormal || choosePerpendicular(tangent);
-    normal = normalize(normal);
-    let side = normalize(cross(tangent, normal));
-    if (length(side) < 0.001) side = choosePerpendicular(tangent);
-    normal = normalize(cross(side, tangent));
-    if (previousSide && dot(side, previousSide) < 0) {
-      side = scale(side, -1);
-      normal = scale(normal, -1);
-    }
-    samples[index].tangent = tangent;
-    samples[index].side = side;
-    samples[index].normal = normal;
-    previousSide = side;
-    previousNormal = normal;
+function residueColor(key) {
+  if (!state.atomColors || !state.structure) return null;
+  const residue = activeModel().residueMap.get(key);
+  const atom = residue?.representative;
+  if (!atom) return null;
+  const offset = atom.id * 4;
+  return [state.atomColors[offset], state.atomColors[offset + 1], state.atomColors[offset + 2]];
+}
+
+function updateFlags() {
+  if (!state.structure || !state.atomFlags) return;
+  const model = activeModel();
+  const flags = state.atomFlags;
+  flags.fill(0);
+  for (const key of state.selection) {
+    const residue = model.residueMap.get(key);
+    if (residue) for (const atom of residue.atoms) flags[atom.id] |= 1;
   }
-}
-
-function addCartoonSpan(mesh, a, b) {
-  const ss = cartoonSpanSS(a, b);
-  if (ss === 'coil' || ss === 'turn') {
-    addTubeSpan(mesh, a, b, ss);
-  } else {
-    addRibbonSpan(mesh, a, b, ss);
+  if (state.hover.residueKey) {
+    const residue = model.residueMap.get(state.hover.residueKey);
+    if (residue) for (const atom of residue.atoms) flags[atom.id] |= 2;
   }
-  mesh.canvasShapes.push({
-    a: a.position,
-    b: b.position,
-    color: midpointColor(a.color, b.color),
-    alpha: 0.96,
-    width: cartoonCanvasWidth(a, b, ss),
-    ss,
-  });
+  for (const id of state.measurePending) flags[id] |= 1;
+  state.renderer.updateAtomFlags(flags);
+  state.dirty.flags = false;
 }
 
-function cartoonSpanSS(a, b) {
-  if (a.ss === b.ss) return a.ss;
-  if (a.ss === 'sheet' || b.ss === 'sheet') return 'sheet';
-  if (a.ss === 'helix' || b.ss === 'helix') return 'helix';
-  if (a.ss === 'turn' || b.ss === 'turn') return 'turn';
-  return 'coil';
-}
+/* ---------- Frame loop ---------- */
 
-function addRibbonSpan(mesh, a, b, ss) {
-  const dimsA = cartoonRibbonDimensions(a, ss);
-  const dimsB = cartoonRibbonDimensions(b, ss);
-  const aCorners = ribbonCorners(a, dimsA.width, dimsA.thickness);
-  const bCorners = ribbonCorners(b, dimsB.width, dimsB.thickness);
-  const colorA = a.color;
-  const colorB = b.color;
-
-  addQuad(mesh, aCorners.leftTop, bCorners.leftTop, bCorners.rightTop, aCorners.rightTop, a.normal, colorA, colorB, colorB, colorA);
-  addQuad(mesh, aCorners.rightBottom, bCorners.rightBottom, bCorners.leftBottom, aCorners.leftBottom, scale(a.normal, -1), colorA, colorB, colorB, colorA);
-  addQuad(mesh, aCorners.rightTop, bCorners.rightTop, bCorners.rightBottom, aCorners.rightBottom, a.side, colorA, colorB, colorB, colorA);
-  addQuad(mesh, aCorners.leftBottom, bCorners.leftBottom, bCorners.leftTop, aCorners.leftTop, scale(a.side, -1), colorA, colorB, colorB, colorA);
-}
-
-function addTubeSpan(mesh, a, b, ss) {
-  const radiusA = cartoonTubeRadius(a, ss);
-  const radiusB = cartoonTubeRadius(b, ss);
-  const sides = CARTOON_DEFAULTS.tubeSides;
-  for (let sideIndex = 0; sideIndex < sides; sideIndex += 1) {
-    const theta0 = (sideIndex / sides) * Math.PI * 2;
-    const theta1 = ((sideIndex + 1) / sides) * Math.PI * 2;
-    const normalA0 = tubeNormal(a, theta0);
-    const normalA1 = tubeNormal(a, theta1);
-    const normalB0 = tubeNormal(b, theta0);
-    const normalB1 = tubeNormal(b, theta1);
-    const a0 = add(a.position, scale(normalA0, radiusA));
-    const a1 = add(a.position, scale(normalA1, radiusA));
-    const b0 = add(b.position, scale(normalB0, radiusB));
-    const b1 = add(b.position, scale(normalB1, radiusB));
-    addTriangle(mesh, a0, b0, b1, normalA0, a.color, b.color, b.color);
-    addTriangle(mesh, a0, b1, a1, normalA0, a.color, b.color, a.color);
-  }
-}
-
-function ribbonCorners(sample, width, thickness) {
-  const halfWidth = width / 2;
-  const halfThickness = thickness / 2;
-  const side = scale(sample.side, halfWidth);
-  const normal = scale(sample.normal, halfThickness);
-  return {
-    leftTop: add(add(sample.position, scale(side, -1)), normal),
-    rightTop: add(add(sample.position, side), normal),
-    leftBottom: add(add(sample.position, scale(side, -1)), scale(normal, -1)),
-    rightBottom: add(add(sample.position, side), scale(normal, -1)),
-  };
-}
-
-function cartoonRibbonDimensions(sample, ss) {
-  const scaleFactor = state.cartoonWidth;
-  if (ss === 'sheet') {
-    return {
-      width: sheetSampleWidth(sample) * scaleFactor,
-      thickness: CARTOON_DEFAULTS.ribbonThickness * scaleFactor,
-    };
-  }
-  return {
-    width: CARTOON_DEFAULTS.helixWidth * scaleFactor,
-    thickness: CARTOON_DEFAULTS.helixThickness * scaleFactor,
-  };
-}
-
-function sheetSampleWidth(sample) {
-  const base = CARTOON_DEFAULTS.sheetWidth;
-  const bounds = sample.sheetBounds;
-  if (!bounds) return base;
-  const distanceToEnd = bounds.end - sample.residueIndex;
-  if (distanceToEnd <= 0.05) return base * 0.08;
-  if (distanceToEnd < 0.38) {
-    return lerp(CARTOON_DEFAULTS.sheetWidth * 0.08, CARTOON_DEFAULTS.sheetArrowWidth, distanceToEnd / 0.38);
-  }
-  if (distanceToEnd < 1.05) {
-    return lerp(CARTOON_DEFAULTS.sheetArrowWidth, CARTOON_DEFAULTS.sheetWidth, (distanceToEnd - 0.38) / 0.67);
-  }
-  return base;
-}
-
-function cartoonTubeRadius(sample, ss) {
-  const base = ss === 'turn' ? CARTOON_DEFAULTS.turnRadius : CARTOON_DEFAULTS.tubeRadius;
-  return base * state.cartoonWidth;
-}
-
-function cartoonCanvasWidth(a, b, ss) {
-  if (ss === 'coil' || ss === 'turn') return (cartoonTubeRadius(a, ss) + cartoonTubeRadius(b, ss)) * 0.72;
-  const widthA = cartoonRibbonDimensions(a, ss).width;
-  const widthB = cartoonRibbonDimensions(b, ss).width;
-  return Math.max(widthA, widthB) * 0.52;
-}
-
-function cartoonPickRadius(sample) {
-  if (sample.ss === 'coil' || sample.ss === 'turn') return Math.max(0.75, cartoonTubeRadius(sample, sample.ss) * 2.8);
-  return Math.max(0.85, cartoonRibbonDimensions(sample, sample.ss).width * 0.72);
-}
-
-function tubeNormal(sample, theta) {
-  return normalize(add(scale(sample.side, Math.cos(theta)), scale(sample.normal, Math.sin(theta))));
-}
-
-function addQuad(mesh, p0, p1, p2, p3, normal, c0, c1, c2, c3) {
-  addTriangle(mesh, p0, p1, p2, normal, c0, c1, c2);
-  addTriangle(mesh, p0, p2, p3, normal, c0, c2, c3);
-}
-
-function addTriangle(mesh, p0, p1, p2, normal, c0, c1, c2) {
-  const faceNormal = length(normal) > 0.001 ? normalize(normal) : normalize(cross(sub(p1, p0), sub(p2, p0)));
-  pushCartoonVertex(mesh, p0, faceNormal, c0);
-  pushCartoonVertex(mesh, p1, faceNormal, c1);
-  pushCartoonVertex(mesh, p2, faceNormal, c2);
-}
-
-function pushCartoonVertex(mesh, position, normal, color) {
-  mesh.data.push(
-    position[0], position[1], position[2], 0,
-    normal[0], normal[1], normal[2], 0,
-    color[0], color[1], color[2], 0.96,
-  );
-}
-
-function cartoonColor(residue, model) {
-  let color;
-  if (state.colorScheme === 'secondary') {
-    color = secondaryColor(residue.ss);
-  } else if (state.colorScheme === 'bfactor') {
-    color = bFactorColor(residue.bFactor, model.bFactorRange);
-  } else if (state.colorScheme === 'residue') {
-    color = residueColor(residue.representative);
-  } else if (state.colorScheme === 'element') {
-    color = [...elementInfo(residue.representative?.element || 'C').color];
-  } else {
-    const chainIndex = state.structure.chains.findIndex((chain) => chain.id === residue.chain);
-    color = [...CHAIN_PALETTE[(chainIndex < 0 ? 0 : chainIndex) % CHAIN_PALETTE.length]];
-  }
-  if (state.selectedAtom?.residueKey === residue.key) {
-    return [
-      Math.min(1, color[0] * 1.1 + 0.32),
-      Math.min(1, color[1] * 1.1 + 0.32),
-      Math.min(1, color[2] * 1.1 + 0.32),
-    ];
-  }
-  return color;
-}
-
-function interpolateResidueNormal(a, b, t) {
-  if (a.normal && b.normal) {
-    const normal = normalize(add(scale(a.normal, 1 - t), scale(b.normal, t)));
-    if (length(normal) > 0.001) return normal;
-  }
-  return a.normal || b.normal || null;
-}
-
-function catmullRomPoint(p0, p1, p2, p3, t) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  return [
-    0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
-    0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3),
-    0.5 * ((2 * p1[2]) + (-p0[2] + p2[2]) * t + (2 * p0[2] - 5 * p1[2] + 4 * p2[2] - p3[2]) * t2 + (-p0[2] + 3 * p1[2] - 3 * p2[2] + p3[2]) * t3),
-  ];
-}
-
-function uploadScene() {
-  if (gpu.fallback) return;
-  const atomData = new Float32Array(Math.max(1, state.visibleAtoms.length) * 8);
-  const glowData = new Float32Array(Math.max(1, state.visibleAtoms.length) * 8);
-  for (let index = 0; index < state.visibleAtoms.length; index += 1) {
-    const atom = state.visibleAtoms[index];
-    const offset = index * 8;
-    atomData[offset] = atom.x;
-    atomData[offset + 1] = atom.y;
-    atomData[offset + 2] = atom.z;
-    atomData[offset + 3] = atom.radius;
-    atomData[offset + 4] = atom.color[0];
-    atomData[offset + 5] = atom.color[1];
-    atomData[offset + 6] = atom.color[2];
-    atomData[offset + 7] = atom.alpha;
-
-    glowData[offset] = atom.x;
-    glowData[offset + 1] = atom.y;
-    glowData[offset + 2] = atom.z;
-    glowData[offset + 3] = atom.radius * (2.8 + state.glowScale * 5.0);
-    glowData[offset + 4] = atom.color[0];
-    glowData[offset + 5] = atom.color[1];
-    glowData[offset + 6] = atom.color[2];
-    glowData[offset + 7] = 0.018 * state.glowScale;
-  }
-
-  const bondData = new Float32Array(Math.max(1, state.visibleBonds.length) * 12);
-  for (let index = 0; index < state.visibleBonds.length; index += 1) {
-    const bond = state.visibleBonds[index];
-    const offset = index * 12;
-    bondData[offset] = bond.ax;
-    bondData[offset + 1] = bond.ay;
-    bondData[offset + 2] = bond.az;
-    bondData[offset + 3] = bond.radius;
-    bondData[offset + 4] = bond.bx;
-    bondData[offset + 5] = bond.by;
-    bondData[offset + 6] = bond.bz;
-    bondData[offset + 7] = bond.radius;
-    bondData[offset + 8] = bond.color[0];
-    bondData[offset + 9] = bond.color[1];
-    bondData[offset + 10] = bond.color[2];
-    bondData[offset + 11] = bond.alpha;
-  }
-
-  gpu.atomCount = state.visibleAtoms.length;
-  gpu.glowCount = state.glowScale > 0 ? state.visibleAtoms.length : 0;
-  gpu.bondCount = state.visibleBonds.length;
-  gpu.cartoonVertexCount = state.visibleCartoon?.vertexCount ?? 0;
-  gpu.atomBuffer = replaceStorageBuffer(gpu.atomBuffer, atomData, 'atoms');
-  gpu.glowBuffer = replaceStorageBuffer(gpu.glowBuffer, glowData, 'glow');
-  gpu.bondBuffer = replaceStorageBuffer(gpu.bondBuffer, bondData, 'bonds');
-  gpu.cartoonBuffer = replaceStorageBuffer(gpu.cartoonBuffer, state.visibleCartoon?.vertices ?? new Float32Array(12), 'cartoon');
-  gpu.atomBindGroup = createBindGroup(gpu.atomBuffer);
-  gpu.glowBindGroup = createBindGroup(gpu.glowBuffer);
-  gpu.bondBindGroup = createBindGroup(gpu.bondBuffer);
-  gpu.cartoonBindGroup = createBindGroup(gpu.cartoonBuffer);
-}
-
-function replaceStorageBuffer(previous, data, label) {
-  previous?.destroy();
-  const buffer = gpu.device.createBuffer({
-    label,
-    size: Math.max(32, align4(data.byteLength)),
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  });
-  gpu.device.queue.writeBuffer(buffer, 0, data);
-  return buffer;
-}
-
-function createBindGroup(storageBuffer) {
-  return gpu.device.createBindGroup({
-    layout: gpu.atomBindLayout,
-    entries: [
-      { binding: 0, resource: { buffer: gpu.uniformBuffer } },
-      { binding: 1, resource: { buffer: storageBuffer } },
-    ],
-  });
-}
-
-function frame(time = 0) {
-  updateCamera(time);
-  render(time);
+function frame(time) {
   requestAnimationFrame(frame);
+  const elapsed = Math.min(0.1, Math.max(0, (time - (state.lastFrameTime ?? time)) / 1000));
+  state.lastFrameTime = time;
+  if (!state.structure) return;
+  let animating = false;
+  if (state.cameraAnimation) {
+    const animation = state.cameraAnimation;
+    const t = Math.min(1, (time - animation.start) / animation.duration);
+    Object.assign(state.camera, interpolateCamera(animation.from, animation.to, t));
+    if (t >= 1) state.cameraAnimation = null;
+    animating = true;
+  }
+  if (state.spin && !state.drag) {
+    spinCamera(state.camera, (state.spinRate ?? DEFAULT_SPIN_RATE) * elapsed);
+    animating = true;
+  }
+  if (state.dirty.scene) rebuildScene();
+  if (state.dirty.colors) updateColors();
+  if (state.dirty.flags) updateFlags();
+  if (state.dirty.render || animating) {
+    state.dirty.render = false;
+    renderFrame(time);
+    updateLabels();
+  }
 }
 
-function updateCamera(time) {
-  if (state.autoRotate && !state.pointer.dragging) {
-    state.camera.yaw += 0.00016 * (time ? 16.7 : 1);
+function resizeCanvas() {
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.floor(els.canvas.clientWidth * ratio));
+  const height = Math.max(1, Math.floor(els.canvas.clientHeight * ratio));
+  if (els.canvas.width !== width || els.canvas.height !== height) {
+    els.canvas.width = width;
+    els.canvas.height = height;
   }
-  const camera = state.camera;
-  const cosPitch = Math.cos(camera.pitch);
-  const sinPitch = Math.sin(camera.pitch);
-  const sinYaw = Math.sin(camera.yaw);
-  const cosYaw = Math.cos(camera.yaw);
-  camera.eye = [
-    camera.target[0] + camera.radius * cosPitch * sinYaw,
-    camera.target[1] + camera.radius * sinPitch,
-    camera.target[2] + camera.radius * cosPitch * cosYaw,
-  ];
-  camera.forward = normalize([
-    camera.target[0] - camera.eye[0],
-    camera.target[1] - camera.eye[1],
-    camera.target[2] - camera.eye[2],
-  ]);
-  camera.right = normalize(cross(camera.forward, [0, 1, 0]));
-  if (length(camera.right) < 0.001) camera.right = [1, 0, 0];
-  camera.up = normalize(cross(camera.right, camera.forward));
 }
 
-function render(time) {
-  if (gpu.fallback) {
-    renderCanvas(time);
-    return;
-  }
-  resize();
+function currentView() {
+  resizeCanvas();
   const aspect = els.canvas.width / Math.max(1, els.canvas.height);
-  const projection = mat4Perspective(state.camera.fov, aspect, state.camera.near, state.camera.far);
-  const view = mat4LookAt(state.camera.eye, state.camera.target, state.camera.up);
-  const viewProj = mat4Multiply(projection, view);
-  gpu.uniformData.set(viewProj, 0);
-  gpu.uniformData.set([...state.camera.right, 0], 16);
-  gpu.uniformData.set([...state.camera.up, 0], 20);
-  gpu.uniformData.set([...state.camera.forward, 0], 24);
-  gpu.uniformData.set([...scale(state.camera.forward, -1), 0], 28);
-  gpu.uniformData.set([time * 0.001, aspect, state.glowScale, 0], 32);
-  gpu.device.queue.writeBuffer(gpu.uniformBuffer, 0, gpu.uniformData);
-
-  const commandEncoder = gpu.device.createCommandEncoder();
-  const textureView = gpu.context.getCurrentTexture().createView();
-  const pass = commandEncoder.beginRenderPass({
-    colorAttachments: [
-      {
-        view: textureView,
-        clearValue: { r: 0.018, g: 0.025, b: 0.027, a: 1 },
-        loadOp: 'clear',
-        storeOp: 'store',
-      },
-    ],
-    depthStencilAttachment: {
-      view: gpu.depthTexture.createView(),
-      depthClearValue: 1,
-      depthLoadOp: 'clear',
-      depthStoreOp: 'store',
-    },
-  });
-  if (gpu.glowCount > 0) {
-    pass.setPipeline(gpu.glowPipeline);
-    pass.setBindGroup(0, gpu.glowBindGroup);
-    pass.draw(6, gpu.glowCount);
-  }
-  if (gpu.cartoonVertexCount > 0) {
-    pass.setPipeline(gpu.cartoonPipeline);
-    pass.setBindGroup(0, gpu.cartoonBindGroup);
-    pass.draw(gpu.cartoonVertexCount);
-  }
-  if (gpu.bondCount > 0) {
-    pass.setPipeline(gpu.bondPipeline);
-    pass.setBindGroup(0, gpu.bondBindGroup);
-    pass.draw(6, gpu.bondCount);
-  }
-  if (gpu.atomCount > 0) {
-    pass.setPipeline(gpu.atomPipeline);
-    pass.setBindGroup(0, gpu.atomBindGroup);
-    pass.draw(6, gpu.atomCount);
-  }
-  pass.end();
-  gpu.device.queue.submit([commandEncoder.finish()]);
+  const matrices = cameraMatrices(state.camera, aspect);
+  return { ...matrices, orthographic: state.camera.orthographic };
 }
 
-function renderCanvas(time) {
-  resize();
-  const ctx = gpu.ctx2d;
-  const width = els.canvas.width;
-  const height = els.canvas.height;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, width, height);
-  const background = ctx.createLinearGradient(0, 0, width, height);
-  background.addColorStop(0, '#071012');
-  background.addColorStop(0.52, '#050708');
-  background.addColorStop(1, '#0b0d0d');
-  ctx.fillStyle = background;
-  ctx.fillRect(0, 0, width, height);
-
-  renderCanvasCartoon(ctx);
-
-  const projectedBonds = [];
-  for (const bond of state.visibleBonds) {
-    const a = projectPoint([bond.ax, bond.ay, bond.az]);
-    const b = projectPoint([bond.bx, bond.by, bond.bz]);
-    if (!a || !b) continue;
-    projectedBonds.push({ a, b, bond, z: (a.z + b.z) / 2 });
-  }
-  projectedBonds.sort((a, b) => b.z - a.z);
-  ctx.lineCap = 'round';
-  for (const item of projectedBonds) {
-    const alpha = Math.max(0.18, item.bond.alpha ?? 0.75);
-    ctx.strokeStyle = rgbaCSS(item.bond.color, alpha);
-    ctx.lineWidth = Math.max(1.2, item.bond.radius * item.a.scale * 2);
-    ctx.beginPath();
-    ctx.moveTo(item.a.x, item.a.y);
-    ctx.lineTo(item.b.x, item.b.y);
-    ctx.stroke();
-  }
-
-  const projectedAtoms = [];
-  for (let index = 0; index < state.visibleAtoms.length; index += 1) {
-    const atom = state.visibleAtoms[index];
-    const point = projectPoint([atom.x, atom.y, atom.z]);
-    if (!point) continue;
-    projectedAtoms.push({ atom, point, record: state.visibleAtomRecords[index] });
-  }
-  projectedAtoms.sort((a, b) => b.point.z - a.point.z);
-
-  if (state.glowScale > 0) {
-    ctx.globalCompositeOperation = 'lighter';
-    for (const item of projectedAtoms) {
-      const radius = Math.max(1.5, item.atom.radius * item.point.scale * (2.2 + state.glowScale * 3.4));
-      const gradient = ctx.createRadialGradient(item.point.x, item.point.y, 0, item.point.x, item.point.y, radius);
-      gradient.addColorStop(0, rgbaCSS(item.atom.color, 0.06 * state.glowScale));
-      gradient.addColorStop(1, rgbaCSS(item.atom.color, 0));
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.arc(item.point.x, item.point.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalCompositeOperation = 'source-over';
-  }
-
-  for (const item of projectedAtoms) {
-    const radius = Math.max(1.6, item.atom.radius * item.point.scale);
-    const color = item.atom.color;
-    const highlight = state.selectedAtom && item.record?.atom.id === state.selectedAtom.id;
-    const gradient = ctx.createRadialGradient(
-      item.point.x,
-      item.point.y,
-      radius * 0.08,
-      item.point.x,
-      item.point.y,
-      radius,
-    );
-    gradient.addColorStop(0, rgbaCSS(lerpColor(color, [1, 1, 1], 0.5), 1));
-    gradient.addColorStop(0.62, rgbaCSS(color, 0.98));
-    gradient.addColorStop(1, rgbaCSS(lerpColor(color, [0, 0, 0], 0.28), 0.95));
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(item.point.x, item.point.y, radius * (highlight ? 1.28 : 1), 0, Math.PI * 2);
-    ctx.fill();
-    if (highlight) {
-      ctx.strokeStyle = 'rgba(255, 245, 220, 0.95)';
-      ctx.lineWidth = Math.max(1.5, radius * 0.16);
-      ctx.stroke();
-    }
-  }
-}
-
-function renderCanvasCartoon(ctx) {
-  const shapes = state.visibleCartoon?.canvasShapes ?? [];
-  if (!shapes.length) return;
-  const projected = [];
-  for (const shape of shapes) {
-    const a = projectPoint(shape.a);
-    const b = projectPoint(shape.b);
-    if (!a || !b) continue;
-    projected.push({ ...shape, a, b, z: (a.z + b.z) / 2 });
-  }
-  projected.sort((a, b) => b.z - a.z);
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  for (const shape of projected) {
-    const scaleAtDepth = (shape.a.scale + shape.b.scale) / 2;
-    const lineWidth = Math.max(2.2, shape.width * scaleAtDepth * 2.2);
-    ctx.strokeStyle = rgbaCSS(shape.color, shape.alpha);
-    ctx.lineWidth = lineWidth;
-    ctx.beginPath();
-    ctx.moveTo(shape.a.x, shape.a.y);
-    ctx.lineTo(shape.b.x, shape.b.y);
-    ctx.stroke();
-    if (shape.ss === 'sheet' && lineWidth > 3.5) {
-      ctx.strokeStyle = rgbaCSS(lerpColor(shape.color, [1, 1, 1], 0.18), 0.35);
-      ctx.lineWidth = Math.max(1, lineWidth * 0.22);
-      ctx.beginPath();
-      ctx.moveTo(shape.a.x, shape.a.y);
-      ctx.lineTo(shape.b.x, shape.b.y);
-      ctx.stroke();
-    }
-  }
-}
-
-function projectPoint(point) {
-  const toPoint = sub(point, state.camera.eye);
-  const z = dot(toPoint, state.camera.forward);
-  if (z <= state.camera.near) return null;
-  const height = els.canvas.height;
-  const width = els.canvas.width;
-  const focal = height / (2 * Math.tan(state.camera.fov / 2));
+function renderSettings(overrides = {}) {
+  const lighting = state.lighting;
+  const model = activeModel();
+  const radius = Math.max(4, model.bounds.radius);
+  const basis = cameraBasis(state.camera);
+  const centerDepth = state.camera.distance;
+  const depthOf = (fraction) => centerDepth - radius + 2 * radius * fraction;
+  const background = BACKGROUNDS[state.background] ?? BACKGROUNDS.dark;
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
   return {
-    x: width / 2 + dot(toPoint, state.camera.right) * focal / z,
-    y: height / 2 - dot(toPoint, state.camera.up) * focal / z,
-    z,
-    scale: focal / z,
+    clip: {
+      near: depthOf(state.clip.near),
+      far: depthOf(state.clip.far),
+      nearEnabled: state.clip.near > 0.001,
+      farEnabled: state.clip.far < 0.999,
+    },
+    lightDirection: normalize(add(add(scale(basis.right, -0.42), scale(basis.up, 0.56)), scale(basis.forward, -0.72))),
+    material: { ambient: lighting.ambient, diffuse: lighting.diffuse, specular: lighting.specular, shininess: lighting.shininess },
+    flat: lighting.flat,
+    highlightColor: [0.35, 1, 0.55],
+    highlightStrength: 0.5,
+    hoverColor: [1, 0.95, 0.5],
+    hoverStrength: 0.38,
+    glow: lighting.glow,
+    dashPeriod: 0.42,
+    fog: { start: centerDepth - radius * 0.3, end: centerDepth + radius * 1.1, strength: lighting.fog * 0.85 },
+    background: { top: background.top, bottom: background.bottom, alpha: 1 },
+    ao: { enabled: lighting.ao > 0.001, strength: lighting.ao, radius: lighting.aoRadius, bias: 0.04 + lighting.aoRadius * 0.01 },
+    outline: { enabled: lighting.outline > 0.001, strength: lighting.outline, width: ratio, threshold: 0.8 },
+    fxaa: true,
+    pixelRatio: ratio,
+    ...overrides,
   };
 }
 
-function resize() {
-  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-  const width = Math.max(1, Math.floor(els.canvas.clientWidth * pixelRatio));
-  const height = Math.max(1, Math.floor(els.canvas.clientHeight * pixelRatio));
-  if (gpu.fallback) {
-    if (els.canvas.width !== width || els.canvas.height !== height) {
-      els.canvas.width = width;
-      els.canvas.height = height;
-    }
+function renderFrame(time) {
+  const view = currentView();
+  state.renderer.render(view, { ...renderSettings(), time: time * 0.001 });
+}
+
+function updateViewOffset() {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const { left, right, top, bottom } = occludedMargins();
+  state.camera.offset = [(left - right) / width, (bottom - top) / height];
+}
+
+function occludedMargins() {
+  const styles = getComputedStyle(els.app);
+  const px = (name) => parseFloat(styles.getPropertyValue(name)) || 0;
+  const narrow = window.innerWidth <= 900;
+  const left = !narrow && els.app.classList.contains('left-open') ? px('--left-width') + px('--gutter') * 2 : 0;
+  const right = !narrow && els.app.classList.contains('right-open') ? px('--right-width') + px('--gutter') * 2 + 52 : 52;
+  const top = px('--topbar');
+  const bottom = els.sequencePanel.hidden ? 0 : els.sequencePanel.getBoundingClientRect().height + px('--gutter');
+  return { left, right, top, bottom };
+}
+
+function viewportRegion() {
+  const { left, right, top, bottom } = occludedMargins();
+  return { width: Math.max(200, window.innerWidth - left - right), height: Math.max(160, window.innerHeight - top - bottom) };
+}
+
+function fitView(animate = true, principal = true, atoms = null) {
+  if (!state.structure) return;
+  updateViewOffset();
+  const model = activeModel();
+  const source = atoms ?? model.atoms.filter((atom) => atom.kind !== 'water' && (!state.display.visibleChains || state.display.visibleChains.has(atom.chain)));
+  const points = new Float32Array(source.length * 3);
+  source.forEach((atom, index) => {
+    points[index * 3] = atom.x;
+    points[index * 3 + 1] = atom.y;
+    points[index * 3 + 2] = atom.z;
+  });
+  const target = cloneCamera(state.camera);
+  target.sceneRadius = model.bounds.radius;
+  fitCameraToPoints(target, points, viewportRegion(), { keepRotation: !principal, padding: atoms ? 4 : 2, sceneRadius: model.bounds.radius });
+  animateCamera(target, animate ? 450 : 0);
+}
+
+function animateCamera(target, duration = 400) {
+  if (duration <= 0) {
+    Object.assign(state.camera, target);
+    state.cameraAnimation = null;
+    requestRender();
     return;
   }
-  if (els.canvas.width === width && els.canvas.height === height && gpu.depthTexture) return;
-  els.canvas.width = width;
-  els.canvas.height = height;
-  gpu.depthTexture?.destroy();
-  gpu.depthTexture = gpu.device.createTexture({
-    label: 'depth',
-    size: [width, height],
-    format: 'depth24plus',
-    usage: GPUTextureUsage.RENDER_ATTACHMENT,
+  state.cameraAnimation = { from: cloneCamera(state.camera), to: target, start: performance.now(), duration };
+}
+
+function resetView(animate = true) {
+  fitView(animate, true);
+}
+
+function setProjection(orthographic) {
+  state.camera.orthographic = orthographic;
+  document.querySelectorAll('[data-projection]').forEach((button) => {
+    button.classList.toggle('is-active', (button.dataset.projection === 'orthographic') === orthographic);
   });
+  requestRender();
+}
+
+function setSpin(value) {
+  state.spin = value;
+  els.spinToggle.classList.toggle('is-active', value);
+  requestRender();
+}
+
+/* ---------- Interaction ---------- */
+
+function canvasPoint(event) {
+  const rect = els.canvas.getBoundingClientRect();
+  const ratioX = els.canvas.width / Math.max(1, rect.width);
+  const ratioY = els.canvas.height / Math.max(1, rect.height);
+  return { x: (event.clientX - rect.left) * ratioX, y: (event.clientY - rect.top) * ratioY };
 }
 
 function onPointerDown(event) {
   els.canvas.setPointerCapture(event.pointerId);
-  state.pointer.dragging = true;
-  state.pointer.panning = event.shiftKey || event.button === 1;
-  state.pointer.lastX = event.clientX;
-  state.pointer.lastY = event.clientY;
-  state.pointer.moved = false;
+  state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  state.cameraAnimation = null;
+  if (state.pointers.size === 2) {
+    const [a, b] = [...state.pointers.values()];
+    state.drag = { mode: 'pinch', distance: Math.hypot(a.x - b.x, a.y - b.y), moved: true };
+    return;
+  }
+  const mode = event.button === 2 || event.button === 1 || event.shiftKey ? 'pan' : event.altKey ? 'roll' : 'rotate';
+  state.drag = { mode, x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, moved: false };
+  els.canvas.classList.add('is-dragging');
 }
 
 function onPointerMove(event) {
-  const rect = els.canvas.getBoundingClientRect();
-  state.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  state.pointer.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
-
-  if (state.pointer.dragging) {
-    const dx = event.clientX - state.pointer.lastX;
-    const dy = event.clientY - state.pointer.lastY;
-    state.pointer.lastX = event.clientX;
-    state.pointer.lastY = event.clientY;
-    if (Math.abs(dx) + Math.abs(dy) > 1) state.pointer.moved = true;
-    if (state.pointer.panning) {
-      panCamera(dx, dy);
-    } else {
-      state.camera.yaw -= dx * 0.006;
-      state.camera.pitch = clamp(state.camera.pitch - dy * 0.005, -1.48, 1.48);
+  if (state.pointers.has(event.pointerId)) state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  const drag = state.drag;
+  if (drag) {
+    if (drag.mode === 'pinch' && state.pointers.size >= 2) {
+      const [a, b] = [...state.pointers.values()];
+      const distance = Math.hypot(a.x - b.x, a.y - b.y);
+      zoomCamera(state.camera, drag.distance / Math.max(1, distance));
+      drag.distance = distance;
+      requestRender();
+      return;
     }
-    if (state.clipDepth < 0.995) rebuildScene();
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    drag.x = event.clientX;
+    drag.y = event.clientY;
+    if (Math.abs(event.clientX - drag.startX) + Math.abs(event.clientY - drag.startY) > 4) drag.moved = true;
+    if (!drag.moved) return;
+    if (drag.mode === 'pan') panCamera(state.camera, dx, dy, els.canvas.clientHeight);
+    else if (drag.mode === 'roll') rollCamera(state.camera, dx * 0.006);
+    else orbitCamera(state.camera, dx, dy);
+    requestRender();
     return;
   }
-
-  const hit = pickAtom(state.pointer.x, state.pointer.y);
-  state.hoveredAtom = hit?.atom ?? null;
-  if (state.hoveredAtom) {
-    const atom = state.hoveredAtom;
-    const ss = atom.polymerType === 'protein' ? ` · ${secondaryLabel(atom.ss)} · ${atom.ssSource}` : '';
-    els.tooltip.innerHTML = `<strong>${escapeHTML(atomLabel(atom))}</strong><span>${escapeHTML(atom.resName)} ${escapeHTML(atom.chain)}${atom.resSeq} · ${escapeHTML(atom.element)} · B ${atom.bFactor.toFixed(2)}${escapeHTML(ss)}</span>`;
-    els.tooltip.style.transform = `translate(${event.clientX + 14}px, ${event.clientY + 14}px)`;
-    els.tooltip.classList.add('is-visible');
-  } else {
-    els.tooltip.classList.remove('is-visible');
-  }
+  scheduleHoverPick(event);
 }
 
 function onPointerUp(event) {
-  state.pointer.dragging = false;
-  if (!state.pointer.moved) {
-    const hit = pickAtom(state.pointer.x, state.pointer.y);
-    if (hit) selectAtom(hit.atom, false, true);
+  state.pointers.delete(event.pointerId);
+  const drag = state.drag;
+  if (state.pointers.size === 0) {
+    state.drag = null;
+    els.canvas.classList.remove('is-dragging');
   }
   try {
     els.canvas.releasePointerCapture(event.pointerId);
   } catch {
-    // Some browsers release capture automatically.
+    // Capture may already be released.
   }
+  if (drag && !drag.moved && drag.mode !== 'pinch' && event.type === 'pointerup' && event.button !== 2) {
+    handleClick(event);
+  }
+}
+
+async function handleClick(event) {
+  const atomIndex = await pickAt(event);
+  const model = activeModel();
+  const atom = atomIndex >= 0 ? model.atoms[atomIndex] : null;
+  if (state.measureMode) {
+    if (atom) addMeasureAtom(atom);
+    return;
+  }
+  if (!atom) {
+    if (!event.shiftKey) clearSelection(false);
+    return;
+  }
+  state.selectedAtom = atom;
+  selectResidues([atom.residueKey], { additive: event.shiftKey || event.metaKey || event.ctrlKey, toggle: true });
+}
+
+async function onDoubleClick(event) {
+  const atomIndex = await pickAt(event);
+  const atom = atomIndex >= 0 ? activeModel().atoms[atomIndex] : null;
+  if (atom && !state.measureMode) focusResidues([atom.residueKey]);
 }
 
 function onWheel(event) {
   event.preventDefault();
-  const scale = Math.exp(event.deltaY * 0.0012);
-  state.camera.radius = clamp(state.camera.radius * scale, 1.5, 2200);
-  if (state.clipDepth < 0.995) rebuildScene();
+  const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+  zoomCamera(state.camera, Math.exp(delta * 0.0012));
+  state.cameraAnimation = null;
+  requestRender();
 }
 
-function panCamera(dx, dy) {
-  const speed = state.camera.radius * 0.0018;
-  state.camera.target = add(
-    state.camera.target,
-    add(scale(state.camera.right, -dx * speed), scale(state.camera.up, dy * speed)),
-  );
-}
-
-function pickAtom(ndcX, ndcY) {
-  if (!state.visibleAtomRecords.length) return null;
-  const aspect = els.canvas.width / Math.max(1, els.canvas.height);
-  const tan = Math.tan(state.camera.fov / 2);
-  const rayDirection = normalize(add(
-    state.camera.forward,
-    add(scale(state.camera.right, ndcX * tan * aspect), scale(state.camera.up, ndcY * tan)),
-  ));
-  const origin = state.camera.eye;
-  let best = null;
-  for (const record of state.visibleAtomRecords) {
-    const atom = record.atom;
-    const center = record.center ?? [atom.x, atom.y, atom.z];
-    const toCenter = sub(center, origin);
-    const t = dot(toCenter, rayDirection);
-    if (t < 0) continue;
-    const closest = add(origin, scale(rayDirection, t));
-    const miss = distanceVec(center, closest);
-    const threshold = Math.max(record.radius * 1.45, 0.32);
-    if (miss <= threshold && (!best || t < best.t)) best = { atom, t, miss };
+async function pickAt(event) {
+  const point = canvasPoint(event);
+  try {
+    return await state.renderer.pick(point.x, point.y);
+  } catch {
+    return -1;
   }
-  return best;
 }
 
-function selectAtomByID(id, frameSelection = false, measure = false) {
-  const atom = activeModel().atoms[id];
-  if (atom) selectAtom(atom, frameSelection, measure);
+function scheduleHoverPick(event) {
+  if (state.pickPending || !state.structure) return;
+  state.pickPending = true;
+  const clientX = event.clientX;
+  const clientY = event.clientY;
+  requestAnimationFrame(async () => {
+    const atomIndex = await pickAt({ clientX, clientY });
+    state.pickPending = false;
+    setHoverAtom(atomIndex, clientX, clientY);
+  });
 }
 
-function selectAtom(atom, frameSelection = false, measure = false) {
-  if (measure && state.lastMeasureAtom && state.lastMeasureAtom.id !== atom.id) {
-    state.measurements.push({
-      a: state.lastMeasureAtom.id,
-      b: atom.id,
-      distance: distance(state.lastMeasureAtom, atom),
-    });
+function setHoverAtom(atomIndex, clientX = 0, clientY = 0) {
+  if (!state.structure) return;
+  const model = activeModel();
+  const atom = atomIndex >= 0 ? model.atoms[atomIndex] : null;
+  const residueKey = atom?.residueKey ?? null;
+  if (atom) {
+    els.tooltip.innerHTML = tooltipHTML(atom);
+    const x = Math.min(window.innerWidth - 300, clientX + 14);
+    els.tooltip.style.transform = `translate(${x}px, ${clientY + 14}px)`;
+    els.tooltip.classList.add('is-visible');
+  } else {
+    els.tooltip.classList.remove('is-visible');
   }
-  state.selectedAtom = atom;
-  state.lastMeasureAtom = atom;
-  if (frameSelection) frameAtom(atom);
-  rebuildScene();
+  state.hover.atom = atomIndex;
+  if (state.hover.residueKey !== residueKey) {
+    state.hover.residueKey = residueKey;
+    sequenceView?.setHover(residueKey);
+    markFlagsDirty();
+  }
 }
 
-function frameAtom(atom) {
-  state.camera.target = [atom.x, atom.y, atom.z];
-  state.camera.radius = Math.max(8, activeModel().bounds.radius * 0.18);
+function setHoverResidue(key) {
+  if (state.hover.residueKey === key) return;
+  state.hover.residueKey = key;
+  sequenceView?.setHover(key);
+  markFlagsDirty();
+}
+
+function componentNameOf(residue) {
+  if (!residue || (residue.kind !== 'ligand' && residue.kind !== 'ion')) return '';
+  const name = state.structure.componentNames?.get(residue.resName);
+  return name ? titleCase(name) : '';
+}
+
+function tooltipHTML(atom) {
+  const residue = residueOf(atom);
+  const parts = [`${atom.name} · ${atom.element}`];
+  const componentName = componentNameOf(residue);
+  if (componentName) parts.unshift(componentName);
+  if (residue?.kind === 'protein') parts.push(secondaryText(residue));
+  if (Number.isFinite(residue?.confidence) && state.structure.meta.isPredicted) parts.push(`pLDDT ${residue.confidence.toFixed(1)}`);
+  else parts.push(`B ${atom.bFactor.toFixed(1)}`);
+  const extra = residueDataText(residue);
+  if (extra) parts.push(extra);
+  return `<strong>${escapeHTML(residueLabel(residue ?? atom))}</strong><span>${escapeHTML(parts.join(' · '))}</span>`;
+}
+
+function residueDataText(residue) {
+  if (!residue) return '';
+  const parts = [];
+  const coverage = state.proteomics.coverage?.get(residue.key);
+  if (coverage) parts.push(`${coverage} peptide${coverage === 1 ? '' : 's'}`);
+  const data = state.proteomics.data?.get(residue.key);
+  if (Number.isFinite(data)) parts.push(`${state.proteomics.dataLabel || 'value'} ${formatNumberShort(data)}`);
+  const relative = state.sasa?.relative?.get(residue.key);
+  if (Number.isFinite(relative)) parts.push(`RSA ${(relative * 100).toFixed(0)}%`);
+  return parts.join(' · ');
+}
+
+function onKeyDown(event) {
+  const target = event.target;
+  if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement) {
+    if (event.key === 'Escape') target.blur();
+    return;
+  }
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const key = event.key;
+  const presets = ['cartoon', 'ball-stick', 'sticks', 'spacefill', 'trace', 'surface'];
+  if (/^[1-6]$/.test(key)) applyRepresentationPreset(presets[Number(key) - 1]);
+  else if (key === 'r' || key === 'R') resetView(true);
+  else if (key === 'f' || key === 'F') focusResidues([...state.selection]);
+  else if (key === 'd' || key === 'D') setMeasureMode(state.measureMode === 'distance' ? null : 'distance');
+  else if (key === 'a' || key === 'A') setMeasureMode(state.measureMode === 'angle' ? null : 'angle');
+  else if (key === 't' || key === 'T') setMeasureMode(state.measureMode === 'dihedral' ? null : 'dihedral');
+  else if (key === 'l' || key === 'L') toggleSelectionLabels();
+  else if (key === 's' || key === 'S') setSpin(!state.spin);
+  else if (key === 'p' || key === 'P') openExportDialog();
+  else if (key === 'o' || key === 'O') setProjection(!state.camera.orthographic);
+  else if (key === 'w' || key === 'W') {
+    els.showWater.checked = !els.showWater.checked;
+    updateDisplay({ showWater: els.showWater.checked });
+  } else if (key === 'h' || key === 'H') {
+    els.showHydrogen.checked = !els.showHydrogen.checked;
+    updateDisplay({ showHydrogen: els.showHydrogen.checked });
+  } else if (key === '/') {
+    event.preventDefault();
+    els.searchInput.focus();
+  } else if (key === '?') {
+    els.helpDialog.showModal();
+  } else if (key === 'Escape') {
+    if (state.measureMode) setMeasureMode(null);
+    else if (state.focus) clearFocus();
+    else clearSelection(true);
+  } else if (key === 'Backspace' || key === 'Delete') {
+    if (state.measurements.length) {
+      state.measurements.pop();
+      renderMeasurements();
+      markSceneDirty();
+    }
+  } else {
+    return;
+  }
+  event.preventDefault();
+}
+
+/* ---------- Selection and focus ---------- */
+
+function selectResidues(keys, options = {}) {
+  if (!state.structure) return;
+  const next = options.additive ? new Set(state.selection) : new Set();
+  for (const key of keys) {
+    if (options.additive && options.toggle && next.has(key) && keys.length === 1) next.delete(key);
+    else next.add(key);
+  }
+  state.selection = next;
+  if (!options.keepAtom && keys.length === 1 && state.selectedAtom?.residueKey !== keys[0]) {
+    state.selectedAtom = activeModel().residueMap.get(keys[0])?.representative ?? null;
+  }
+  if (options.frame && keys.length) frameResidues(keys);
+  onSelectionChanged();
+}
+
+function clearSelection(clearFocusToo) {
+  state.selection = new Set();
+  state.selectedAtom = null;
+  if (clearFocusToo && state.focus) clearFocus();
+  onSelectionChanged();
+}
+
+function onSelectionChanged() {
+  sequenceView?.setSelection(state.selection);
+  const first = [...state.selection][0];
+  if (first) sequenceView?.scrollTo(first);
+  renderSelectionPanel();
+  if (activeTabName() === 'analysis') {
+    renderRamachandran();
+    renderProfile();
+  }
+  markFlagsDirty();
+}
+
+function frameResidues(keys) {
+  const model = activeModel();
+  const atoms = keys.flatMap((key) => model.residueMap.get(key)?.atoms ?? []);
+  if (!atoms.length) return;
+  fitView(true, false, atoms);
+}
+
+async function focusResidues(keys) {
+  if (!state.structure || !keys.length) return;
+  const model = activeModel();
+  const valid = keys.filter((key) => model.residueMap.has(key));
+  if (!valid.length) return;
+  state.selection = new Set(valid);
+  const neighborhood = focusNeighborhood(model, valid, 5);
+  state.focus = { residues: new Set(valid), neighborhood };
+  const atoms = [...neighborhood].flatMap((key) => model.residueMap.get(key)?.atoms ?? []).filter((atom) => !atom.isHydrogen);
+  fitView(true, false, atoms);
+  onSelectionChanged();
+  markSceneDirty();
+  await computeFocusInteractions(valid);
+}
+
+function clearFocus() {
+  state.focus = null;
+  state.interactions = { ...state.interactions, list: [], title: '' };
+  renderInteractions();
+  markSceneDirty();
+}
+
+async function computeFocusInteractions(keys) {
+  const focus = state.focus;
+  const module = await loadModule('interactions', './lib/interactions.js');
+  if (!module?.findInteractions || state.focus !== focus) return;
+  const model = activeModel();
+  const focusAtoms = keys.flatMap((key) => model.residueMap.get(key)?.atoms ?? []).map((atom) => atom.id);
+  try {
+    const list = module.findInteractions(model, focusAtoms, { includeWater: state.display.showWater });
+    const residue = model.residueMap.get(keys[0]);
+    state.interactions = { ...state.interactions, list, title: keys.length === 1 ? residueLabel(residue) : `${keys.length} residues` };
+  } catch (error) {
+    console.error(error);
+    showToast(`Interaction analysis failed: ${error.message}`, true);
+  }
+  renderInteractions();
+  markSceneDirty();
+}
+
+function toggleSelectionLabels() {
+  if (!state.selection.size) return;
+  const allLabeled = [...state.selection].every((key) => state.labels.has(key));
+  for (const key of state.selection) {
+    if (allLabeled) state.labels.delete(key);
+    else state.labels.add(key);
+  }
+  requestRender();
+}
+
+function isolateSelectionChains() {
+  if (!state.selection.size) return;
+  const model = activeModel();
+  const chains = new Set([...state.selection].map((key) => model.residueMap.get(key)?.chain).filter(Boolean));
+  setVisibleChains(chains);
+}
+
+/* ---------- Measurements ---------- */
+
+function setMeasureMode(mode) {
+  state.measureMode = mode;
+  state.measurePending = [];
+  document.querySelectorAll('[data-measure]').forEach((button) => button.classList.toggle('is-active', button.dataset.measure === mode));
+  els.app.classList.toggle('measure-mode', Boolean(mode));
+  const needed = { distance: 2, angle: 3, dihedral: 4 }[mode];
+  els.modeBanner.hidden = !mode;
+  if (mode) els.modeBanner.textContent = `${capitalize(mode === 'dihedral' ? 'torsion' : mode)}: click ${needed} atoms · Esc to finish`;
+  markSceneDirty();
+}
+
+function addMeasureAtom(atom) {
+  const needed = { distance: 2, angle: 3, dihedral: 4 }[state.measureMode];
+  if (state.measurePending.at(-1) === atom.id) return;
+  state.measurePending.push(atom.id);
+  if (state.measurePending.length >= needed) {
+    const model = activeModel();
+    const atoms = state.measurePending.map((id) => model.atoms[id]);
+    state.measurements.push({ type: state.measureMode, atoms: [...state.measurePending], value: measureValue(state.measureMode, atoms) });
+    state.measurePending = [];
+    renderMeasurements();
+  }
+  markSceneDirty();
+}
+
+function measureValue(type, atoms) {
+  const p = atoms.map(point);
+  if (type === 'distance') return Math.hypot(p[0][0] - p[1][0], p[0][1] - p[1][1], p[0][2] - p[1][2]);
+  if (type === 'angle') return angleBetween(sub(p[0], p[1]), sub(p[2], p[1])) * 180 / Math.PI;
+  return dihedralAngle(p[0], p[1], p[2], p[3]) * 180 / Math.PI;
+}
+
+function formatMeasurement(measurement) {
+  return measurement.type === 'distance' ? `${measurement.value.toFixed(2)} Å` : `${measurement.value.toFixed(1)}°`;
 }
 
 function clearMeasurements() {
   state.measurements = [];
-  state.lastMeasureAtom = null;
-  rebuildScene();
+  state.measurePending = [];
+  renderMeasurements();
+  markSceneDirty();
 }
 
-function fitModel(resetAngles) {
-  const bounds = activeModel().bounds;
-  state.camera.target = [...bounds.center];
-  state.camera.radius = Math.max(10, bounds.radius * 2.25);
-  state.camera.near = Math.max(0.02, bounds.radius / 500);
-  state.camera.far = Math.max(100, bounds.radius * 8);
-  if (resetAngles) {
-    state.camera.yaw = -0.72;
-    state.camera.pitch = 0.34;
+function renderMeasurements() {
+  const model = state.structure ? activeModel() : null;
+  const fragment = document.createDocumentFragment();
+  state.measurements.forEach((measurement, index) => {
+    const row = document.createElement('div');
+    row.className = 'list-row';
+    const atoms = measurement.atoms.map((id) => model?.atoms[id]).filter(Boolean);
+    row.innerHTML = `<i style="background:#ffd166"></i><span>${escapeHTML(atoms.map(shortAtomLabel).join(' – '))}</span><strong>${formatMeasurement(measurement)}</strong><button type="button" title="Remove">×</button>`;
+    row.querySelector('button').addEventListener('click', (event) => {
+      event.stopPropagation();
+      state.measurements.splice(index, 1);
+      renderMeasurements();
+      markSceneDirty();
+    });
+    row.addEventListener('click', () => fitView(true, false, atoms));
+    fragment.appendChild(row);
+  });
+  els.measurementList.replaceChildren(fragment);
+}
+
+/* ---------- Labels ---------- */
+
+function updateLabels() {
+  if (!state.structure) return;
+  const model = activeModel();
+  const view = currentView();
+  const width = els.canvas.clientWidth;
+  const height = els.canvas.clientHeight;
+  const labels = collectLabels(model);
+  const pool = els.labelLayer.children;
+  let used = 0;
+  for (const label of labels.slice(0, 400)) {
+    const screen = projectToScreen(view, label.position, width, height);
+    if (!screen || screen.x < 0 || screen.y < 0 || screen.x > width || screen.y > height) continue;
+    const element = pool[used] ?? els.labelLayer.appendChild(document.createElement('div'));
+    const className = `label-3d ${label.kind}`;
+    if (element.className !== className) element.className = className;
+    if (element.textContent !== label.text) element.textContent = label.text;
+    element.style.transform = `translate(${screen.x}px, ${screen.y}px) translate(-50%, -140%)`;
+    used += 1;
   }
+  while (pool.length > used) pool[pool.length - 1].remove();
 }
 
-function resetView() {
-  fitModel(true);
-  rebuildScene();
+function collectLabels(model) {
+  const labels = [];
+  for (const key of state.labels) {
+    const residue = model.residueMap.get(key);
+    if (residue?.representative) labels.push({ position: point(residue.representative), text: residueLabel(residue), kind: 'residue' });
+  }
+  for (const site of state.proteomics.sites) {
+    if (site.residue?.representative) labels.push({ position: point(site.residue.representative), text: site.label, kind: 'site' });
+  }
+  for (const measurement of state.measurements) {
+    const atoms = measurement.atoms.map((id) => model.atoms[id]).filter(Boolean);
+    if (atoms.length < 2) continue;
+    let position;
+    if (measurement.type === 'distance') position = scale(add(point(atoms[0]), point(atoms[1])), 0.5);
+    else if (measurement.type === 'angle') position = point(atoms[1]);
+    else position = scale(add(point(atoms[1]), point(atoms[2])), 0.5);
+    labels.push({ position, text: formatMeasurement(measurement), kind: 'measure' });
+  }
+  return labels;
 }
 
-function exportPNG() {
-  els.canvas.toBlob((blob) => {
-    if (!blob) return;
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${(state.structure?.meta.code || 'proteoscope').toLowerCase()}-view.png`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-  }, 'image/png');
-}
+/* ---------- Structure UI ---------- */
 
 function updateStructureUI() {
   const structure = state.structure;
-  els.title.textContent = structure.meta.title;
-  document.title = `${structure.meta.code || 'Structure'} · Proteoscope`;
-  updateStructureMetadata();
+  const meta = structure.meta;
+  els.title.textContent = meta.title;
+  els.title.title = meta.title;
+  els.subtitle.textContent = [state.sourceLabel, structure.format === 'mmcif' ? 'PDBx/mmCIF' : 'PDB'].filter(Boolean).join(' · ');
+  document.title = `${meta.code || structure.label} · Proteoscope`;
+  setMeta(els.metaMethod, meta.isPredicted && !meta.method ? 'Predicted model' : titleCase(meta.method) || 'Unknown');
+  setMeta(els.metaResolution, meta.resolution ? meta.resolution.replace(' Angstroms', ' Å') : 'n/a');
+  setMeta(els.metaRFree, meta.rFree ? Number(meta.rFree).toFixed(3) : 'n/a');
+  setMeta(els.metaEntry, meta.code || 'Local');
+  setMeta(els.metaOrganism, titleCase(meta.organism) || 'n/a');
+  setMeta(els.metaFormat, structure.format === 'mmcif' ? 'PDBx/mmCIF' : 'PDB');
+  setMeta(els.metaDate, meta.depositionDate || 'n/a');
+  const assembly = structure.assemblies.find((item) => item.id === structure.activeAssemblyId);
+  setMeta(els.metaAssembly, assembly ? assemblyLabel(assembly, false) : 'Asymmetric unit');
   updateAssemblyOptions();
-  els.residuesMetric.textContent = formatNumber(structure.residues.length);
+  renderConfidenceSummary();
+  const models = structure.models.length;
+  els.modelsMetric.textContent = formatNumber(models);
+  els.residuesMetric.textContent = formatNumber(structure.residues.filter((residue) => residue.kind !== 'water').length);
   els.chainsMetric.textContent = formatNumber(structure.chains.length);
-  els.modelsMetric.textContent = formatNumber(structure.models.length);
-  els.modelSlider.max = String(structure.models.length);
-  els.modelSlider.value = '1';
-  els.modelStrip.classList.toggle('is-visible', structure.models.length > 1);
+  els.modelSlider.max = String(models);
+  els.modelSlider.value = String(state.activeModel + 1);
+  els.modelStrip.classList.toggle('is-visible', models > 1);
   updateModelLabel();
-  updateModelMetrics();
+  renderEntities();
+  updateSecondarySummary();
+  populateChainSelects();
   renderChains();
+  renderSequence();
+  renderSelectionPanel();
+  renderInteractions();
+  renderMeasurements();
+  refreshTabPanels();
   clearSearch();
+  updateViewOffset();
 }
 
-function updateStructureMetadata() {
+function activeTabName() {
+  return document.querySelector('[data-tab].is-active')?.dataset.tab ?? 'structure';
+}
+
+function refreshTabPanels() {
+  const tab = activeTabName();
+  if (tab === 'analysis') {
+    renderRamachandran();
+    renderProfile();
+    renderPAE();
+  } else if (tab === 'proteomics') {
+    renderProtParam();
+  }
+}
+
+function setMeta(element, value) {
+  element.textContent = value;
+  element.title = value;
+}
+
+function renderConfidenceSummary() {
   const structure = state.structure;
-  const assembly = activeAssembly();
-  els.metaFormat.textContent = structure.format === 'mmcif' ? 'PDBx/mmCIF' : 'PDB';
-  els.metaMethod.textContent = structure.meta.method || 'Unknown';
-  els.metaResolution.textContent = structure.meta.resolution || 'N/A';
-  els.metaEntry.textContent = structure.meta.code || 'Local';
-  els.metaAssembly.textContent = assembly ? assemblyLabel(assembly, false) : 'Asymmetric unit';
-  els.metaFormat.title = els.metaFormat.textContent;
-  els.metaMethod.title = els.metaMethod.textContent;
-  els.metaResolution.title = els.metaResolution.textContent;
-  els.metaEntry.title = els.metaEntry.textContent;
-  els.metaAssembly.title = els.metaAssembly.textContent;
+  const residues = structure.residues.filter((residue) => residue.kind === 'protein' && Number.isFinite(residue.confidence));
+  if (!structure.meta.isPredicted || !residues.length) {
+    els.confidenceSummary.hidden = true;
+    return;
+  }
+  const mean = residues.reduce((sum, residue) => sum + residue.confidence, 0) / residues.length;
+  const counts = PLDDT_BANDS.map((band, index) => residues.filter((residue) => {
+    const upper = index === 0 ? Infinity : PLDDT_BANDS[index - 1].min;
+    return residue.confidence > band.min && residue.confidence <= upper;
+  }).length);
+  els.confidenceSummary.hidden = false;
+  els.confidenceSummary.innerHTML = `<div><strong>Predicted model</strong> · mean pLDDT <strong>${mean.toFixed(1)}</strong> over ${formatNumber(residues.length)} residues${structure.meta.confidenceSource ? ` · ${escapeHTML(structure.meta.confidenceSource)}` : ''}</div>
+    <div class="confidence-bar">${PLDDT_BANDS.map((band, index) => `<i title="${escapeHTML(band.label)}: ${counts[index]}" style="flex:${counts[index]};background:${colorToHex(band.color)}"></i>`).join('')}</div>`;
 }
 
 function updateAssemblyOptions() {
   const structure = state.structure;
-  const hasAssemblies = structure.assemblies.length > 0;
+  const hasAssemblies = structure.assemblies.length > 0 && !(structure.assemblies.length === 1 && structure.assemblies[0].estimatedAtoms === structure.baseModels[0].atoms.length && structure.format === 'pdb');
   els.assemblyField.hidden = !hasAssemblies;
-  els.assemblyField.style.display = hasAssemblies ? '' : 'none';
   els.assemblySelect.replaceChildren();
   if (!hasAssemblies) return;
-  const asymmetric = document.createElement('option');
-  asymmetric.value = ASYMMETRIC_UNIT_ID;
-  asymmetric.textContent = 'Asymmetric unit';
-  els.assemblySelect.appendChild(asymmetric);
+  els.assemblySelect.appendChild(new Option('Asymmetric unit', ASYMMETRIC_UNIT_ID));
   for (const assembly of structure.assemblies) {
-    const option = document.createElement('option');
-    option.value = assembly.id;
-    option.textContent = assemblyLabel(assembly, true);
+    const option = new Option(assemblyLabel(assembly, true), assembly.id);
     option.disabled = assembly.estimatedAtoms > MAX_ASSEMBLY_ATOMS;
     if (option.disabled) {
       option.textContent += ' · too large';
@@ -3157,451 +1693,1739 @@ function updateAssemblyOptions() {
   els.assemblySelect.value = structure.activeAssemblyId;
 }
 
-function activeAssembly() {
-  const structure = state.structure;
-  if (!structure || structure.activeAssemblyId === ASYMMETRIC_UNIT_ID) return null;
-  return structure.assemblies.find((assembly) => assembly.id === structure.activeAssemblyId) || null;
-}
-
 function assemblyLabel(assembly, includeAtoms) {
   const details = assembly.oligomericDetails || assembly.details || 'assembly';
-  const atoms = includeAtoms && assembly.estimatedAtoms ? ` · ${formatNumber(assembly.estimatedAtoms)} atoms/model` : '';
+  const atoms = includeAtoms && assembly.estimatedAtoms ? ` · ${formatNumber(assembly.estimatedAtoms)} atoms` : '';
   return `${assembly.id}: ${details}${atoms}`;
 }
 
-function populateSamples() {
-  els.sampleSelect.innerHTML = '';
-  for (const sample of state.samples) {
-    const option = document.createElement('option');
-    option.value = sample.id;
-    option.textContent = sampleSummary(sample);
-    els.sampleSelect.appendChild(option);
+function renderEntities() {
+  const structure = state.structure;
+  const fragment = document.createDocumentFragment();
+  const polymerChains = structure.chains.filter((chain) => chain.polymerKind);
+  const groups = new Map();
+  for (const chain of polymerChains) {
+    const key = chain.description || `Chain ${chain.id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(chain);
   }
+  for (const [description, chains] of groups) {
+    const row = document.createElement('div');
+    const color = chainPaletteColor(structure.chains.indexOf(chains[0]), state.color.palette);
+    row.innerHTML = `<i style="background:${colorToHex(color)}"></i><span title="${escapeHTML(description)}">${escapeHTML(titleCase(description))}</span><em>${escapeHTML(chains.map((chain) => chain.id).join(', '))}</em>`;
+    fragment.appendChild(row);
+  }
+  const ligands = new Set();
+  for (const residue of structure.residues) {
+    if (residue.kind === 'ligand' || residue.kind === 'ion') ligands.add(residue.resName);
+  }
+  if (ligands.size) {
+    const row = document.createElement('div');
+    const names = [...ligands].map((id) => {
+      const name = structure.componentNames?.get(id);
+      return name ? `${id}: ${titleCase(name)}` : id;
+    });
+    row.title = names.join('\n');
+    row.innerHTML = `<i style="background:#5bdb80"></i><span>Ligands &amp; ions</span><em>${escapeHTML([...ligands].slice(0, 8).join(', '))}${ligands.size > 8 ? '…' : ''}</em>`;
+    fragment.appendChild(row);
+  }
+  els.entityList.replaceChildren(fragment);
 }
 
-function sampleSummary(sample) {
-  if (sample.models > 1) {
-    const atomsPerModel = sample.atoms / sample.models;
-    const atomsLabel = Number.isInteger(atomsPerModel) ? atomsPerModel.toLocaleString() : sample.atoms.toLocaleString();
-    return `${sample.name} · ${atomsLabel} atoms/model · ${sample.models.toLocaleString()} models`;
+function updateSecondarySummary() {
+  const model = activeModel();
+  const counts = dsspSummary(model.residues.map((residue) => residue.dssp));
+  const protein = model.residues.filter((residue) => residue.kind === 'protein').length;
+  if (!protein) {
+    els.ssSummary.textContent = 'No protein chains.';
+    return;
   }
-  return `${sample.name} · ${sample.atoms.toLocaleString()} atoms`;
+  const helix = (counts.H ?? 0) + (counts.G ?? 0) + (counts.I ?? 0);
+  const strand = counts.E ?? 0;
+  const source = model.residues.find((residue) => residue.kind === 'protein' && residue.ssSource !== 'none')?.ssSource ?? 'none';
+  els.ssSummary.textContent = `Showing ${source === 'none' ? 'coil only' : source}. DSSP: ${pct(helix, protein)} helix, ${pct(strand, protein)} strand across ${formatNumber(protein)} residues.`;
+}
+
+function populateChainSelects() {
+  const structure = state.structure;
+  const polymer = structure.chains.filter((chain) => chain.polymerKind);
+  const proteinChains = polymer.filter((chain) => chain.polymerKind === 'protein');
+  const fill = (select, chains, includeAll = false) => {
+    const previous = select.value;
+    select.replaceChildren();
+    if (includeAll) select.appendChild(new Option('All chains', '*'));
+    for (const chain of chains) select.appendChild(new Option(chainOptionLabel(chain), chain.id));
+    if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+  };
+  fill(els.sequenceChain, polymer);
+  fill(els.ramaChain, proteinChains, true);
+  fill(els.profileChain, polymer);
+  fill(els.protparamChain, polymer);
+  fill(els.uniprotChain, proteinChains);
+  fill(els.interfaceA, polymer);
+  fill(els.interfaceB, polymer);
+  if (polymer.length > 1 && els.interfaceA.value === els.interfaceB.value) els.interfaceB.value = polymer[1].id;
+  els.sequencePanel.hidden = !polymer.length;
+  els.app.classList.toggle('no-sequence', !polymer.length);
+}
+
+function chainOptionLabel(chain) {
+  return `${chain.id}${chain.description ? ` · ${titleCase(chain.description).slice(0, 40)}` : ''}`;
 }
 
 function renderChains() {
   if (!state.structure) return;
   const fragment = document.createDocumentFragment();
-  els.isolateClear.disabled = !state.visibleChains;
-  els.isolateClear.title = state.visibleChains ? 'Show all chains' : 'All chains are visible';
-  for (const chain of state.structure.chains) {
-    const visible = chainIsVisible(chain.id);
+  state.structure.chains.forEach((chain, index) => {
+    const visible = !state.display.visibleChains || state.display.visibleChains.has(chain.id);
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = visible ? 'chain-button is-visible' : 'chain-button is-hidden-chain';
-    button.setAttribute('aria-pressed', visible ? 'true' : 'false');
-    button.title = visible ? `Hide ${displayChain(chain.id)}` : `Show ${displayChain(chain.id)}`;
-    button.innerHTML = `
-      <span class="chain-swatch" style="--swatch:${rgbCSS(chain.color)}"></span>
-      <span><strong>${escapeHTML(displayChain(chain.id))}</strong><small>${chain.residues} residues · ${chain.atoms} atoms · ${visible ? 'visible' : 'hidden'}</small></span>
-    `;
-    button.addEventListener('click', () => {
-      toggleChainVisibility(chain.id);
-    });
+    button.className = `chain-button${visible ? '' : ' is-hidden-chain'}`;
+    button.setAttribute('aria-pressed', String(visible));
+    button.title = `${visible ? 'Hide' : 'Show'} chain ${chain.id} · double-click to show only this chain`;
+    const color = chainPaletteColor(index, state.color.palette);
+    const kind = chain.polymerKind || (chain.kinds.water === chain.residues ? 'water' : 'ligand');
+    const detail = chain.polymerKind ? `${formatNumber(chain.polymerResidues)} residues · ${formatNumber(chain.atoms)} atoms` : `${formatNumber(chain.residues)} groups · ${formatNumber(chain.atoms)} atoms`;
+    button.innerHTML = `<span class="chain-swatch" style="--swatch:${colorToHex(color)}"></span><span><strong>${escapeHTML(chain.id)}${chain.description ? ` · ${escapeHTML(titleCase(chain.description))}` : ''}</strong><small>${detail}</small></span><em>${kind === 'protein' ? 'prot' : kind === 'nucleic' ? 'NA' : kind}</em>`;
+    button.addEventListener('click', () => toggleChain(chain.id));
+    button.addEventListener('dblclick', () => setVisibleChains(new Set([chain.id])));
     fragment.appendChild(button);
-  }
+  });
   els.chainList.replaceChildren(fragment);
+  els.chainsAll.disabled = !state.display.visibleChains;
 }
 
-function chainIsVisible(chainID) {
-  return !state.visibleChains || state.visibleChains.has(chainID);
+function toggleChain(chainID) {
+  const all = state.structure.chains.map((chain) => chain.id);
+  const visible = new Set(state.display.visibleChains ?? all);
+  if (visible.has(chainID)) visible.delete(chainID);
+  else visible.add(chainID);
+  setVisibleChains(visible.size === all.length ? null : visible);
 }
 
-function toggleChainVisibility(chainID) {
-  if (!state.structure) return;
-  if (!state.visibleChains) {
-    state.visibleChains = new Set(state.structure.chains.map((chain) => chain.id));
-  }
-  if (state.visibleChains.has(chainID)) {
-    state.visibleChains.delete(chainID);
-  } else {
-    state.visibleChains.add(chainID);
-  }
-  if (state.visibleChains.size === state.structure.chains.length) {
-    state.visibleChains = null;
-  }
-  state.selectedAtom = null;
-  state.hoveredAtom = null;
-  state.lastMeasureAtom = null;
-  state.measurements = [];
+function invertChains() {
+  const all = state.structure.chains.map((chain) => chain.id);
+  const visible = state.display.visibleChains ?? new Set(all);
+  const inverted = new Set(all.filter((id) => !visible.has(id)));
+  setVisibleChains(inverted.size === 0 || inverted.size === all.length ? null : inverted);
+}
+
+function setVisibleChains(chains) {
+  state.display.visibleChains = chains;
+  state.cartoonKey = '';
   renderChains();
-  rebuildScene();
+  markSceneDirty();
+  refreshSurface();
 }
 
-function updateSelectionPanel() {
-  const atom = state.selectedAtom;
-  if (!atom) {
-    els.selectionTitle.textContent = 'None';
-    els.selectionMeta.textContent = 'Select an atom or residue.';
-  } else {
-    els.selectionTitle.textContent = atomLabel(atom);
-    const ss = atom.polymerType === 'protein' ? ` · ${secondaryLabel(atom.ss)} · ${atom.ssSource}` : '';
-    els.selectionMeta.textContent = `${atom.resName} ${atom.chain}${atom.resSeq}${atom.iCode} · ${atom.element} · serial ${atom.serial} · occupancy ${atom.occupancy.toFixed(2)} · B ${atom.bFactor.toFixed(2)}${ss}`;
+/* ---------- Sequence ---------- */
+
+function renderSequence() {
+  if (!state.structure || !sequenceView) return;
+  const info = state.structure.sequences.get(els.sequenceChain.value) ?? [...state.structure.sequences.values()][0];
+  if (!info) {
+    sequenceView.render(null);
+    els.sequenceInfo.textContent = '';
+    return;
   }
+  sequenceView.render(info, residueColor);
+  const uniprot = info.uniprot?.[0];
+  const missing = info.items.filter((item) => !item.residue && !item.gap).length;
+  els.sequenceInfo.textContent = [
+    `${info.items.filter((item) => !item.gap).length} residues`,
+    missing ? `${missing} not modeled` : '',
+    info.source === 'model' ? 'from coordinates' : `from ${info.source}`,
+    uniprot?.accession ? `UniProt ${uniprot.accession}` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+/* ---------- Selection panel ---------- */
+
+function renderSelectionPanel() {
+  const model = state.structure ? activeModel() : null;
+  const keys = [...state.selection];
+  els.selectionDetails.replaceChildren();
+  const disabled = !keys.length;
+  for (const button of [els.focusSelection, els.labelSelection, els.isolateSelection, els.focusButton]) button.disabled = disabled;
+  if (!model || !keys.length) {
+    els.selectionTitle.textContent = 'Nothing selected';
+    els.selectionHint.hidden = false;
+    return;
+  }
+  els.selectionHint.hidden = true;
+  if (keys.length > 1) {
+    const residues = keys.map((key) => model.residueMap.get(key)).filter(Boolean);
+    els.selectionTitle.textContent = `${residues.length} residues selected`;
+    addDetail('Residues', residues.slice(0, 6).map((residue) => `${residue.resName}${residue.resSeq}`).join(', ') + (residues.length > 6 ? '…' : ''), true);
+    addDetail('Chains', [...new Set(residues.map((residue) => residue.chain))].join(', '));
+    addDetail('Atoms', formatNumber(residues.reduce((sum, residue) => sum + residue.atoms.length, 0)));
+    return;
+  }
+  const residue = model.residueMap.get(keys[0]);
+  if (!residue) return;
+  els.selectionTitle.textContent = residueLabel(residue);
+  const chain = state.structure.chains.find((item) => item.id === residue.chain);
+  const componentName = componentNameOf(residue);
+  if (componentName) addDetail('Name', componentName, true);
+  else if (chain?.description) addDetail('Molecule', titleCase(chain.description), true);
+  addDetail('Type', residue.modified ? `${residue.kind} (modified ${residue.parent})` : residue.kind);
+  if (residue.kind === 'protein') {
+    addDetail('Secondary', secondaryText(residue));
+    if (Number.isFinite(residue.phi) || Number.isFinite(residue.psi)) addDetail('φ / ψ', `${formatAngle(residue.phi)} / ${formatAngle(residue.psi)}`);
+  }
+  if (state.structure.meta.isPredicted && Number.isFinite(residue.confidence)) addDetail('pLDDT', residue.confidence.toFixed(1));
+  else addDetail('Mean B', residue.bFactor.toFixed(1));
+  const info = state.structure.sequences.get(residue.chain);
+  const uniprot = info ? uniprotPositionForResidue(info, residue) : null;
+  if (uniprot) addDetail('UniProt', `${uniprot.accession} ${residue.code}${uniprot.position}`);
+  const relative = state.sasa?.relative?.get(residue.key);
+  if (Number.isFinite(relative)) addDetail('Rel. SASA', `${(relative * 100).toFixed(0)}%`);
+  const extra = residueDataText(residue);
+  if (extra) addDetail('Data', extra, true);
+  const atom = state.selectedAtom?.residueKey === residue.key ? state.selectedAtom : null;
+  if (atom) {
+    addDetail('Atom', `${atom.name} (${atom.element}) #${atom.serial}`);
+    addDetail('Occupancy · B', `${atom.occupancy.toFixed(2)} · ${atom.bFactor.toFixed(1)}${atom.altCount ? ` · ${atom.altCount} alt` : ''}`);
+  }
+}
+
+function addDetail(label, value, wide = false) {
+  const div = document.createElement('div');
+  if (wide) div.className = 'wide';
+  div.innerHTML = `<dt>${escapeHTML(label)}</dt><dd title="${escapeHTML(value)}">${escapeHTML(value)}</dd>`;
+  els.selectionDetails.appendChild(div);
+}
+
+/* ---------- Interactions ---------- */
+
+function renderInteractionTypeToggles() {
   const fragment = document.createDocumentFragment();
-  for (const measurement of state.measurements.slice(-6).reverse()) {
-    const a = activeModel().atoms[measurement.a];
-    const b = activeModel().atoms[measurement.b];
+  for (const type of state.interactionTypes) {
+    const label = document.createElement('label');
+    label.innerHTML = `<input type="checkbox" ${state.interactions.enabled.has(type.id) ? 'checked' : ''} /><i style="background:${type.color}"></i>${escapeHTML(type.label)}`;
+    label.querySelector('input').addEventListener('change', (event) => {
+      if (event.target.checked) state.interactions.enabled.add(type.id);
+      else state.interactions.enabled.delete(type.id);
+      renderInteractions();
+      markSceneDirty();
+    });
+    fragment.appendChild(label);
+  }
+  els.interactionTypes.replaceChildren(fragment);
+}
+
+function renderInteractions() {
+  const list = state.interactions.list.filter((item) => state.interactions.enabled.has(item.type));
+  els.interactionsCard.hidden = !state.interactions.list.length && !state.interactions.title;
+  els.interactionCount.textContent = state.interactions.title ? `${state.interactions.title} · ${list.length}` : String(list.length);
+  const counts = new Map();
+  for (const item of list) counts.set(item.type, (counts.get(item.type) ?? 0) + 1);
+  els.interactionSummary.replaceChildren(...state.interactionTypes.filter((type) => counts.has(type.id)).map((type) => {
+    const chip = document.createElement('span');
+    chip.innerHTML = `<i style="background:${type.color}"></i>${escapeHTML(type.label)} ${counts.get(type.id)}`;
+    return chip;
+  }));
+  const model = state.structure ? activeModel() : null;
+  const typeInfo = new Map(state.interactionTypes.map((type) => [type.id, type]));
+  const fragment = document.createDocumentFragment();
+  for (const item of list.slice(0, 300)) {
     const row = document.createElement('div');
-    row.innerHTML = `<strong>${measurement.distance.toFixed(2)} Å</strong><span>${escapeHTML(shortAtomLabel(a))} ↔ ${escapeHTML(shortAtomLabel(b))}</span>`;
+    row.className = 'list-row';
+    const a = model?.residueMap.get(item.residueA);
+    const b = model?.residueMap.get(item.residueB);
+    const type = typeInfo.get(item.type);
+    row.innerHTML = `<i style="background:${type?.color ?? '#999'}"></i><span title="${escapeHTML(type?.label ?? item.type)}">${escapeHTML(`${a ? shortResidueLabel(a) : '?'} ↔ ${b ? shortResidueLabel(b) : '?'}`)}</span><strong>${Number.isFinite(item.distance) ? `${item.distance.toFixed(2)} Å` : ''}</strong><span></span>`;
+    row.addEventListener('click', () => {
+      const keys = [item.residueA, item.residueB].filter(Boolean);
+      selectResidues(keys, { frame: true });
+    });
     fragment.appendChild(row);
   }
-  els.measurementList.replaceChildren(fragment);
+  els.interactionList.replaceChildren(fragment);
 }
+
+async function runInterfaceAnalysis() {
+  if (!state.structure) return;
+  const chainA = els.interfaceA.value;
+  const chainB = els.interfaceB.value;
+  if (!chainA || !chainB || chainA === chainB) {
+    showToast('Choose two different chains for interface analysis.', true);
+    return;
+  }
+  const module = await loadModule('interactions', './lib/interactions.js');
+  if (!module) return;
+  const model = activeModel();
+  const list = module.findInterfaceInteractions
+    ? module.findInterfaceInteractions(model, chainA, chainB, { includeWater: state.display.showWater })
+    : module.findInteractions(model, model.atoms.filter((atom) => atom.chain === chainA).map((atom) => atom.id), {
+      groupB: model.atoms.filter((atom) => atom.chain === chainB).map((atom) => atom.id),
+    });
+  state.interactions = { ...state.interactions, list, title: `${chainA}:${chainB} interface` };
+  const residues = new Set();
+  for (const item of list) {
+    if (item.residueA) residues.add(item.residueA);
+    if (item.residueB) residues.add(item.residueB);
+  }
+  state.focus = { residues: new Set(residues), neighborhood: new Set(residues) };
+  const counts = new Map();
+  for (const item of list) counts.set(item.type, (counts.get(item.type) ?? 0) + 1);
+  const typeInfo = new Map(state.interactionTypes.map((type) => [type.id, type]));
+  els.interfaceResult.hidden = false;
+  els.interfaceResult.innerHTML = `<strong>${list.length}</strong> contacts between chains ${escapeHTML(chainA)} and ${escapeHTML(chainB)} · ${residues.size} interface residues<ul>${[...counts].map(([type, count]) => `<li>${escapeHTML(typeInfo.get(type)?.label ?? type)}: ${count}</li>`).join('')}</ul>${state.sasa ? '' : '<span class="hint">Compute SASA to add buried surface area.</span>'}`;
+  if (state.sasa) appendBuriedArea(chainA, chainB);
+  renderInteractions();
+  markSceneDirty();
+  const atoms = [...residues].flatMap((key) => model.residueMap.get(key)?.atoms ?? []);
+  if (atoms.length) fitView(true, false, atoms);
+}
+
+function exportInteractionsCSV() {
+  if (!state.interactions.list.length || !state.structure) {
+    showToast('No interactions to export yet.', true);
+    return;
+  }
+  const model = activeModel();
+  const rows = [['type', 'residue_a', 'atom_a', 'residue_b', 'atom_b', 'distance_angstrom']];
+  for (const item of state.interactions.list) {
+    const a = model.residueMap.get(item.residueA);
+    const b = model.residueMap.get(item.residueB);
+    rows.push([item.type, a ? shortResidueLabel(a) : '', model.atoms[item.atomA]?.name ?? 'centroid', b ? shortResidueLabel(b) : '', model.atoms[item.atomB]?.name ?? 'centroid', Number.isFinite(item.distance) ? item.distance.toFixed(2) : '']);
+  }
+  downloadText(`${fileStem()}-interactions.csv`, rows.map((row) => row.join(',')).join('\n'), 'text/csv');
+}
+
+/* ---------- Surfaces and SASA ---------- */
+
+function surfaceWorker() {
+  if (!state.workers) {
+    const worker = new Worker(new URL('./lib/surface-worker.js', import.meta.url), { type: 'module' });
+    const pending = new Map();
+    let counter = 0;
+    worker.addEventListener('message', (event) => {
+      const { id, result, error } = event.data;
+      const entry = pending.get(id);
+      if (!entry) return;
+      pending.delete(id);
+      if (error) entry.reject(new Error(error));
+      else entry.resolve(result);
+    });
+    worker.addEventListener('error', (event) => {
+      for (const entry of pending.values()) entry.reject(new Error(event.message || 'Surface worker failed'));
+      pending.clear();
+    });
+    state.workers = {
+      run(type, payload, transfer = []) {
+        counter += 1;
+        const id = counter;
+        return new Promise((resolve, reject) => {
+          pending.set(id, { resolve, reject });
+          worker.postMessage({ id, type, payload }, transfer);
+        });
+      },
+    };
+  }
+  return state.workers;
+}
+
+function surfaceAtoms(model) {
+  return model.atoms.filter((atom) => atom.kind !== 'water' && !atom.isHydrogen && (!state.display.visibleChains || state.display.visibleChains.has(atom.chain)));
+}
+
+async function refreshSurface() {
+  if (!state.structure) return;
+  const kind = state.surface.kind;
+  if (kind === 'off') {
+    state.surface.data = null;
+    state.surface.key = '';
+    state.renderer.setMesh('surface', null);
+    els.surfaceStatus.textContent = '';
+    requestRender();
+    return;
+  }
+  if (state.renderer.kind !== 'webgpu') {
+    els.surfaceStatus.textContent = 'Surfaces need WebGPU.';
+    return;
+  }
+  const model = activeModel();
+  const atoms = surfaceAtoms(model);
+  const key = [state.structure.label, state.structure.activeAssemblyId, model.number, kind, state.display.visibleChains ? [...state.display.visibleChains].sort().join(',') : '*'].join('|');
+  if (key === state.surface.key && state.surface.data) return;
+  state.surface.key = key;
+  const ticket = (state.surface.pending += 1);
+  const positions = new Float32Array(atoms.length * 3);
+  const radii = new Float32Array(atoms.length);
+  atoms.forEach((atom, index) => {
+    positions[index * 3] = atom.x;
+    positions[index * 3 + 1] = atom.y;
+    positions[index * 3 + 2] = atom.z;
+    radii[index] = elementInfo(atom.element).vdw;
+  });
+  els.surfaceStatus.textContent = `Computing ${els.surfaceKind.selectedOptions[0]?.textContent ?? kind} surface for ${formatNumber(atoms.length)} atoms…`;
+  const started = performance.now();
+  try {
+    const result = await surfaceWorker().run('surface', { positions, radii, options: { kind } }, [positions.buffer, radii.buffer]);
+    if (ticket !== state.surface.pending) return;
+    const atomIds = new Uint32Array(result.atoms.length);
+    for (let index = 0; index < result.atoms.length; index += 1) atomIds[index] = atoms[result.atoms[index]]?.id ?? 0;
+    state.surface.data = { positions: result.positions, normals: result.normals, indices: result.indices, atoms: atomIds, potential: null };
+    const triangles = result.indices.length / 3;
+    els.surfaceStatus.textContent = `${formatNumber(triangles)} triangles · ${((performance.now() - started) / 1000).toFixed(1)} s${result.spacing ? ` · grid ${result.spacing.toFixed(2)} Å` : ''}`;
+    await applySurfaceColors(true);
+  } catch (error) {
+    console.error(error);
+    if (ticket === state.surface.pending) els.surfaceStatus.textContent = `Surface failed: ${error.message}`;
+  }
+}
+
+async function applySurfaceColors(force = true) {
+  const data = state.surface.data;
+  if (!data || !state.structure) return;
+  const model = activeModel();
+  const mode = state.surface.color;
+  const vertexCount = data.positions.length / 3;
+  let vertexColors = null;
+  if (mode === 'electrostatic') {
+    if (!data.potential) {
+      const module = await loadModule('electrostatics', './lib/electrostatics.js');
+      if (!module) return;
+      const charges = module.assignCharges(model.atoms, model.residues);
+      const charged = [];
+      for (let index = 0; index < charges.length; index += 1) if (charges[index] !== 0) charged.push(index);
+      const chargePositions = new Float32Array(charged.length * 3);
+      const chargeValues = new Float32Array(charged.length);
+      charged.forEach((atomIndex, index) => {
+        const atom = model.atoms[atomIndex];
+        chargePositions[index * 3] = atom.x;
+        chargePositions[index * 3 + 1] = atom.y;
+        chargePositions[index * 3 + 2] = atom.z;
+        chargeValues[index] = charges[atomIndex];
+      });
+      els.surfaceStatus.textContent = 'Computing Coulombic potential…';
+      const points = data.positions.slice();
+      const normals = data.normals.slice();
+      data.potential = await surfaceWorker().run('potential', {
+        points,
+        normals,
+        chargePositions,
+        charges: chargeValues,
+        options: { offset: 1.4 },
+      }, [points.buffer, normals.buffer, chargePositions.buffer, chargeValues.buffer]);
+      data.range = module.COULOMBIC_RANGE ?? [-10, 10];
+      els.surfaceStatus.textContent = `${formatNumber(data.indices.length / 3)} triangles · Coulombic potential from ${formatNumber(charged.length)} charged atoms`;
+      if (data !== state.surface.data) return;
+    }
+    vertexColors = new Uint32Array(vertexCount);
+    const [low, high] = data.range;
+    for (let index = 0; index < vertexCount; index += 1) {
+      const t = (data.potential[index] - low) / (high - low);
+      vertexColors[index] = packColor(sampleColormap('electrostatic', t));
+    }
+  } else if (mode === 'hydrophobicity') {
+    vertexColors = new Uint32Array(vertexCount);
+    for (let index = 0; index < vertexCount; index += 1) {
+      const atom = model.atoms[data.atoms[index]];
+      const residue = residueOf(atom);
+      const value = KYTE_DOOLITTLE[residue?.parent];
+      vertexColors[index] = packColor(value === undefined ? [0.85, 0.85, 0.85] : sampleColormap('hydrophobicity', (value + 4.5) / 9));
+    }
+  } else if (mode === 'uniform') {
+    vertexColors = new Uint32Array(vertexCount).fill(packColor([0.93, 0.93, 0.93]));
+  }
+  if (!force && !vertexColors && data.uploadedMode === 'scheme') return;
+  const buffer = new ArrayBuffer(vertexCount * MESH_VERTEX_STRIDE);
+  const floats = new Float32Array(buffer);
+  const uints = new Uint32Array(buffer);
+  for (let index = 0; index < vertexCount; index += 1) {
+    const offset = index * 8;
+    floats[offset] = data.positions[index * 3];
+    floats[offset + 1] = data.positions[index * 3 + 1];
+    floats[offset + 2] = data.positions[index * 3 + 2];
+    floats[offset + 3] = data.normals[index * 3];
+    floats[offset + 4] = data.normals[index * 3 + 1];
+    floats[offset + 5] = data.normals[index * 3 + 2];
+    uints[offset + 6] = data.atoms[index];
+    uints[offset + 7] = vertexColors ? vertexColors[index] : 0;
+  }
+  data.uploadedMode = mode;
+  state.renderer.setMesh('surface', { vertices: buffer, indices: data.indices, opacity: state.surface.opacity });
+  if (mode === 'electrostatic') {
+    state.surfaceLegend = { type: 'gradient', title: 'Coulombic potential (kcal/mol·e)', colormap: 'electrostatic', minLabel: String(data.range[0]), maxLabel: `+${data.range[1]}`, note: 'Formal charges, ε = 4r, 1.4 Å offset' };
+  } else if (mode === 'hydrophobicity') {
+    state.surfaceLegend = { type: 'gradient', title: 'Surface hydropathy', colormap: 'hydrophobicity', minLabel: 'Hydrophilic', maxLabel: 'Hydrophobic' };
+  } else {
+    state.surfaceLegend = null;
+  }
+  renderLegend();
+  requestRender();
+}
+
+async function runSASA() {
+  if (!state.structure) return;
+  if (typeof Worker === 'undefined') return;
+  const model = activeModel();
+  const atoms = model.atoms.filter((atom) => atom.kind !== 'water' && !atom.isHydrogen);
+  els.sasaResult.hidden = false;
+  els.sasaResult.textContent = `Computing SASA for ${formatNumber(atoms.length)} atoms…`;
+  const chainIndex = new Map(state.structure.chains.map((chain, index) => [chain.id, index]));
+  const positions = new Float32Array(atoms.length * 3);
+  const radii = new Float32Array(atoms.length);
+  const groups = new Int32Array(atoms.length);
+  atoms.forEach((atom, index) => {
+    positions[index * 3] = atom.x;
+    positions[index * 3 + 1] = atom.y;
+    positions[index * 3 + 2] = atom.z;
+    radii[index] = elementInfo(atom.element).vdw;
+    groups[index] = chainIndex.get(atom.chain) ?? -1;
+  });
+  try {
+    const started = performance.now();
+    const result = await surfaceWorker().run('sasa-groups', { positions, radii, groups, options: { probe: 1.4, points: 96 } }, [positions.buffer, radii.buffer, groups.buffer]);
+    if (model !== activeModel()) return;
+    const atomSASA = new Float32Array(model.atoms.length);
+    const isolatedSASA = new Float32Array(model.atoms.length);
+    atoms.forEach((atom, index) => {
+      atomSASA[atom.id] = result.complex[index];
+      isolatedSASA[atom.id] = result.isolated[index];
+    });
+    const relative = new Map();
+    const absolute = new Map();
+    for (const residue of model.residues) {
+      if (residue.kind === 'water') continue;
+      const total = residue.atoms.reduce((sum, atom) => sum + atomSASA[atom.id], 0);
+      absolute.set(residue.key, total);
+      const max = MAX_ASA[residue.parent];
+      if (max) relative.set(residue.key, total / max);
+    }
+    const chains = [];
+    for (const chain of state.structure.chains.filter((item) => item.polymerKind)) {
+      const chainAtoms = atoms.filter((atom) => atom.chain === chain.id);
+      const inComplex = chainAtoms.reduce((sum, atom) => sum + atomSASA[atom.id], 0);
+      const alone = chainAtoms.reduce((sum, atom) => sum + isolatedSASA[atom.id], 0);
+      chains.push({ id: chain.id, inComplex, alone, buried: alone - inComplex });
+    }
+    state.sasa = { atomSASA, relative, absolute, chains, atoms };
+    els.sasaColor.disabled = false;
+    const total = atoms.reduce((sum, atom) => sum + atomSASA[atom.id], 0);
+    els.sasaResult.innerHTML = `Total SASA <strong>${formatNumber(Math.round(total))} Å²</strong> · ${((performance.now() - started) / 1000).toFixed(1)} s
+      <table><thead><tr><th>Chain</th><th>SASA</th><th>Alone</th><th>Buried</th></tr></thead><tbody>${chains.map((chain) => `<tr><td>${escapeHTML(chain.id)}</td><td>${formatNumber(Math.round(chain.inComplex))}</td><td>${formatNumber(Math.round(chain.alone))}</td><td>${formatNumber(Math.round(chain.buried))}</td></tr>`).join('')}</tbody></table>
+      <span class="hint">Buried = SASA of the isolated chain minus SASA in the complex (Å²).</span>`;
+    renderSelectionPanel();
+    renderProfile();
+    if (state.color.scheme === 'exposure') markColorsDirty();
+  } catch (error) {
+    console.error(error);
+    els.sasaResult.textContent = `SASA failed: ${error.message}`;
+  }
+}
+
+async function appendBuriedArea(chainA, chainB) {
+  const model = activeModel();
+  const atoms = model.atoms.filter((atom) => (atom.chain === chainA || atom.chain === chainB) && atom.kind !== 'water' && !atom.isHydrogen);
+  const positions = new Float32Array(atoms.length * 3);
+  const radii = new Float32Array(atoms.length);
+  atoms.forEach((atom, index) => {
+    positions.set([atom.x, atom.y, atom.z], index * 3);
+    radii[index] = elementInfo(atom.element).vdw;
+  });
+  const result = await surfaceWorker().run('sasa', { positions, radii, options: { probe: 1.4, points: 96 } }, [positions.buffer, radii.buffer]);
+  const pair = (result.sasa ?? result).reduce((sum, value) => sum + value, 0);
+  const alone = (id) => state.sasa.chains.find((chain) => chain.id === id)?.alone ?? 0;
+  const buried = alone(chainA) + alone(chainB) - pair;
+  els.interfaceResult.insertAdjacentHTML('beforeend', `<div>Buried surface area <strong>${formatNumber(Math.round(buried))} Å²</strong> (≈ ${formatNumber(Math.round(buried / 2))} Å² per side)</div>`);
+}
+
+/* ---------- Plots ---------- */
+
+function renderRamachandran() {
+  if (!state.structure) return;
+  const model = activeModel();
+  const chain = els.ramaChain.value || '*';
+  const residues = model.residues.filter((residue) => residue.kind === 'protein' && (chain === '*' || residue.chain === chain));
+  const result = drawRamachandran(els.ramaCanvas, residues, { selected: state.selection });
+  ramaPoints = result;
+  const plotted = result.points.length;
+  const ssCounts = { helix: 0, sheet: 0 };
+  for (const item of result.points) if (item.residue.ss in ssCounts) ssCounts[item.residue.ss] += 1;
+  els.ramaSummary.textContent = plotted
+    ? `${plotted} residues · colored by secondary structure; triangles Gly, squares Pro. Shaded regions are approximate favored areas. Click a point to select it.`
+    : 'No residues with complete backbone dihedrals.';
+}
+
+function onRamaClick(event) {
+  if (!ramaPoints) return;
+  const rect = els.ramaCanvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * (els.ramaCanvas.width / rect.width);
+  const y = (event.clientY - rect.top) * (els.ramaCanvas.height / rect.height);
+  let best = null;
+  for (const item of ramaPoints.points) {
+    const d = Math.hypot(item.x - x, item.y - y);
+    if (d <= ramaPoints.radius * 2 && (!best || d < best.d)) best = { d, item };
+  }
+  if (best) selectResidues([best.item.residue.key], { additive: event.shiftKey, frame: true });
+}
+
+function profileSeries() {
+  const model = activeModel();
+  const chain = els.profileChain.value;
+  const metric = els.profileMetric.value;
+  const residues = model.residues.filter((residue) => residue.chain === chain && (residue.kind === 'protein' || residue.kind === 'nucleic'));
+  if (metric === 'bfactor') {
+    const predicted = state.structure.meta.isPredicted;
+    return {
+      label: predicted ? 'pLDDT' : 'Mean B-factor (Å²)',
+      series: residues.map((residue) => ({ residue, value: predicted && Number.isFinite(residue.confidence) ? residue.confidence : residue.bFactor })),
+      options: predicted ? { min: 0, max: 100, bands: PLDDT_BANDS.map((band, index) => ({ from: Math.max(0, band.min), to: index === 0 ? 100 : PLDDT_BANDS[index - 1].min, color: `${colorToHex(band.color)}33` })) } : {},
+    };
+  }
+  if (metric === 'sasa') {
+    if (!state.sasa) return { label: 'Relative SASA', series: [], options: { emptyText: 'Compute SASA first' } };
+    return { label: 'Relative SASA', series: residues.map((residue) => ({ residue, value: state.sasa.relative.get(residue.key) ?? NaN })), options: { min: 0 } };
+  }
+  if (metric === 'hydrophobicity') {
+    const window = 9;
+    const values = residues.map((residue) => KYTE_DOOLITTLE[residue.parent]);
+    return {
+      label: 'Kyte-Doolittle (window 9)',
+      series: residues.map((residue, index) => {
+        const slice = values.slice(Math.max(0, index - 4), index + 5).filter(Number.isFinite);
+        return { residue, value: slice.length >= Math.min(window, residues.length) / 2 ? slice.reduce((a, b) => a + b, 0) / slice.length : NaN };
+      }),
+      options: { min: -4.5, max: 4.5, bands: [{ from: 0, to: 4.5, color: 'rgba(204,140,13,0.12)' }] },
+    };
+  }
+  const data = state.proteomics.data;
+  if (!data) return { label: 'Custom data', series: [], options: { emptyText: 'Load residue data in the Proteomics tab' } };
+  return { label: state.proteomics.dataLabel || 'Custom data', series: residues.map((residue) => ({ residue, value: data.get(residue.key) ?? NaN })), options: {} };
+}
+
+function renderProfile() {
+  if (!state.structure) return;
+  const { label, series, options } = profileSeries();
+  profilePoints = drawProfile(els.profileCanvas, series, { ...options, label, selected: state.selection });
+}
+
+function onProfileClick(event) {
+  if (!profilePoints?.points.length) return;
+  const rect = els.profileCanvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * (els.profileCanvas.width / rect.width);
+  let best = null;
+  for (const item of profilePoints.points) {
+    const d = Math.abs(item.x - x);
+    if (!best || d < best.d) best = { d, item };
+  }
+  if (best?.item.residue) selectResidues([best.item.residue.key], { additive: event.shiftKey, frame: true });
+}
+
+/* ---------- PAE ---------- */
+
+async function loadPAEFromURL(url) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return;
+    loadPAEFromJSON(await response.json(), 'AlphaFold DB');
+  } catch (error) {
+    console.warn('PAE fetch failed', error);
+  }
+}
+
+function loadPAEFromJSON(json, source) {
+  const document0 = Array.isArray(json) ? json[0] : json;
+  const matrix = document0?.predicted_aligned_error ?? document0?.pae;
+  if (!Array.isArray(matrix) || !Array.isArray(matrix[0])) {
+    showToast(`${source}: no PAE matrix found (expected predicted_aligned_error or pae).`, true);
+    return;
+  }
+  const size = matrix.length;
+  const flat = new Float32Array(size * size);
+  let max = 0;
+  for (let row = 0; row < size; row += 1) {
+    for (let column = 0; column < size; column += 1) {
+      const value = Number(matrix[row][column]) || 0;
+      flat[row * size + column] = value;
+      if (value > max) max = value;
+    }
+  }
+  const residues = paeResidues(size, document0);
+  state.pae = {
+    size,
+    matrix: flat,
+    max: Number(document0.max_predicted_aligned_error ?? document0.max_pae) || Math.max(31.75, max),
+    residues,
+    chainBoundaries: chainBoundaries(residues),
+    source,
+  };
+  if (Array.isArray(document0.plddt) && state.structure && !state.structure.meta.isPredicted) {
+    state.structure.meta.isPredicted = true;
+  }
+  renderPAE();
+  showToast(`Loaded PAE matrix (${size} × ${size}) from ${source}.`);
+}
+
+function paeResidues(size, document0) {
+  if (!state.structure) return [];
+  const model = activeModel();
+  const chains = document0.token_chain_ids;
+  const numbers = document0.token_res_ids;
+  if (Array.isArray(chains) && Array.isArray(numbers) && chains.length === size) {
+    const byKey = new Map(model.residues.map((residue) => [`${residue.chain}:${residue.resSeq}`, residue]));
+    return chains.map((chain, index) => byKey.get(`${chain}:${numbers[index]}`) ?? null);
+  }
+  const polymer = model.residues.filter((residue) => residue.kind === 'protein' || residue.kind === 'nucleic');
+  return Array.from({ length: size }, (_, index) => polymer[index] ?? null);
+}
+
+function chainBoundaries(residues) {
+  const boundaries = [];
+  for (let index = 1; index < residues.length; index += 1) {
+    if (residues[index]?.chain !== residues[index - 1]?.chain) boundaries.push(index);
+  }
+  return boundaries;
+}
+
+function renderPAE() {
+  const pae = state.pae;
+  els.paeCanvas.hidden = !pae;
+  els.paeHint.hidden = Boolean(pae);
+  if (!pae) {
+    els.paeSummary.textContent = '';
+    paeLayout = null;
+    return;
+  }
+  paeLayout = drawPAE(els.paeCanvas, pae, { selection: state.paeSelection });
+  let sum = 0;
+  for (const value of pae.matrix) sum += value;
+  els.paeSummary.textContent = `${pae.size} residues · mean PAE ${(sum / pae.matrix.length).toFixed(1)} Å · max ${pae.max.toFixed(1)} Å · ${pae.source}. Dark green = confident relative position.`;
+}
+
+function bindPAEEvents() {
+  let start = null;
+  const indexAt = (event) => {
+    if (!paeLayout) return null;
+    const rect = els.paeCanvas.getBoundingClientRect();
+    return paeLayout.toIndex((event.clientX - rect.left) * (els.paeCanvas.width / rect.width), (event.clientY - rect.top) * (els.paeCanvas.height / rect.height));
+  };
+  els.paeCanvas.addEventListener('pointerdown', (event) => {
+    start = indexAt(event);
+    if (start) els.paeCanvas.setPointerCapture(event.pointerId);
+  });
+  els.paeCanvas.addEventListener('pointermove', (event) => {
+    const current = indexAt(event);
+    if (current && state.pae) {
+      const value = state.pae.matrix[current.row * state.pae.size + current.column];
+      const a = state.pae.residues[current.row];
+      const b = state.pae.residues[current.column];
+      els.paeCanvas.title = `aligned ${a ? shortResidueLabel(a) : current.row + 1} · scored ${b ? shortResidueLabel(b) : current.column + 1} · PAE ${value.toFixed(1)} Å`;
+    }
+    if (!start || !current) return;
+    state.paeSelection = { x0: start.column, x1: current.column, y0: start.row, y1: current.row };
+    renderPAE();
+  });
+  els.paeCanvas.addEventListener('pointerup', () => {
+    if (!start || !state.paeSelection || !state.pae) {
+      start = null;
+      return;
+    }
+    const { x0, x1, y0, y1 } = state.paeSelection;
+    const keys = new Set();
+    for (const [a, b] of [[Math.min(x0, x1), Math.max(x0, x1)], [Math.min(y0, y1), Math.max(y0, y1)]]) {
+      for (let index = a; index <= b; index += 1) {
+        const residue = state.pae.residues[index];
+        if (residue) keys.add(residue.key);
+      }
+    }
+    start = null;
+    selectResidues([...keys], {});
+  });
+}
+
+/* ---------- Proteomics ---------- */
+
+async function proteomicsModule() {
+  const module = await loadModule('proteomics', './lib/proteomics.js');
+  if (module && !els.xlCrosslinker.options.length) {
+    for (const preset of module.CROSSLINKERS ?? []) els.xlCrosslinker.appendChild(new Option(`${preset.label}${preset.maxCaCa ? ` (≤ ${preset.maxCaCa} Å)` : ''}`, preset.id));
+    for (const enzyme of module.ENZYMES ?? []) els.digestEnzyme.appendChild(new Option(enzyme.label, enzyme.id));
+  }
+  return module;
+}
+
+async function renderProtParam() {
+  if (!state.structure) return;
+  const module = await proteomicsModule();
+  if (!module?.sequenceProperties) {
+    els.protparam.textContent = 'Sequence tools are unavailable.';
+    return;
+  }
+  const info = state.structure.sequences.get(els.protparamChain.value) ?? [...state.structure.sequences.values()][0];
+  if (!info || info.kind !== 'protein') {
+    els.protparam.innerHTML = '<div class="wide"><dt>Note</dt><dd>Select a protein chain.</dd></div>';
+    return;
+  }
+  const sequence = info.sequence.replace(/[^A-Z]/g, '');
+  const props = module.sequenceProperties(sequence);
+  const rows = [
+    ['Length', `${props.length} aa (${info.observed} modeled)`],
+    ['Average mass', `${formatNumber(Math.round(props.averageMass))} Da`],
+    ['Monoisotopic', `${props.monoisotopicMass.toFixed(2)} Da`],
+    ['Theoretical pI', props.isoelectricPoint.toFixed(2)],
+    ['Net charge pH 7', formatSigned(props.netChargeAtPH7)],
+    ['ε280 (cystines)', `${formatNumber(props.extinction.cystines)} M⁻¹cm⁻¹`],
+    ['ε280 (reduced)', `${formatNumber(props.extinction.reduced)} M⁻¹cm⁻¹`],
+    ['Abs 0.1% (1 g/L)', props.absorbance01.cystines.toFixed(3)],
+    ['GRAVY', props.gravy.toFixed(3)],
+    ['Aliphatic index', props.aliphaticIndex.toFixed(1)],
+    ['Instability index', `${props.instabilityIndex.toFixed(1)} (${props.stable ? 'stable' : 'unstable'})`],
+    ['Aromaticity', props.aromaticity.toFixed(3)],
+  ];
+  els.protparam.innerHTML = rows.map(([label, value]) => `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value)}</dd></div>`).join('') +
+    `<div class="wide"><dt>Sequence source</dt><dd>${escapeHTML(info.source === 'model' ? 'Modeled residues only' : `${info.source} (full construct)`)}</dd></div>` +
+    (props.warnings?.length ? `<div class="wide"><dt>Notes</dt><dd>${escapeHTML(props.warnings.join(' '))}</dd></div>` : '');
+}
+
+const UNIPROT_FEATURE_GROUPS = [
+  { title: 'Domains & regions', types: ['Domain', 'Region', 'Motif', 'Repeat', 'Zinc finger', 'DNA binding', 'Coiled coil', 'Compositional bias'], range: true },
+  { title: 'Functional sites', types: ['Active site', 'Binding site', 'Site'], sites: true },
+  { title: 'Post-translational modifications', types: ['Modified residue', 'Glycosylation', 'Lipidation', 'Cross-link', 'Disulfide bond'], sites: true },
+  { title: 'Disease & natural variants', types: ['Natural variant'], sites: true },
+  { title: 'Mutagenesis', types: ['Mutagenesis'], sites: true },
+];
+
+function uniprotReference(info) {
+  const segment = info?.uniprot?.find((item) => item.accession);
+  if (segment) return { accession: segment.accession, mapped: true };
+  const match = String(state.structure.meta.code || state.structure.label).match(/AF-([A-Z0-9]+(?:-\d+)?)-F1/i);
+  return match ? { accession: match[1].toUpperCase(), mapped: false } : null;
+}
+
+function residuesForUniprotRange(info, start, end, reference) {
+  const residues = [];
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return residues;
+  for (let position = start; position <= end; position += 1) {
+    const residue = reference.mapped
+      ? residueForUniprotPosition(info, position, reference.accession)
+      : info.items.find((item) => item.residue && item.residue.resSeq === position && !item.residue.iCode)?.residue;
+    if (residue) residues.push(residue);
+  }
+  return residues;
+}
+
+async function loadUniProtFeatures() {
+  if (!state.structure) return;
+  const info = state.structure.sequences.get(els.uniprotChain.value);
+  const reference = uniprotReference(info);
+  els.uniprotResult.hidden = false;
+  if (!reference) {
+    els.uniprotResult.innerHTML = '<span class="warn">This chain has no UniProt cross-reference in the file.</span>';
+    return;
+  }
+  els.uniprotResult.textContent = `Loading UniProt ${reference.accession}…`;
+  try {
+    const response = await fetch(`/api/fetch/uniprot/${encodeURIComponent(reference.accession)}`);
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${response.status}`);
+    }
+    const entry = await response.json();
+    renderUniProtFeatures(entry, info, reference);
+  } catch (error) {
+    els.uniprotResult.innerHTML = `<span class="warn">Could not load UniProt ${escapeHTML(reference.accession)}: ${escapeHTML(error.message)}</span>`;
+  }
+}
+
+function renderUniProtFeatures(entry, info, reference) {
+  const features = (entry.features ?? []).map((feature) => {
+    const start = Number(feature.location?.start?.value);
+    const end = Number(feature.location?.end?.value);
+    const disulfide = feature.type === 'Disulfide bond';
+    const residues = disulfide
+      ? [...residuesForUniprotRange(info, start, start, reference), ...residuesForUniprotRange(info, end, end, reference)]
+      : residuesForUniprotRange(info, start, end, reference);
+    return { ...feature, start, end, residues, label: uniprotFeatureLabel(feature, start, end, info) };
+  });
+  const name = entry.proteinDescription?.recommendedName?.fullName?.value ?? entry.uniProtkbId ?? reference.accession;
+  const gene = entry.genes?.[0]?.geneName?.value;
+  const fragment = document.createElement('div');
+  fragment.innerHTML = `<div><strong>${escapeHTML(name)}</strong>${gene ? ` (${escapeHTML(gene)})` : ''} · ${escapeHTML(entry.primaryAccession ?? reference.accession)} · ${entry.sequence?.length ?? '?'} aa${reference.mapped ? '' : ' · numbering assumed identical to UniProt'}</div>
+    <input type="search" class="feature-filter" placeholder="Filter, e.g. R175, kinase, phospho, LFS" aria-label="Filter UniProt features" />`;
+  const filterInput = fragment.querySelector('input');
+  filterInput.addEventListener('input', () => {
+    const needle = filterInput.value.trim().toLowerCase();
+    state.uniprotFilter = needle;
+    renderUniProtFeatureGroups(groupsContainer, features, needle);
+  });
+  const groupsContainer = document.createElement('div');
+  fragment.appendChild(groupsContainer);
+  renderUniProtFeatureGroups(groupsContainer, features, '');
+  els.uniprotResult.replaceChildren(fragment);
+}
+
+function renderUniProtFeatureGroups(container, features, needle) {
+  const fragment = document.createDocumentFragment();
+  for (const group of UNIPROT_FEATURE_GROUPS) {
+    const items = features.filter((feature) => group.types.includes(feature.type));
+    if (!items.length) continue;
+    const inStructure = items.filter((item) => item.residues.length && (!needle || `${item.label} ${item.description ?? ''} ${item.type}`.toLowerCase().includes(needle)));
+    if (needle && !inStructure.length) continue;
+    const section = document.createElement('div');
+    section.className = 'feature-group';
+    section.innerHTML = `<h4>${escapeHTML(group.title)} <small>${inStructure.length}/${items.length} in structure</small></h4>`;
+    const list = document.createElement('div');
+    list.className = 'feature-list';
+    for (const item of inStructure.slice(0, 60)) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'feature-row';
+      row.title = item.description || item.type;
+      row.innerHTML = `<span>${escapeHTML(item.label)}</span><em>${escapeHTML(item.type)}</em>`;
+      row.addEventListener('click', () => selectResidues(item.residues.map((residue) => residue.key), { frame: true }));
+      list.appendChild(row);
+    }
+    if (inStructure.length > 60) list.insertAdjacentHTML('beforeend', `<p class="hint">…and ${inStructure.length - 60} more.</p>`);
+    section.appendChild(list);
+    if (group.sites && inStructure.length) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = `Mark ${Math.min(inStructure.length, 200)} as sites`;
+      button.addEventListener('click', () => {
+        const sites = inStructure.slice(0, 200).flatMap((item) => item.residues.slice(0, 2).map((residue) => ({ residue, label: item.label })));
+        setSites(sites);
+        focusResidues(sites.map((site) => site.residue.key));
+      });
+      section.appendChild(button);
+    }
+    fragment.appendChild(section);
+  }
+  container.replaceChildren(fragment);
+}
+
+function uniprotFeatureLabel(feature, start, end, info) {
+  const residueCode = (position) => info.items.find((item) => item.residue?.resSeq === position)?.code ?? '';
+  if (feature.type === 'Natural variant' || feature.type === 'Mutagenesis') {
+    const original = feature.alternativeSequence?.originalSequence ?? residueCode(start);
+    const alternative = feature.alternativeSequence?.alternativeSequences?.join('/') ?? '?';
+    const disease = (feature.description || '').match(/in ([A-Z][A-Za-z0-9-]+)/)?.[1];
+    return `${original}${start}${alternative}${disease ? ` (${disease})` : ''}`;
+  }
+  if (start === end) return `${feature.description || feature.type} · ${start}`;
+  return `${feature.description || feature.type} · ${start}–${end}`;
+}
+
+function polymerSequenceChains() {
+  return [...state.structure.sequences.values()].filter((info) => info.kind === 'protein');
+}
+
+async function mapPeptidesFromInput() {
+  const module = await proteomicsModule();
+  if (!module || !state.structure) return;
+  const peptides = module.parsePeptides(els.peptideInput.value);
+  if (!peptides.length) {
+    showToast('Paste one or more peptide sequences first.', true);
+    return;
+  }
+  applyPeptides(module, peptides, 'peptides');
+}
+
+async function runDigest() {
+  const module = await proteomicsModule();
+  if (!module?.digest || !state.structure) return;
+  const info = state.structure.sequences.get(els.sequenceChain.value) ?? polymerSequenceChains()[0];
+  if (!info) return;
+  const peptides = module.digest(info.sequence, els.digestEnzyme.value || 'trypsin', { missedCleavages: Number(els.digestMissed.value) || 0, minLength: 6, maxLength: 40 });
+  els.peptideInput.value = peptides.map((peptide) => peptide.sequence).join('\n');
+  applyPeptides(module, module.parsePeptides(els.peptideInput.value), `in-silico ${els.digestEnzyme.selectedOptions[0]?.textContent ?? 'digest'} peptides (6–40 aa)`);
+}
+
+function applyPeptides(module, peptides, label) {
+  const chains = polymerSequenceChains().map((info) => ({ id: info.chain, sequence: info.sequence }));
+  const result = module.mapPeptides(peptides, chains, { ilEquivalent: els.peptideIL.checked });
+  const coverage = new Map();
+  const values = new Map();
+  const summaries = [];
+  for (const chainResult of result.chains) {
+    const info = state.structure.sequences.get(chainResult.id);
+    let modeled = 0;
+    let modeledCovered = 0;
+    info.items.filter((item) => !item.gap).forEach((item, index) => {
+      if (!item.residue) return;
+      modeled += 1;
+      const count = chainResult.coverage[index] ?? 0;
+      if (count > 0) {
+        modeledCovered += 1;
+        coverage.set(item.residue.key, count);
+        const value = chainResult.values?.[index];
+        if (Number.isFinite(value)) values.set(item.residue.key, value);
+      }
+    });
+    summaries.push({ id: chainResult.id, fraction: chainResult.coverageFraction, modeled, modeledCovered, matches: chainResult.matches.length, coverage: chainResult.coverage });
+  }
+  state.proteomics.coverage = coverage;
+  const hasValues = values.size > 0;
+  if (hasValues) {
+    state.proteomics.data = values;
+    state.proteomics.dataLabel = 'Peptide value';
+  }
+  els.peptideResult.hidden = false;
+  els.peptideResult.innerHTML = `<strong>${peptides.length}</strong> ${escapeHTML(label)} · ${peptides.length - result.unmatched.length} mapped · ${result.unmatched.length} unmatched${result.modifiedSites?.length ? ` · ${result.modifiedSites.length} modified sites` : ''}
+    ${summaries.filter((item) => item.matches).map((item) => `<div>Chain ${escapeHTML(item.id)}: <strong>${(item.fraction * 100).toFixed(1)}%</strong> sequence coverage · ${item.modeledCovered}/${item.modeled} modeled residues${coverageBar(item.coverage)}</div>`).join('')}
+    ${result.unmatched.length ? `<div class="warn">Unmatched: ${escapeHTML(result.unmatched.slice(0, 8).map((index) => peptides[index].sequence).join(', '))}${result.unmatched.length > 8 ? '…' : ''}</div>` : ''}
+    ${hasValues ? '<div class="hint">Peptide values were averaged per residue; choose "Custom residue data" coloring to view them.</div>' : ''}`;
+  if (result.modifiedSites?.length) {
+    const sites = [];
+    for (const site of result.modifiedSites) {
+      const info = state.structure.sequences.get(site.chainId);
+      const item = info?.items.filter((entry) => !entry.gap)[site.position];
+      if (item?.residue) sites.push({ residue: item.residue, label: `${site.residue}${item.residue.resSeq} ${site.label}` });
+    }
+    setSites(sites);
+  }
+  setColorScheme('coverage');
+  renderProfile();
+}
+
+function coverageBar(coverage) {
+  if (!coverage?.length) return '';
+  const segments = [];
+  let start = -1;
+  for (let index = 0; index <= coverage.length; index += 1) {
+    const covered = index < coverage.length && coverage[index] > 0;
+    if (covered && start < 0) start = index;
+    if (!covered && start >= 0) {
+      segments.push(`<i style="left:${(start / coverage.length) * 100}%;width:${((index - start) / coverage.length) * 100}%"></i>`);
+      start = -1;
+    }
+  }
+  return `<div class="coverage-bar">${segments.join('')}</div>`;
+}
+
+async function mapSitesFromInput() {
+  const module = await proteomicsModule();
+  if (!module || !state.structure) return;
+  const parsed = module.parseSites(els.siteInput.value);
+  if (!parsed.length) {
+    showToast('Enter sites such as R175H, pS15 or A:K120.', true);
+    return;
+  }
+  const numbering = els.siteNumbering.value;
+  const found = [];
+  const problems = [];
+  for (const site of parsed) {
+    const match = locateSite(site, numbering);
+    if (!match) {
+      problems.push(`${site.label}: position not in structure`);
+      continue;
+    }
+    if (site.wt && match.residue.code !== site.wt) problems.push(`${site.label}: structure has ${match.residue.resName}${match.residue.resSeq} (${match.numbering})`);
+    found.push({ residue: match.residue, label: site.label, value: site.value, mismatch: site.wt && match.residue.code !== site.wt });
+  }
+  setSites(found);
+  els.siteResult.hidden = false;
+  els.siteResult.innerHTML = `<strong>${found.length}</strong> of ${parsed.length} sites located${found.length ? ` (${found.filter((item) => !item.mismatch).length} with matching wild-type residue)` : ''}.
+    ${problems.length ? `<ul>${problems.slice(0, 12).map((text) => `<li class="warn">${escapeHTML(text)}</li>`).join('')}</ul>` : ''}
+    ${structureHasUniprot() ? '' : '<div class="hint">No UniProt mapping in this file, so positions use the structure numbering.</div>'}`;
+  if (found.length) {
+    focusResidues(found.map((item) => item.residue.key));
+  }
+}
+
+function structureHasUniprot() {
+  return state.structure.uniprotSegments.length > 0;
+}
+
+// Collects candidate residues in UniProt and/or author numbering and prefers the one whose
+// residue matches the stated wild type, so numbering offsets surface as flagged mismatches.
+function locateSite(site, numbering) {
+  const model = activeModel();
+  const chains = site.chain ? [site.chain] : [...state.structure.sequences.keys()];
+  const candidates = [];
+  for (const chainId of chains) {
+    const info = state.structure.sequences.get(chainId);
+    if (!info || info.kind !== 'protein') continue;
+    if (numbering !== 'author' && info.uniprot?.length) {
+      const residue = residueForUniprotPosition(info, site.position);
+      if (residue) candidates.push({ residue, numbering: 'UniProt numbering', rank: numbering === 'uniprot' ? 0 : 1 });
+    }
+    if (numbering !== 'uniprot') {
+      const residue = model.residues.find((item) => item.chain === chainId && item.kind === 'protein' && item.resSeq === site.position && !item.iCode);
+      if (residue) candidates.push({ residue, numbering: 'structure numbering', rank: numbering === 'author' ? 0 : 2 });
+    }
+  }
+  if (!candidates.length) return null;
+  const matching = site.wt ? candidates.filter((candidate) => candidate.residue.code === site.wt) : candidates;
+  const pool = matching.length ? matching : candidates;
+  return pool.sort((a, b) => a.rank - b.rank)[0];
+}
+
+function setSites(sites) {
+  state.proteomics.sites = sites;
+  const overrides = new Map();
+  for (const site of sites) overrides.set(site.residue.key, site.mismatch ? [1, 0.7, 0.2] : [1, 0.28, 0.72]);
+  state.proteomics.siteOverrides = overrides.size ? overrides : null;
+  markSceneDirty();
+}
+
+function siteResidueKeys() {
+  return new Set(state.proteomics.sites.map((site) => site.residue.key));
+}
+
+async function mapCrosslinksFromInput() {
+  const module = await proteomicsModule();
+  if (!module || !state.structure) return;
+  const parsed = module.parseCrosslinks(els.xlInput.value);
+  const links = parsed.links ?? parsed;
+  if (!links.length) {
+    showToast('Enter cross-links such as A:K123-B:K45.', true);
+    return;
+  }
+  const maxDistance = Number(els.xlMax.value) || 30;
+  const model = activeModel();
+  const chainIds = state.structure.chains.filter((chain) => chain.polymerKind === 'protein').map((chain) => chain.id);
+  const resolveChains = (protein) => {
+    if (!protein) return chainIds;
+    if (chainIds.includes(protein)) return [protein];
+    const needle = protein.toLowerCase();
+    const byDescription = state.structure.chains.filter((chain) => chain.description && chain.description.toLowerCase().includes(needle)).map((chain) => chain.id);
+    const byAccession = state.structure.uniprotSegments.filter((segment) => segment.accession?.toLowerCase().startsWith(needle)).map((segment) => segment.chain);
+    const result = [...new Set([...byDescription, ...byAccession])].filter((id) => chainIds.includes(id));
+    return result.length ? result : [];
+  };
+  const caFor = (chainId, residueNumber) => {
+    const residue = model.residues.find((item) => item.chain === chainId && item.resSeq === residueNumber && item.kind === 'protein');
+    return residue?.backbone.CA ?? null;
+  };
+  const mapped = [];
+  let missing = 0;
+  for (const link of links) {
+    let best = null;
+    for (const chainA of resolveChains(link.proteinA)) {
+      for (const chainB of resolveChains(link.proteinB ?? link.proteinA)) {
+        const a = caFor(chainA, link.residueA);
+        const b = caFor(chainB, link.residueB);
+        if (!a || !b || a === b) continue;
+        const distance = Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+        if (!best || distance < best.distance) best = { atomA: a, atomB: b, distance };
+      }
+    }
+    if (!best) {
+      missing += 1;
+      continue;
+    }
+    mapped.push({ ...link, ...best, satisfied: best.distance <= maxDistance });
+  }
+  state.proteomics.crosslinks = mapped;
+  const satisfied = mapped.filter((link) => link.satisfied).length;
+  els.xlResult.hidden = false;
+  els.xlResult.innerHTML = `<strong>${mapped.length}</strong> of ${links.length} cross-links mapped · <span class="good">${satisfied} within ${maxDistance} Å</span> · <span class="bad">${mapped.length - satisfied} violated</span>${missing ? ` · <span class="warn">${missing} not in structure</span>` : ''}${parsed.skipped ? ` · ${parsed.skipped} monolinks skipped` : ''}
+    <div class="hint">Cα–Cα distances; for homo-oligomers the shortest chain pairing is used.</div>
+    <table><thead><tr><th>Link</th><th>Cα–Cα</th></tr></thead><tbody>${mapped.slice().sort((a, b) => b.distance - a.distance).slice(0, 40).map((link) => `<tr><td>${escapeHTML(`${link.atomA.chain}:${link.atomA.resName}${link.atomA.resSeq} – ${link.atomB.chain}:${link.atomB.resName}${link.atomB.resSeq}`)}</td><td class="${link.satisfied ? 'good' : 'bad'}">${link.distance.toFixed(1)} Å</td></tr>`).join('')}</tbody></table>`;
+  markSceneDirty();
+}
+
+async function applyResidueDataFromInput() {
+  const module = await proteomicsModule();
+  if (!module || !state.structure) return;
+  const parsed = module.parseResidueData(els.dataInput.value);
+  const rows = parsed.rows ?? [];
+  if (!rows.length) {
+    showToast('Paste chain, residue and value columns first.', true);
+    return;
+  }
+  const model = activeModel();
+  const values = new Map();
+  let unmatched = 0;
+  const defaultChain = state.structure.chains.find((chain) => chain.polymerKind)?.id;
+  for (const row of rows) {
+    const chain = row.chain ?? defaultChain;
+    const residue = model.residues.find((item) => item.chain === chain && item.resSeq === row.resSeq && (item.iCode || '') === (row.iCode || ''));
+    if (!residue) {
+      unmatched += 1;
+      continue;
+    }
+    values.set(residue.key, row.value);
+  }
+  state.proteomics.data = values;
+  state.proteomics.dataLabel = parsed.name || 'Custom data';
+  state.color.colormap = els.dataColormap.value;
+  els.colormap.value = els.dataColormap.value;
+  els.dataResult.hidden = false;
+  els.dataResult.innerHTML = `<strong>${values.size}</strong> residues colored${unmatched ? ` · <span class="warn">${unmatched} rows did not match a residue</span>` : ''}${parsed.skipped ? ` · ${parsed.skipped} lines skipped` : ''}.`;
+  setColorScheme('data');
+  renderProfile();
+}
+
+/* ---------- Color scheme and legend ---------- */
+
+function setColorScheme(scheme) {
+  state.color.scheme = scheme;
+  els.colorScheme.value = scheme;
+  const categorical = ['chain', 'entity'].includes(scheme);
+  const continuous = ['bfactor', 'exposure', 'coverage', 'data'].includes(scheme);
+  els.paletteField.hidden = !categorical;
+  els.colormapField.hidden = !continuous;
+  els.uniformField.hidden = scheme !== 'uniform';
+  if (scheme === 'exposure' && !state.sasa) showToast('Compute SASA in the Analysis tab to color by solvent exposure.');
+  if (scheme === 'coverage' && !state.proteomics.coverage) showToast('Map peptides in the Proteomics tab to color by coverage.');
+  if (scheme === 'data' && !state.proteomics.data) showToast('Load residue values in the Proteomics tab first.');
+  markColorsDirty();
+}
+
+function renderLegend() {
+  const legends = [state.legend, state.surface.kind !== 'off' ? state.surfaceLegend : null].filter(Boolean);
+  if (!legends.length) {
+    els.legend.hidden = true;
+    return;
+  }
+  els.legend.hidden = false;
+  els.legend.classList.toggle('is-collapsed', Boolean(state.legendCollapsed));
+  els.legend.innerHTML = legends.map(legendHTML).join('<hr>');
+  els.legend.title = state.legendCollapsed ? 'Show legend' : 'Click a legend title to collapse it';
+}
+
+function legendHTML(legend) {
+  if (legend.type === 'categorical') {
+    const columns = legend.items.length > 8 ? ' two-columns' : '';
+    return `<h4>${escapeHTML(legend.title)}</h4><div class="legend-items${columns}">${legend.items.map((item) => `<div title="${escapeHTML(item.label)}"><i style="background:${colorToHex(item.color)}"></i><span>${escapeHTML(item.label)}</span></div>`).join('')}</div>`;
+  }
+  if (legend.type === 'gradient') {
+    return `<h4>${escapeHTML(legend.title)}</h4><div class="legend-gradient" style="background:${colormapGradientCSS(legend.colormap)}"></div><div class="legend-scale"><span>${escapeHTML(legend.minLabel ?? '')}</span><span>${escapeHTML(legend.maxLabel ?? '')}</span></div>${legend.note ? `<div class="legend-note">${escapeHTML(legend.note)}</div>` : ''}`;
+  }
+  return `<h4>${escapeHTML(legend.title)}</h4><div class="legend-note">${escapeHTML(legend.text ?? '')}</div>`;
+}
+
+/* ---------- Lighting ---------- */
+
+function applyLightingPreset(name) {
+  const preset = LIGHTING_PRESETS[name];
+  if (!preset) return;
+  setActiveButton('[data-lighting]', document.querySelector(`[data-lighting="${name}"]`));
+  state.lighting = { preset: name, ...preset };
+  for (const [id, key] of [['ao-strength', 'ao'], ['outline-strength', 'outline'], ['fog-strength', 'fog'], ['glow-scale', 'glow'], ['specular', 'specular'], ['ao-radius', 'aoRadius']]) {
+    document.querySelector(`#${id}`).value = String(state.lighting[key]);
+  }
+  syncControlOutputs();
+  requestRender();
+}
+
+function syncControlOutputs() {
+  const pairs = [
+    ['atom-scale', (value) => Number(value).toFixed(2)],
+    ['bond-scale', (value) => Number(value).toFixed(2)],
+    ['cartoon-width', (value) => Number(value).toFixed(2)],
+    ['cartoon-quality', (value) => value],
+    ['ao-strength', percent],
+    ['outline-strength', percent],
+    ['fog-strength', percent],
+    ['glow-scale', percent],
+    ['specular', percent],
+    ['ao-radius', (value) => `${Number(value).toFixed(1)} Å`],
+    ['clip-near', (value) => (Number(value) <= 0.001 ? 'off' : percent(value))],
+    ['clip-far', (value) => (Number(value) >= 0.999 ? 'off' : percent(value))],
+  ];
+  for (const [id, format] of pairs) {
+    const input = document.querySelector(`#${id}`);
+    const output = document.querySelector(`#${id}-value`);
+    if (input && output) output.textContent = format(input.value);
+  }
+}
+
+/* ---------- Models ---------- */
+
+function setActiveModel(index) {
+  if (!state.structure) return;
+  state.activeModel = Math.max(0, Math.min(state.structure.models.length - 1, index));
+  els.modelSlider.value = String(state.activeModel + 1);
+  state.measurePending = [];
+  state.measurements = [];
+  state.interactions = { ...state.interactions, list: [] };
+  state.atomFlags = null;
+  if (state.sasa) {
+    state.sasa = null;
+    els.sasaColor.disabled = true;
+    els.sasaResult.hidden = true;
+    if (state.color.scheme === 'exposure') markColorsDirty();
+  }
+  renderMeasurements();
+  renderInteractions();
+  updateModelLabel();
+  markSceneDirty();
+  if (state.focus) computeFocusInteractions([...state.focus.residues]);
+  if (state.surface.kind !== 'off') refreshSurface();
+}
+
+function updateModelLabel() {
+  const total = state.structure?.models.length ?? 1;
+  els.modelLabel.textContent = `${state.activeModel + 1} / ${total}`;
+  const model = state.structure ? activeModel() : null;
+  els.atomsLabel.textContent = total > 1 ? 'Atoms/model' : 'Atoms';
+  els.atomsMetric.textContent = formatNumber(model?.atoms.length ?? 0);
+}
+
+function toggleModelPlayback() {
+  if (state.modelTimer) {
+    stopModelPlayback();
+    return;
+  }
+  els.modelPlay.textContent = '❚❚';
+  state.modelTimer = setInterval(() => {
+    const total = state.structure?.models.length ?? 1;
+    setActiveModel((state.activeModel + 1) % total);
+  }, 160);
+}
+
+function stopModelPlayback() {
+  if (state.modelTimer) clearInterval(state.modelTimer);
+  state.modelTimer = null;
+  els.modelPlay.textContent = '▶';
+}
+
+/* ---------- Search ---------- */
 
 function renderSearch() {
   const query = els.searchInput.value.trim().toLowerCase();
   if (!query || !state.structure) {
-    els.searchResults.classList.remove('is-visible');
-    els.searchResults.replaceChildren();
+    clearSearchResults();
     return;
   }
+  if (!state.structure.searchItems) state.structure.searchItems = buildSearchItems(state.structure);
   const terms = query.split(/\s+/).filter(Boolean);
-  const results = state.structure.searchItems
-    .filter((item) => terms.every((term) => item.haystack.includes(term)))
-    .slice(0, 32);
+  const results = [];
+  for (const item of state.structure.searchItems) {
+    if (terms.every((term) => item.haystack.includes(term))) {
+      results.push(item);
+      if (results.length >= 40) break;
+    }
+  }
   const fragment = document.createDocumentFragment();
-  for (const result of results) {
+  results.forEach((result, index) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.dataset.atomId = String(result.atomID);
+    button.dataset.index = String(index);
+    if (index === 0) button.classList.add('is-active');
     button.innerHTML = `<strong>${escapeHTML(result.label)}</strong><span>${escapeHTML(result.type)} · ${escapeHTML(result.sublabel)}</span>`;
-    button.addEventListener('click', () => {
-      selectAtomByID(result.atomID, true, false);
-      els.searchResults.classList.remove('is-visible');
-    });
+    button.addEventListener('mousedown', (event) => event.preventDefault());
+    button.addEventListener('click', () => chooseSearchResult(result));
     fragment.appendChild(button);
-  }
+  });
   els.searchResults.replaceChildren(fragment);
   els.searchResults.classList.toggle('is-visible', results.length > 0);
+  els.searchResults.results = results;
+}
+
+function onSearchKey(event) {
+  const buttons = [...els.searchResults.querySelectorAll('button')];
+  const active = buttons.findIndex((button) => button.classList.contains('is-active'));
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    const next = Math.max(0, Math.min(buttons.length - 1, active + (event.key === 'ArrowDown' ? 1 : -1)));
+    buttons.forEach((button, index) => button.classList.toggle('is-active', index === next));
+    buttons[next]?.scrollIntoView({ block: 'nearest' });
+  } else if (event.key === 'Enter') {
+    const result = els.searchResults.results?.[Math.max(0, active)];
+    if (result) chooseSearchResult(result);
+  } else if (event.key === 'Escape') {
+    clearSearch();
+    els.searchInput.blur();
+  }
+}
+
+function chooseSearchResult(result) {
+  const atom = activeModel().atoms[result.atomID];
+  if (atom) state.selectedAtom = atom;
+  selectResidues([result.residueKey], { frame: true, keepAtom: true });
+  clearSearchResults();
 }
 
 function clearSearch() {
   els.searchInput.value = '';
+  clearSearchResults();
+}
+
+function clearSearchResults() {
   els.searchResults.classList.remove('is-visible');
   els.searchResults.replaceChildren();
 }
 
-function updateModelLabel() {
-  els.modelLabel.textContent = `${state.activeModel + 1} / ${state.structure?.models.length ?? 1}`;
-  updateModelMetrics();
+/* ---------- Export ---------- */
+
+function openExportDialog() {
+  updateExportInfo();
+  els.exportDialog.showModal();
 }
 
-function updateModelMetrics() {
+function exportDimensions() {
+  const factor = Number(els.exportSize.value) || 2;
+  const width = Math.round(els.canvas.clientWidth * factor);
+  const height = Math.round(els.canvas.clientHeight * factor);
+  const max = state.renderer.maxTextureDimension ?? 8192;
+  const scaleDown = Math.min(1, max / Math.max(width, height));
+  return { width: Math.round(width * scaleDown), height: Math.round(height * scaleDown), factor: factor * scaleDown };
+}
+
+function updateExportInfo() {
+  const { width, height } = exportDimensions();
+  els.exportInfo.textContent = `${formatNumber(width)} × ${formatNumber(height)} px${els.exportSupersample.checked ? ' · 2× supersampled' : ''}. At 300 dpi: ${(width / 300 * 2.54).toFixed(1)} × ${(height / 300 * 2.54).toFixed(1)} cm.`;
+}
+
+async function renderImageCanvas() {
+  const { width, height, factor } = exportDimensions();
+  const aspect = width / height;
+  const exportCamera = { ...cloneCamera(state.camera), offset: [0, 0] };
+  const matrices = cameraMatrices(exportCamera, aspect);
+  const view = { ...matrices, orthographic: state.camera.orthographic };
+  const settings = renderSettings();
+  if (els.exportTransparent.checked) settings.background = { ...settings.background, alpha: 0 };
+  settings.outline = { ...settings.outline, width: (settings.outline.width ?? 1) * factor / Math.min(window.devicePixelRatio || 1, 2) };
+  const image = await state.renderer.capture(view, settings, width, height, els.exportSupersample.checked ? 2 : 1);
+  requestRender();
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.putImageData(new ImageData(image.data, width, height), 0, 0);
+  const cssScale = width / els.canvas.clientWidth;
+  if (els.exportLabels.checked) drawExportLabels(ctx, view, width, height, cssScale);
+  if (els.exportLegend.checked) drawExportLegend(ctx, width, height, cssScale);
+  return canvas;
+}
+
+async function exportImage(target) {
   if (!state.structure) return;
-  const model = activeModel();
-  const totalAtoms = state.structure.models.reduce((sum, item) => sum + item.atoms.length, 0);
-  const hasEnsemble = state.structure.models.length > 1;
-  els.atomsLabel.textContent = hasEnsemble ? 'Atoms/model' : 'Atoms';
-  els.atomsMetric.textContent = formatNumber(model.atoms.length);
-  els.totalAtomsMetric.textContent = formatNumber(totalAtoms);
-  els.totalAtomsMetric.parentElement.hidden = !hasEnsemble;
+  try {
+    els.exportInfo.textContent = 'Rendering…';
+    const canvas = await renderImageCanvas();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('The browser could not encode the image.');
+    if (target === 'clipboard') {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      showToast('Image copied to the clipboard.');
+    } else {
+      downloadBlob(`${fileStem()}.png`, blob);
+      showToast(`Saved ${canvas.width} × ${canvas.height} PNG.`);
+    }
+    els.exportDialog.close();
+  } catch (error) {
+    console.error(error);
+    els.exportInfo.textContent = `Export failed: ${error.message}`;
+  }
 }
 
-function onKeyDown(event) {
-  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
-  if (event.key.toLowerCase() === 'r') resetView();
-  if (event.key === 'Escape') {
-    clearSearch();
-    clearMeasurements();
+function drawExportLabels(ctx, view, width, height, cssScale) {
+  const labels = collectLabels(activeModel());
+  ctx.font = `600 ${Math.round(11 * cssScale)}px Inter, ui-sans-serif, system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const label of labels) {
+    const screen = projectToScreen(view, label.position, width, height);
+    if (!screen) continue;
+    const text = label.text;
+    const metrics = ctx.measureText(text);
+    const pad = 5 * cssScale;
+    const boxWidth = metrics.width + pad * 2;
+    const boxHeight = 17 * cssScale;
+    const x = screen.x;
+    const y = screen.y - boxHeight * 1.1;
+    ctx.fillStyle = label.kind === 'measure' ? 'rgba(40,30,4,0.85)' : label.kind === 'site' ? 'rgba(58,8,36,0.85)' : 'rgba(3,5,6,0.78)';
+    roundRect(ctx, x - boxWidth / 2, y - boxHeight / 2, boxWidth, boxHeight, 4 * cssScale);
+    ctx.fill();
+    ctx.fillStyle = label.kind === 'measure' ? '#ffd166' : label.kind === 'site' ? '#ffc2e2' : '#fffaf1';
+    ctx.fillText(text, x, y + cssScale * 0.5);
   }
+}
+
+function drawExportLegend(ctx, width, height, cssScale) {
+  const legends = [state.legend, state.surface.kind !== 'off' ? state.surfaceLegend : null].filter(Boolean);
+  if (!legends.length) return;
+  const light = state.background === 'white' || state.background === 'gray';
+  let y = height - 16 * cssScale;
+  const x = 16 * cssScale;
+  const lineHeight = 15 * cssScale;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  for (const legend of legends.slice().reverse()) {
+    const rows = legend.type === 'categorical' ? legend.items.length : legend.type === 'gradient' ? 2 : 1;
+    const boxHeight = (rows + 1.6) * lineHeight;
+    const boxWidth = 230 * cssScale;
+    y -= boxHeight;
+    ctx.fillStyle = light ? 'rgba(255,255,255,0.85)' : 'rgba(8,11,13,0.78)';
+    roundRect(ctx, x, y, boxWidth, boxHeight, 6 * cssScale);
+    ctx.fill();
+    ctx.fillStyle = light ? '#1d6b55' : '#9ee8cf';
+    ctx.font = `800 ${Math.round(9.5 * cssScale)}px Inter, ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillText(legend.title.toUpperCase(), x + 9 * cssScale, y + lineHeight * 0.85);
+    ctx.font = `500 ${Math.round(10.5 * cssScale)}px Inter, ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillStyle = light ? '#222' : 'rgba(248,245,238,0.85)';
+    if (legend.type === 'categorical') {
+      legend.items.forEach((item, index) => {
+        const rowY = y + lineHeight * (1.9 + index);
+        ctx.fillStyle = colorToHex(item.color);
+        ctx.fillRect(x + 9 * cssScale, rowY - 5 * cssScale, 10 * cssScale, 10 * cssScale);
+        ctx.fillStyle = light ? '#222' : 'rgba(248,245,238,0.85)';
+        ctx.fillText(item.label, x + 25 * cssScale, rowY);
+      });
+    } else if (legend.type === 'gradient') {
+      const gradient = ctx.createLinearGradient(x + 9 * cssScale, 0, x + boxWidth - 9 * cssScale, 0);
+      const stops = COLORMAPS[legend.colormap]?.stops ?? COLORMAPS.viridis.stops;
+      stops.forEach((stop, index) => gradient.addColorStop(index / (stops.length - 1), colorToHex(stop)));
+      ctx.fillStyle = gradient;
+      ctx.fillRect(x + 9 * cssScale, y + lineHeight * 1.5, boxWidth - 18 * cssScale, 9 * cssScale);
+      ctx.fillStyle = light ? '#222' : 'rgba(248,245,238,0.85)';
+      ctx.fillText(legend.minLabel ?? '', x + 9 * cssScale, y + lineHeight * 2.75);
+      ctx.textAlign = 'right';
+      ctx.fillText(legend.maxLabel ?? '', x + boxWidth - 9 * cssScale, y + lineHeight * 2.75);
+      ctx.textAlign = 'left';
+    }
+    y -= 8 * cssScale;
+  }
+}
+
+function roundRect(ctx, x, y, width, height, radius) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + width, y, x + width, y + height, radius);
+  ctx.arcTo(x + width, y + height, x, y + height, radius);
+  ctx.arcTo(x, y + height, x, y, radius);
+  ctx.arcTo(x, y, x + width, y, radius);
+  ctx.closePath();
+}
+
+async function recordSpinMovie() {
+  if (typeof MediaRecorder === 'undefined' || !els.canvas.captureStream) {
+    showToast('Video recording is not supported in this browser.', true);
+    return;
+  }
+  els.exportDialog.close();
+  const stream = els.canvas.captureStream(30);
+  const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type));
+  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 12_000_000 });
+  const chunks = [];
+  recorder.addEventListener('dataavailable', (event) => {
+    if (event.data.size) chunks.push(event.data);
+  });
+  const done = new Promise((resolve) => recorder.addEventListener('stop', resolve));
+  const previousSpin = state.spin;
+  const duration = 8000;
+  state.spinRate = (Math.PI * 2) / (duration / 1000);
+  showToast('Recording one full rotation (8 s)…');
+  recorder.start();
+  setSpin(true);
+  await new Promise((resolve) => setTimeout(resolve, duration));
+  recorder.stop();
+  await done;
+  setSpin(previousSpin);
+  state.spinRate = DEFAULT_SPIN_RATE;
+  downloadBlob(`${fileStem()}-spin.webm`, new Blob(chunks, { type: 'video/webm' }));
+  showToast('Saved spin video (WebM).');
+}
+
+/* ---------- Panels and misc UI ---------- */
+
+function activateTab(name) {
+  document.querySelectorAll('[data-tab]').forEach((button) => button.classList.toggle('is-active', button.dataset.tab === name));
+  document.querySelectorAll('[data-panel]').forEach((panel) => {
+    panel.hidden = panel.dataset.panel !== name;
+  });
+  if (state.structure) refreshTabPanels();
+}
+
+function togglePanel(className) {
+  const opening = !els.app.classList.contains(className);
+  if (opening && window.innerWidth <= 900) {
+    if (className === 'left-open') els.app.classList.remove('right-open');
+    if (className === 'right-open') els.app.classList.remove('left-open');
+  }
+  els.app.classList.toggle(className);
+  setTimeout(() => {
+    updateViewOffset();
+    requestRender();
+  }, 200);
+  updateViewOffset();
+  requestRender();
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen?.();
 }
 
 function setActiveButton(selector, active) {
   document.querySelectorAll(selector).forEach((button) => button.classList.toggle('is-active', button === active));
 }
 
-function activeModel() {
-  return state.structure.models[state.activeModel] ?? state.structure.models[0];
-}
-
-function computeBounds(atoms) {
-  const min = [Infinity, Infinity, Infinity];
-  const max = [-Infinity, -Infinity, -Infinity];
-  for (const atom of atoms) {
-    min[0] = Math.min(min[0], atom.x);
-    min[1] = Math.min(min[1], atom.y);
-    min[2] = Math.min(min[2], atom.z);
-    max[0] = Math.max(max[0], atom.x);
-    max[1] = Math.max(max[1], atom.y);
-    max[2] = Math.max(max[2], atom.z);
+function populateSamples() {
+  els.sampleSelect.replaceChildren(new Option('Choose an example…', ''));
+  for (const sample of state.samples) {
+    const option = new Option(sampleSummary(sample), sample.id);
+    option.title = sample.title;
+    els.sampleSelect.appendChild(option);
   }
-  const center = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
-  let radius = 1;
-  for (const atom of atoms) {
-    radius = Math.max(radius, distanceVec(center, [atom.x, atom.y, atom.z]));
-  }
-  return { min, max, center, radius };
 }
 
-function computeBFactorRange(atoms) {
-  let min = Infinity;
-  let max = -Infinity;
-  for (const atom of atoms) {
-    min = Math.min(min, atom.bFactor);
-    max = Math.max(max, atom.bFactor);
-  }
-  if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) return { min: 0, max: 1 };
-  return { min, max };
-}
-
-function cellKey(atom, cellSize) {
-  return `${Math.floor(atom.x / cellSize)},${Math.floor(atom.y / cellSize)},${Math.floor(atom.z / cellSize)}`;
-}
-
-function isBackboneAtom(atom) {
-  if (atom.polymerType === 'protein') return PROTEIN_BACKBONE.has(atom.name);
-  if (atom.polymerType === 'nucleic') return NUCLEIC_BACKBONE.has(atom.name);
-  return false;
-}
-
-function inferPolymerType(resName) {
-  if (RESIDUE_CLASSES.nucleic.has(resName)) return 'nucleic';
-  if (
-    RESIDUE_CLASSES.hydrophobic.has(resName) ||
-    RESIDUE_CLASSES.polar.has(resName) ||
-    RESIDUE_CLASSES.positive.has(resName) ||
-    RESIDUE_CLASSES.negative.has(resName)
-  ) {
-    return 'protein';
-  }
-  return 'ligand';
-}
-
-function inferElement(elementField, atomName) {
-  const clean = elementField.trim().toUpperCase();
-  if (clean) return clean;
-  const letters = atomName.replace(/[0-9']/g, '').trim().toUpperCase();
-  if (!letters) return 'C';
-  if (letters.length >= 2 && ELEMENTS[letters.slice(0, 2)]) return letters.slice(0, 2);
-  return letters[0];
-}
-
-function elementInfo(element) {
-  return ELEMENTS[element] ?? { covalent: 0.77, vdw: 1.7, color: [0.78, 0.8, 0.82] };
-}
-
-function isMetal(element) {
-  return ['FE', 'MG', 'ZN', 'MN', 'CU', 'CO', 'NI', 'CA', 'NA', 'K'].includes(element);
-}
-
-function atomLabel(atom) {
-  return `${atom.name} · ${atom.resName} ${displayChain(atom.chain)}${atom.resSeq}${atom.iCode}`;
-}
-
-function shortAtomLabel(atom) {
-  return `${atom.name}/${atom.resName}${atom.chain}${atom.resSeq}`;
-}
-
-function displayChain(chain) {
-  return chain === '_' ? 'Chain _' : `Chain ${chain}`;
+function sampleSummary(sample) {
+  const title = (sample.title || '').replace(/^[0-9A-Z]{4}:\s*/, '');
+  const short = title.length > 46 ? `${title.slice(0, 45)}…` : title;
+  return `${sample.name} · ${titleCase(short)}`;
 }
 
 function setLoading(message) {
   els.loadingStatus.textContent = message;
 }
 
-function slice(text, start, end) {
-  return text.length > start ? text.slice(start, Math.min(end, text.length)) : '';
+function showLoading(message) {
+  els.loading.classList.remove('is-hidden', 'is-error');
+  setLoading(message);
 }
 
-function parseIntSafe(value) {
-  const parsed = Number.parseInt(String(value).trim(), 10);
-  return Number.isFinite(parsed) ? parsed : 0;
+function hideLoading() {
+  els.loading.classList.add('is-hidden');
 }
 
-function parseFloatSafe(value) {
-  const parsed = Number.parseFloat(String(value).trim());
-  return Number.isFinite(parsed) ? parsed : NaN;
+function showLoadingError(message) {
+  els.loading.classList.remove('is-hidden');
+  els.loading.classList.add('is-error');
+  setLoading(message);
 }
 
-function parseFloatDefault(value, fallback) {
-  const parsed = parseFloatSafe(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+let toastTimer = null;
+function showToast(message, error = false) {
+  els.toast.textContent = message;
+  els.toast.classList.toggle('is-error', error);
+  els.toast.classList.add('is-visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => els.toast.classList.remove('is-visible'), error ? 6500 : 3500);
+}
+
+async function loadModule(name, path) {
+  if (lazyModules[name]) return lazyModules[name];
+  if (lazyModules[`${name}:failed`]) return null;
+  try {
+    const module = await import(path);
+    lazyModules[name] = module;
+    if (name === 'interactions' && module.INTERACTION_TYPES?.length) {
+      state.interactionTypes = module.INTERACTION_TYPES;
+      renderInteractionTypeToggles();
+    }
+    return module;
+  } catch (error) {
+    console.error(error);
+    lazyModules[`${name}:failed`] = true;
+    showToast(`Could not load the ${name} module: ${error.message}`, true);
+    return null;
+  }
+}
+
+/* ---------- Helpers ---------- */
+
+function residueOf(atom) {
+  if (!atom || !state.structure) return null;
+  const model = activeModel();
+  return model.residues[model.atomResidue[atom.id]] ?? null;
+}
+
+function residueLabel(residue) {
+  if (!residue) return '';
+  return `${residue.resName} ${residue.resSeq}${residue.iCode || ''} · chain ${residue.chain}`;
+}
+
+function shortResidueLabel(residue) {
+  return `${residue.chain}:${residue.resName}${residue.resSeq}${residue.iCode || ''}`;
+}
+
+function shortAtomLabel(atom) {
+  return `${atom.chain}:${atom.resName}${atom.resSeq} ${atom.name}`;
+}
+
+function secondaryText(residue) {
+  const names = { helix: 'Helix', sheet: 'Strand', turn: 'Turn', coil: 'Coil' };
+  const source = residue.ssSource === 'none' ? '' : ` (${residue.ssSource}${residue.dssp && residue.ssSource !== 'DSSP' ? `, DSSP ${residue.dssp}` : residue.dssp ? ` ${residue.dssp}` : ''})`;
+  return `${names[residue.ss] ?? 'Coil'}${source}`;
+}
+
+function fileStem() {
+  const code = state.structure?.meta.code || state.structure?.label?.replace(/\.[^.]+$/, '') || 'proteoscope';
+  return `${code.toLowerCase()}-proteoscope`;
+}
+
+function downloadBlob(filename, blob) {
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 2000);
+}
+
+function downloadText(filename, text, type = 'text/plain') {
+  downloadBlob(filename, new Blob([text], { type }));
+}
+
+function point(atom) {
+  return [atom.x, atom.y, atom.z];
 }
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString();
 }
 
-function naturalCompare(a, b) {
-  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+function formatNumberShort(value) {
+  if (!Number.isFinite(value)) return '';
+  const magnitude = Math.abs(value);
+  if (magnitude >= 1000 || (magnitude > 0 && magnitude < 0.01)) return value.toExponential(2);
+  return Number(value.toFixed(3)).toString();
 }
 
-function nextFrame() {
-  return new Promise((resolve) => requestAnimationFrame(resolve));
+function formatSigned(value) {
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}`;
 }
 
-function align4(size) {
-  return Math.ceil(size / 4) * 4;
+function formatAngle(value) {
+  return Number.isFinite(value) ? `${value.toFixed(0)}°` : '–';
 }
 
-function rgbCSS(color) {
-  return `rgb(${Math.round(color[0] * 255)} ${Math.round(color[1] * 255)} ${Math.round(color[2] * 255)})`;
+function percent(value) {
+  return `${Math.round(Number(value) * 100)}%`;
 }
 
-function rgbaCSS(color, alpha) {
-  return `rgba(${Math.round(color[0] * 255)}, ${Math.round(color[1] * 255)}, ${Math.round(color[2] * 255)}, ${alpha})`;
+function pct(part, total) {
+  return total ? `${Math.round((part / total) * 100)}%` : '0%';
 }
 
-function withTimeout(promise, timeoutMs, message) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(message)), timeoutMs);
-    }),
-  ]);
+
+function capitalize(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function escapeHTML(value) {
-  return String(value).replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  })[char]);
+  return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 }
 
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
+function nextFrame() {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
 
-function lerpColor(a, b, t) {
-  return [
-    a[0] + (b[0] - a[0]) * t,
-    a[1] + (b[1] - a[1]) * t,
-    a[2] + (b[2] - a[2]) * t,
-  ];
-}
-
-function midpointColor(a, b) {
-  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
-}
-
-function atomPoint(atom) {
-  return [atom.x, atom.y, atom.z];
-}
-
-function add(a, b) {
-  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-}
-
-function sub(a, b) {
-  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-}
-
-function scale(v, s) {
-  return [v[0] * s, v[1] * s, v[2] * s];
-}
-
-function dot(a, b) {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-
-function cross(a, b) {
-  return [
-    a[1] * b[2] - a[2] * b[1],
-    a[2] * b[0] - a[0] * b[2],
-    a[0] * b[1] - a[1] * b[0],
-  ];
-}
-
-function length(v) {
-  return Math.hypot(v[0], v[1], v[2]);
-}
-
-function normalize(v) {
-  const len = length(v);
-  if (len < 0.000001) return [0, 0, 0];
-  return [v[0] / len, v[1] / len, v[2] / len];
-}
-
-function distance(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-
-function distanceAtoms(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-
-function distanceVec(a, b) {
-  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-}
-
-function angleDegrees(a, b) {
-  const denom = Math.max(0.000001, length(a) * length(b));
-  return Math.acos(clamp(dot(a, b) / denom, -1, 1)) * 180 / Math.PI;
-}
-
-function choosePerpendicular(v) {
-  const reference = Math.abs(v[1]) < 0.85 ? [0, 1, 0] : [1, 0, 0];
-  return normalize(cross(v, reference));
-}
-
-function mat4Perspective(fovy, aspect, near, far) {
-  const f = 1 / Math.tan(fovy / 2);
-  const nf = 1 / (near - far);
-  return new Float32Array([
-    f / aspect, 0, 0, 0,
-    0, f, 0, 0,
-    0, 0, (far + near) * nf, -1,
-    0, 0, 2 * far * near * nf, 0,
-  ]);
-}
-
-function mat4LookAt(eye, center, up) {
-  const z = normalize(sub(eye, center));
-  const x = normalize(cross(up, z));
-  const y = cross(z, x);
-  return new Float32Array([
-    x[0], y[0], z[0], 0,
-    x[1], y[1], z[1], 0,
-    x[2], y[2], z[2], 0,
-    -dot(x, eye), -dot(y, eye), -dot(z, eye), 1,
-  ]);
-}
-
-function mat4Multiply(a, b) {
-  const out = new Float32Array(16);
-  for (let column = 0; column < 4; column += 1) {
-    for (let row = 0; row < 4; row += 1) {
-      out[column * 4 + row] =
-        a[0 * 4 + row] * b[column * 4 + 0] +
-        a[1 * 4 + row] * b[column * 4 + 1] +
-        a[2 * 4 + row] * b[column * 4 + 2] +
-        a[3 * 4 + row] * b[column * 4 + 3];
-    }
-  }
-  return out;
-}
+// Console scripting API for power users (and automated checks).
+globalThis.proteoscope = {
+  state,
+  fetch: fetchStructure,
+  select: (keys) => selectResidues(keys, { frame: true }),
+  focus: focusResidues,
+  representation: applyRepresentationPreset,
+  color: setColorScheme,
+  lighting: applyLightingPreset,
+  surface: (kind) => {
+    state.surface.kind = kind;
+    els.surfaceKind.value = kind;
+    refreshSurface();
+  },
+  resetView,
+  residues: () => (state.structure ? activeModel().residues : []),
+  snapshot: async (options = {}) => {
+    if (options.scale) els.exportSize.value = String(options.scale);
+    if ('transparent' in options) els.exportTransparent.checked = Boolean(options.transparent);
+    if ('supersample' in options) els.exportSupersample.checked = Boolean(options.supersample);
+    const canvas = await renderImageCanvas();
+    return canvas.toDataURL('image/png');
+  },
+};
 
 if (globalThis.__PROTEOSCOPE_TEST__) {
-  globalThis.__proteoscopeTest = {
-    state,
-    createStructure,
-    createModel,
-    parsePDB,
-    parseMMCIF,
-    deriveStructure,
-    buildModelResidues,
-    buildProteinCartoonSegments,
-    buildCartoonScene,
-    applyAltLocationPolicy,
-    assignSecondary,
-    detectStructureFormat,
-  };
+  globalThis.__proteoscopeTest = { state, normalizeFetchQuery, loadStructureFromText, colorExtras };
 }
