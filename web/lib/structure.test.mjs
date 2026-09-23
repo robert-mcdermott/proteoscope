@@ -314,6 +314,28 @@ test('scene shows ligands in cartoon mode and side chains only around the focus'
   assert.ok(focused.spheres.count > plain.spheres.count);
 });
 
+test('per-residue styles add side-chain sticks on the cartoon and hidden residues disappear', async () => {
+  const text = await readFile(new URL('4hhb.pdb', DATA_DIR), 'utf8');
+  const structure = derive(parsePDB(text, '4hhb.pdb'));
+  const model = structure.models[0];
+  const his = model.residueMap.get('A:87:HIS');
+  const display = { polymer: 'cartoon', ligand: 'ball-stick', sidechains: 'none', showWater: false, showHydrogen: false, atomScale: 1, bondScale: 1, cartoonWidth: 1, cartoonQuality: 6, visibleChains: null };
+  const plain = buildScene(model, structure, display);
+  assert.ok(his.atoms.every((atom) => plain.styles[atom.id] === 0 || atom === his.representative));
+
+  const styled = buildScene(model, structure, { ...display, residueStyles: new Map([[his.key, 'sticks']]) });
+  const drawn = his.atoms.filter((atom) => styled.styles[atom.id]).map((atom) => atom.name).sort();
+  assert.deepEqual(drawn, ['CA', 'CB', 'CD2', 'CE1', 'CG', 'ND1', 'NE2'], 'side chain anchored at CA, backbone left to the ribbon');
+
+  const spheres = buildScene(model, structure, { ...display, residueStyles: new Map([[his.key, 'spacefill']]) });
+  assert.ok(his.atoms.every((atom) => spheres.styles[atom.id]), 'spheres show the whole residue');
+
+  const hidden = new Set(model.residues.filter((residue) => residue.chain === 'B').map((residue) => residue.key));
+  const withoutB = buildScene(model, structure, { ...display, ligand: 'ball-stick', hiddenResidues: hidden });
+  assert.ok(model.atoms.every((atom) => atom.chain !== 'B' || !withoutB.styles[atom.id]));
+  assert.ok(![...withoutB.cartoon.covered].some((key) => key.startsWith('B:')), 'hidden residues leave the cartoon');
+});
+
 test('every bundled structure parses, derives and builds a cartoon', async () => {
   const files = (await readdir(DATA_DIR)).filter((name) => /\.(pdb|cif)$/i.test(name));
   assert.ok(files.length >= 10);

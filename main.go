@@ -50,12 +50,14 @@ type config struct {
 	cacheDir    string
 	dev         bool
 	showVersion bool
+	remote      bool
 	files       []string
 }
 
 type app struct {
 	offline  bool
 	dev      bool
+	control  *remoteHub
 	assetDir string
 	assets   fs.FS
 	files    []localFile
@@ -128,6 +130,7 @@ func parseConfig(args []string) (config, error) {
 	flags.BoolVar(&cfg.noCache, "no-cache", false, "do not cache downloads on disk")
 	flags.BoolVar(&cfg.dev, "dev", false, "serve web/ and data/ from the working directory instead of the embedded copies")
 	flags.BoolVar(&cfg.showVersion, "version", false, "print the version and exit")
+	flags.BoolVar(&cfg.remote, "remote-control", false, "accept commands from scripts on this computer at /api/remote/command (for example Jupyter)")
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "Usage: proteoscope [flags] [structure files...]")
 		flags.PrintDefaults()
@@ -164,6 +167,9 @@ func newApp(cfg config) (*app, error) {
 		cache:   openCache(cfg.cacheDir, cfg.noCache),
 		remote:  defaultUpstream(),
 	}
+	if cfg.remote {
+		a.control = newRemoteHub()
+	}
 	if !cfg.dev {
 		return a, nil
 	}
@@ -191,6 +197,9 @@ func (a *app) printBanner(url string) {
 		fmt.Printf("Download cache: %s\n", a.cache.dir)
 	} else {
 		fmt.Println("Download cache: disabled")
+	}
+	if a.control != nil {
+		fmt.Printf("Remote control: POST {\"command\": ...} to %s/api/remote/command\n", url)
 	}
 	for _, file := range a.files {
 		fmt.Printf("Local file %s: %s\n", file.URL, file.path)
@@ -236,6 +245,9 @@ func (a *app) registerAPI(mux *http.ServeMux, samples func() ([]sample, error)) 
 		writeJSON(w, map[string]any{"samples": list})
 	})
 	mux.HandleFunc("GET /api/startup", a.serveStartup)
+	if a.control != nil {
+		a.control.register(mux)
+	}
 	mux.HandleFunc("GET /api/local/{index}", a.serveLocal)
 	mux.HandleFunc("GET /api/fetch/pdb/{id}", a.fetchPDB)
 	mux.HandleFunc("GET /api/fetch/afdb/{accession}", a.fetchAlphaFold)

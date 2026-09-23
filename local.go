@@ -21,9 +21,10 @@ type localFile struct {
 }
 
 type startupInfo struct {
-	Version string      `json:"version"`
-	Offline bool        `json:"offline"`
-	Files   []localFile `json:"files"`
+	Version       string      `json:"version"`
+	Offline       bool        `json:"offline"`
+	RemoteControl bool        `json:"remoteControl"`
+	Files         []localFile `json:"files"`
 }
 
 func loadLocalFiles(paths []string) []localFile {
@@ -78,7 +79,7 @@ func trimGzip(name string) string {
 
 func (a *app) serveStartup(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, startupInfo{Version: version, Offline: a.offline, Files: a.files})
+	writeJSON(w, startupInfo{Version: version, Offline: a.offline, RemoteControl: a.control != nil, Files: a.files})
 }
 
 func (a *app) serveLocal(w http.ResponseWriter, r *http.Request) {

@@ -304,3 +304,27 @@ the completed v0.1 application.
 
 - [x] 41. Documentation: README comparison section, design, roadmap, screenshots
   - _Requirements: 15, 24_
+
+## Wave 3: selections, commands, sessions and scripting
+
+- [x] 42. Selection language: parser, evaluator across structures, distance and expansion operators, value predicates, tests
+  - _Requirements: 25_
+
+- [x] 43. Command parser and executor; search box with live previews, history and completion; help reference
+  - _Requirements: 25_
+
+- [x] 44. Per-residue sticks, spheres, hiding, colors and surface restriction in the scene; selection card buttons
+  - _Requirements: 25_
+
+- [x] 45. Session files, restore, `#session=` links, and restoring in background tabs
+  - _Requirements: 26_
+
+- [x] 46. MolViewSpec export (.mvsj and .mvsx) with a ZIP writer, checked in the Mol* viewer
+  - _Requirements: 26_
+
+- [x] 47. Remote control API (`--remote-control`) with Server-Sent Events and Go tests
+  - _Requirements: 27_
+
+- [x] 48. Documentation: README sections for selections, commands, sessions and scripting; design, requirements, roadmap
+  - _Requirements: 15, 25, 26, 27_
+

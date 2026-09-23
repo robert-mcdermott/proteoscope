@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#050708" />
     <title>Proteoscope</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=wave2" />
+    <link rel="stylesheet" href="/styles.css?v=wave3" />
   </head>
   <body>
     <main id="app" class="left-open right-open sequence-open">
@@ -28,7 +28,7 @@
         <div class="search-wrap">
           <label class="search-box">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" /></svg>
-            <input id="search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Find residue, ligand, chain, atom…  ( / )" />
+            <input id="search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Find a residue, or type a selection or command (help)  ( / )" />
           </label>
           <div id="search-results" class="search-results" role="listbox"></div>
         </div>
@@ -76,6 +76,16 @@
               <h3>Structures in scene <span id="structure-count" class="count-badge"></span></h3>
               <div id="structure-list" class="structure-list"></div>
               <p class="hint">Click a structure to make it active: the panels and the sequence follow it. Superpose structures in the Analysis tab.</p>
+            </div>
+
+            <div class="group">
+              <h3>Session</h3>
+              <div class="button-row">
+                <button id="session-save" type="button" title="Save structures, styles, superpositions, selections and the camera as a .proteoscope.json file">Save session</button>
+                <button id="session-link" type="button" title="Copy a link that reopens this view (fetched structures and bundled examples only)">Copy link</button>
+                <button id="session-mvs" type="button" title="Export this view as MolViewSpec (.mvsj or .mvsx) to open in Mol*">MolViewSpec</button>
+              </div>
+              <p class="hint">Open a saved session like any file. Local files are embedded in the session; links carry only fetched structures and bundled examples.</p>
             </div>
 
             <div class="group">
@@ -438,6 +448,12 @@
             <button id="label-selection" type="button" title="Toggle 3D label (L)">Label</button>
             <button id="isolate-selection" type="button" title="Show only these chains">Isolate chain</button>
           </div>
+          <div class="button-row selection-style">
+            <button id="selection-sticks" type="button" title="Show the selected residues as sticks (again to remove)">Sticks</button>
+            <label class="color-chip" title="Color the selected residues"><input id="selection-color" type="color" value="#ff66cc" aria-label="Color the selected residues" /><span>Color</span></label>
+            <button id="selection-hide" type="button" title="Hide the selected residues">Hide</button>
+            <button id="selection-reset-style" type="button" title="Remove custom styles and colors from the selected residues">Reset</button>
+          </div>
         </section>
 
         <section class="card" id="interactions-card" hidden>
@@ -514,7 +530,7 @@
 
       <div id="tooltip" class="tooltip" role="status"></div>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
-      <div id="drop-overlay" class="drop-overlay" hidden><div>Drop structure or PAE file to open</div></div>
+      <div id="drop-overlay" class="drop-overlay" hidden><div>Drop structures, a PAE file or a session to open</div></div>
 
       <div id="loading" class="loading">
         <div class="loading-mark"></div>
@@ -585,10 +601,11 @@
               </dl>
             </div>
           </div>
+          <div id="help-commands" class="help-commands"></div>
           <menu><button type="submit" class="primary">Close</button></menu>
         </form>
       </dialog>
     </main>
-    <script type="module" src="/app.js?v=wave2"></script>
+    <script type="module" src="/app.js?v=wave3"></script>
   </body>
 </html>

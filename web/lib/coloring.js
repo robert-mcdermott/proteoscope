@@ -85,7 +85,7 @@ export function computeAtomColors(model, structure, settings, extras = {}) {
       }
     }
     const override = overrides?.get(residue?.key);
-    if (override) color = atom.element === 'C' || atom.name === 'P' ? override : [...elementInfo(atom.element).color];
+    if (override) color = !heteroByElement || atom.element === 'C' || atom.name === 'P' ? override : [...elementInfo(atom.element).color];
     const offset = index * 4;
     colors[offset] = color[0];
     colors[offset + 1] = color[1];

@@ -100,9 +100,10 @@ func TestStartupInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{
-		"version": version,
-		"offline": true,
-		"files":   []any{map[string]any{"name": "one.pdb", "url": "/api/local/0", "size": 12.0}},
+		"version":       version,
+		"offline":       true,
+		"remoteControl": false,
+		"files":         []any{map[string]any{"name": "one.pdb", "url": "/api/local/0", "size": 12.0}},
 	}
 	if !jsonEqual(info, want) {
 		t.Fatalf("startup = %v, want %v", info, want)

@@ -336,3 +336,38 @@ selection, distance measurement, and PNG export.
 5. WHEN the user compares an experimental entry with AlphaFold, THE System SHALL fetch the AlphaFold DB model for each UniProt accession, superpose it by UniProt numbering and trim it to the aligned span
 6. WHEN a multi-model entry is overlaid, THE System SHALL superpose all models on their shared core, display them together and report per-residue RMSF
 7. WHEN positions are reset or an assembly is changed, THE System SHALL restore the deposited coordinates
+
+### Requirement 25: Selection Language and Command Line
+
+**User Story:** As a structural biologist used to PyMOL or ChimeraX, I want to type selections and commands, so that I can select, style and compare precisely and repeat what I did.
+
+#### Acceptance Criteria
+
+1. WHEN a selection expression is typed, THE System SHALL preview the number of matching residues and atoms per structure and select and frame them on Enter
+2. WHEN a selection uses chain, residue number (with insertion codes), residue name, atom name, element, secondary structure, entity, UniProt numbering, structure index or name, ChimeraX atom specs, classes, Boolean logic, distance operators, residue or chain expansion, value comparisons or named sets, THE System SHALL evaluate it on every structure
+3. WHEN a selection or command is invalid, THE System SHALL explain the problem and name the offending word
+4. WHEN a command is run, THE System SHALL apply it (select, zoom, focus, show, hide, color, label, load, superpose, measure, rotate, save, export) and report the outcome
+5. WHEN residues are styled per selection, THE System SHALL draw them as sticks, spheres or hidden, and color them, on top of the structure's representation
+
+### Requirement 26: Sessions and Sharing
+
+**User Story:** As a researcher preparing figures, I want to save and reopen my workspace and share a view, so that I can revise figures later and colleagues can see exactly what I see.
+
+#### Acceptance Criteria
+
+1. WHEN a session is saved, THE System SHALL write a versioned JSON file recording every structure's source (embedding local files), styles, per-residue styling, transforms, comparisons, overlays, selections, focus, labels, proteomics overlays, measurements and the view
+2. WHEN a session file is opened, THE System SHALL rebuild the workspace, reporting any structure that could not be restored
+3. WHEN every structure was fetched or bundled, THE System SHALL offer a link that restores the session when opened
+4. WHEN MolViewSpec export is requested, THE System SHALL write an .mvsj file (remote structures) or an .mvsx archive (local structures) that Mol* can open, including representations, colors, labels, transforms, camera and background
+
+### Requirement 27: Remote Control
+
+**User Story:** As a computational biologist working in Jupyter, I want to drive the viewer from Python, so that I can script comparisons and figures.
+
+#### Acceptance Criteria
+
+1. WHEN Proteoscope is started with `--remote-control`, THE System SHALL accept commands at `POST /api/remote/command` and return the result of running them in the open page
+2. WHEN a command produces an image, a session, a link or MolViewSpec, THE System SHALL return the data instead of downloading a file
+3. WHEN no page is connected or the page does not answer, THE System SHALL return an error rather than hang
+4. WHEN remote control is off or a request comes from a web page on another origin, THE System SHALL refuse it
+

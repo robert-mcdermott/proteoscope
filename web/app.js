@@ -15,6 +15,11 @@ import {
 import { buildLines, buildScene, focusNeighborhood } from './lib/scene.js';
 import { compareStructures, polymerChainResidues, superposeEnsemble } from './lib/compare.js';
 import { composeTransforms, invertTransform, isIdentityTransform, transformPoint } from './lib/superpose.js';
+import { countMask, evaluateSelection, looksLikeSelection, parseSelection, residueKeysFromMask } from './lib/select.js';
+import { COMMANDS, CommandError, parseCommand, suggestCommands } from './lib/commands.js';
+import { base64ToBytes, bytesToBase64, compressText, decodeLinkPayload, decompressText, encodeLinkPayload } from './lib/codec.js';
+import { createZip } from './lib/zip.js';
+import { buildMolViewSpec, referenceCameraPosition, residueColors, residueSelector } from './lib/mvs.js';
 import { buildCartoon } from './lib/cartoon.js';
 import { COLOR_SCHEMES, computeAtomColors, titleCase } from './lib/coloring.js';
 import {
@@ -42,7 +47,7 @@ import {
   spinCamera,
   zoomCamera,
 } from './lib/camera.js';
-import { add, angleBetween, dihedralAngle, normalize, scale, sub } from './lib/math3d.js';
+import { add, angleBetween, dihedralAngle, normalize, quatFromAxisAngle, quatMultiply, quatNormalize, scale, sub } from './lib/math3d.js';
 import { createSequenceView } from './lib/sequence-view.js';
 import { drawPAE, drawProfile, drawRamachandran } from './lib/plots.js';
 import { dsspSummary } from './lib/dssp.js';
@@ -83,6 +88,9 @@ const els = {
   compareAlphaFold: document.querySelector('#compare-alphafold'),
   compareModels: document.querySelector('#compare-models'),
   compareResult: document.querySelector('#compare-result'),
+  sessionSave: document.querySelector('#session-save'),
+  sessionLink: document.querySelector('#session-link'),
+  sessionMvs: document.querySelector('#session-mvs'),
   chainsTitle: document.querySelector('#chains-title'),
   metaMethod: document.querySelector('#meta-method'),
   metaResolution: document.querySelector('#meta-resolution'),
@@ -127,6 +135,11 @@ const els = {
   selectionHint: document.querySelector('#selection-hint'),
   selectionDetails: document.querySelector('#selection-details'),
   selectionClear: document.querySelector('#selection-clear'),
+  selectionSticks: document.querySelector('#selection-sticks'),
+  selectionHide: document.querySelector('#selection-hide'),
+  selectionColor: document.querySelector('#selection-color'),
+  selectionResetStyle: document.querySelector('#selection-reset-style'),
+  helpCommands: document.querySelector('#help-commands'),
   focusSelection: document.querySelector('#focus-selection'),
   labelSelection: document.querySelector('#label-selection'),
   isolateSelection: document.querySelector('#isolate-selection'),
@@ -259,6 +272,11 @@ const DEFAULT_DISPLAY = {
   visibleChains: null,
   residueFilter: null,
   residueFilterKey: '',
+  // Per-residue styling from commands and the selection card: extra representation
+  // ("sticks", "ball-stick", "spacefill") and hidden residues, keyed by residue key.
+  residueStyles: null,
+  hiddenResidues: null,
+  overrideKey: '',
 };
 
 // Colors that tell structures apart in the "Structure" scheme and the structures list.
@@ -392,11 +410,28 @@ async function init() {
   ]);
   state.samples = manifest.samples ?? [];
   state.startup = startup;
+  if (startup?.remoteControl) connectRemoteControl();
   populateSamples();
 
   const hashRequest = new URLSearchParams(location.hash.slice(1));
   const fetchRequest = hashRequest.get('fetch') || hashRequest.get('pdb') || hashRequest.get('af') || hashRequest.get('uniprot');
-  if (startup?.files?.length) {
+  const sessionPayload = hashRequest.get('session');
+  if (sessionPayload && !startup?.files?.length) {
+    const link = location.href;
+    await guardedLoad(async () => {
+      state.restoringSession = true;
+      try {
+        await restoreSession(JSON.parse(await decodeLinkPayload(sessionPayload)));
+      } finally {
+        state.restoringSession = false;
+      }
+    });
+    history.replaceState(null, '', link);
+    if (!state.entries.length) {
+      const fallback = state.samples.find((sample) => sample.id.startsWith('1m17')) ?? state.samples[0];
+      if (fallback) await loadStructureFromURL(fallback.url, fallback.name, { origin: { type: 'sample', id: fallback.id } });
+    }
+  } else if (startup?.files?.length) {
     await guardedLoad(async () => {
       await loadStructureFromURL(startup.files[0].url, startup.files[0].name);
       for (const file of startup.files.slice(1)) await loadStructureFromURL(file.url, file.name, { add: true });
@@ -415,7 +450,7 @@ async function init() {
     const preferred = state.samples.find((sample) => sample.id.startsWith('1m17')) ?? state.samples[0];
     if (!preferred) throw new Error('No embedded structure files were found.');
     els.sampleSelect.value = preferred.id;
-    await loadStructureFromURL(preferred.url, preferred.name);
+    await loadStructureFromURL(preferred.url, preferred.name, { origin: { type: 'sample', id: preferred.id } });
   }
   hideLoading();
 }
@@ -461,6 +496,7 @@ function populateStaticControls() {
   }
   els.dataColormap.value = 'viridis';
   renderInteractionTypeToggles();
+  renderHelpCommands();
   syncControlOutputs();
 }
 
@@ -495,7 +531,7 @@ function bindEvents() {
     const sample = state.samples.find((item) => item.id === els.sampleSelect.value);
     if (!sample) return;
     history.replaceState(null, '', location.pathname + location.search);
-    await guardedLoad(() => loadStructureFromURL(sample.url, sample.name, { add: els.addMode.checked }));
+    await guardedLoad(() => loadStructureFromURL(sample.url, sample.name, { add: els.addMode.checked, origin: { type: 'sample', id: sample.id } }));
   });
   els.fileInput.addEventListener('change', async () => {
     const files = [...(els.fileInput.files ?? [])];
@@ -622,7 +658,14 @@ function bindEvents() {
   els.searchInput.addEventListener('input', renderSearch);
   els.searchInput.addEventListener('keydown', onSearchKey);
   els.searchInput.addEventListener('blur', () => setTimeout(() => els.searchResults.classList.remove('is-visible'), 150));
-  els.chainsAll.addEventListener('click', () => setVisibleChains(null));
+  els.chainsAll.addEventListener('click', () => {
+    if (state.display.hiddenResidues?.size) setHiddenResidues(state.active, null);
+    setVisibleChains(null);
+  });
+  els.selectionSticks.addEventListener('click', () => styleSelection({ overlay: 'sticks' }));
+  els.selectionHide.addEventListener('click', () => styleSelection({ hide: true }));
+  els.selectionColor.addEventListener('input', () => styleSelection({ color: els.selectionColor.value }));
+  els.selectionResetStyle.addEventListener('click', () => styleSelection({ reset: true }));
   els.chainsInvert.addEventListener('click', invertChains);
   els.selectionClear.addEventListener('click', () => clearSelection(true));
   els.focusSelection.addEventListener('click', () => focusResidues([...state.selection]));
@@ -655,12 +698,15 @@ function bindEvents() {
     renderSequence();
   });
 
+  for (const [button, command] of [[els.sessionSave, 'save'], [els.sessionLink, 'link'], [els.sessionMvs, 'mvs']]) {
+    button.addEventListener('click', () => runCommand(command));
+  }
   els.compareReference.addEventListener('change', () => populateCompareChains());
   els.compareMobile.addEventListener('change', () => populateCompareChains());
   els.compareRun.addEventListener('click', () => runSuperposition());
   els.compareReset.addEventListener('click', resetComparedPositions);
   els.compareAlphaFold.addEventListener('click', compareWithAlphaFold);
-  els.compareModels.addEventListener('click', toggleModelOverlay);
+  els.compareModels.addEventListener('click', () => toggleModelOverlay());
   els.compareResult.addEventListener('click', (event) => {
     const action = event.target.closest('[data-compare-action]')?.dataset.compareAction;
     if (action) runCompareAction(action);
@@ -763,8 +809,9 @@ async function fetchStructure(query, options = {}) {
     const text = await response.text();
     const filename = response.headers.get('X-Proteoscope-Filename') || request.filename;
     const add = options.add ?? els.addMode.checked;
-    entry = await loadStructureFromText(text, filename, { source: request.label, add, activate: options.activate });
+    entry = await loadStructureFromText(text, filename, { source: request.label, add, activate: options.activate, origin: { type: 'fetch', id: request.id } });
     entry.fetchId = request.id;
+    entry.sourceURL = (response.headers.get('X-Proteoscope-Source') || '').replace(/\.gz$/i, '');
     applyRemoteMetadata(response.headers.get('X-Proteoscope-Meta-B64'), entry);
     els.sampleSelect.value = '';
     updateLocationHash();
@@ -776,6 +823,7 @@ async function fetchStructure(query, options = {}) {
 
 // Keeps a shareable #fetch=ID,ID[&superpose] link while every structure came from a fetch.
 function updateLocationHash() {
+  if (state.restoringSession) return;
   const ids = state.entries.map((entry) => entry.fetchId);
   if (!ids.length || ids.some((id) => !id)) {
     if (location.hash.includes('fetch=')) history.replaceState(null, '', location.pathname + location.search);
@@ -842,6 +890,10 @@ async function openFiles(files) {
     }
     for (const file of jsonFiles) {
       const text = await readFileText(file);
+      if (await openSessionFile(text)) {
+        history.replaceState(null, '', location.pathname + location.search);
+        continue;
+      }
       loadPAEFromJSON(JSON.parse(text), file.name);
     }
   });
@@ -880,6 +932,8 @@ async function loadStructureFromText(text, label, options = {}) {
   const template = state.active ?? state.defaults;
   if (!add) removeAllEntries();
   const entry = createEntry(structure, options.source || '', template);
+  // Local files keep their text so a saved session can embed them.
+  entry.origin = options.origin ?? { type: 'file', name: label, text };
   state.entries.push(entry);
   if (add && entry.color.scheme === 'chain') {
     // Chain colors repeat between entries, so a multi-structure scene starts colored by structure.
@@ -916,9 +970,10 @@ function createEntry(structure, sourceLabel, template = state.active ?? state.de
     structure,
     sourceLabel,
     visible: true,
-    display: { ...template.display, visibleChains: null, residueFilter: null, residueFilterKey: '' },
+    display: { ...template.display, visibleChains: null, residueFilter: null, residueFilterKey: '', residueStyles: null, hiddenResidues: null, overrideKey: '' },
     color,
-    surface: { kind: template.surface.kind, color: template.surface.color, opacity: template.surface.opacity, key: '', pending: 0, data: null },
+    colorOverrides: null,
+    surface: { kind: template.surface.kind, color: template.surface.color, opacity: template.surface.opacity, key: '', pending: 0, data: null, keys: null },
     interactions: { list: [], title: '' },
     transform: null,
     transformVersion: 0,
@@ -1041,8 +1096,7 @@ function resetEntryAnalysis(entry) {
   stopModelPlayback();
 }
 
-async function activateAssembly(assemblyID) {
-  const entry = state.active;
+async function activateAssembly(assemblyID, entry = state.active) {
   const structure = entry?.structure;
   if (!structure || structure.activeAssemblyId === assemblyID) return;
   const previous = { id: structure.activeAssemblyId, models: structure.models };
@@ -1165,11 +1219,11 @@ function applyRepresentationPreset(name) {
 function cartoonFor(entry, model) {
   const display = entry.display;
   const chains = display.visibleChains ? [...display.visibleChains].sort().join(',') : '*';
-  const key = [model.number, chains, display.residueFilterKey || '*', display.cartoonWidth.toFixed(2), display.cartoonQuality, state.secondaryMode].join('|');
+  const key = [model.number, chains, display.residueFilterKey || '*', display.overrideKey || '*', display.cartoonWidth.toFixed(2), display.cartoonQuality, state.secondaryMode].join('|');
   const cached = model.cartoonCache.get(key);
   if (cached) return cached;
   const cartoon = buildCartoon(model, {
-    include: (residue) => (!display.visibleChains || display.visibleChains.has(residue.chain)) && (!display.residueFilter || display.residueFilter.has(residue.key)),
+    include: (residue) => (!display.visibleChains || display.visibleChains.has(residue.chain)) && !display.hiddenResidues?.has(residue.key) && (!display.residueFilter || display.residueFilter.has(residue.key)),
     widthScale: display.cartoonWidth,
     quality: display.cartoonQuality,
   });
@@ -1348,7 +1402,9 @@ function updateColors() {
 
 function colorExtras(entry = state.active) {
   const scheme = entry.color.scheme;
-  const extras = { overrides: entry.proteomics.siteOverrides, structureColor: entryColor(entry) };
+  // Colors set with "color <color> <selection>" win over proteomics site highlights.
+  const overrides = entry.colorOverrides?.size ? new Map([...(entry.proteomics.siteOverrides ?? []), ...entry.colorOverrides]) : entry.proteomics.siteOverrides;
+  const extras = { overrides, structureColor: entryColor(entry) };
   if (scheme === 'coverage' && entry.proteomics.coverage) extras.residueValues = entry.proteomics.coverage;
   if (scheme === 'data' && entry.proteomics.data) {
     extras.residueValues = entry.proteomics.data;
@@ -1391,8 +1447,9 @@ function updateFlags() {
         if (residue) for (const atom of residue.atoms) flags[offset + atom.id] |= bit;
       }
     };
-    // The selection and hover of one structure light up the aligned residues of the others.
-    mark(entry === source ? entry.selection : mapKeys(source, entry, source?.selection), 1);
+    // Each structure shows its own selection plus the residues aligned to the active selection.
+    mark(entry.selection, 1);
+    if (entry !== source) mark(mapKeys(source, entry, source?.selection), 1);
     if (state.hover.residueKey && hoverEntry) {
       mark(entry === hoverEntry ? [state.hover.residueKey] : mapKeys(hoverEntry, entry, [state.hover.residueKey]), 2);
     }
@@ -1834,6 +1891,8 @@ function onKeyDown(event) {
 
 function selectResidues(keys, options = {}) {
   if (!state.structure) return;
+  // A new (non-additive) selection replaces selections made in other structures too.
+  if (!options.additive) for (const entry of state.entries) if (entry !== state.active) entry.selection = new Set();
   const next = options.additive ? new Set(state.selection) : new Set();
   for (const key of keys) {
     if (options.additive && options.toggle && next.has(key) && keys.length === 1) next.delete(key);
@@ -1848,6 +1907,7 @@ function selectResidues(keys, options = {}) {
 }
 
 function clearSelection(clearFocusToo) {
+  for (const entry of state.entries) entry.selection = new Set();
   state.selection = new Set();
   state.selectedAtom = null;
   if (clearFocusToo && state.focus) clearFocus();
@@ -2050,6 +2110,569 @@ function collectLabels() {
   return labels;
 }
 
+/* ---------- Selections and commands ---------- */
+
+function selectionTargets(entries = state.entries) {
+  return entries.map((entry) => ({
+    id: entry.id,
+    index: state.entries.indexOf(entry) + 1,
+    name: entry.name,
+    model: activeModelOf(entry),
+    structure: entry.structure,
+    context: selectionContext(entry),
+  }));
+}
+
+function selectionContext(entry) {
+  const comparison = comparisonFor(entry);
+  const deviation = comparison?.values('deviation') ?? null;
+  return {
+    selected: entry.selection,
+    focus: entry.focus?.neighborhood ?? null,
+    sites: siteResidueKeys(entry),
+    covered: entry.proteomics.coverage ? new Set(entry.proteomics.coverage.keys()) : null,
+    aligned: deviation ? new Set(deviation.keys()) : null,
+    values: { deviation, lddt: comparison?.values('lddt') ?? null, rmsf: entry.rmsf ?? null, rsa: entry.sasa?.relative ?? null },
+    uniprot: (residue) => uniprotNumber(entry, residue),
+  };
+}
+
+function uniprotNumber(entry, residue) {
+  const info = entry.structure.sequences?.get(residue.chain);
+  const mapped = info ? uniprotPositionForResidue(info, residue) : null;
+  if (mapped) return mapped.position;
+  return entry.structure.meta.isPredicted && !residue.iCode ? residue.resSeq : null;
+}
+
+// Evaluates selection text on the active model of each structure.
+function resolveSelection(text, entries = state.entries) {
+  const targets = selectionTargets(entries);
+  const masks = evaluateSelection(parseSelection(text), targets);
+  const results = [];
+  let residues = 0;
+  let atoms = 0;
+  for (const target of targets) {
+    const mask = masks.get(target.id);
+    const count = countMask(mask);
+    if (!count) continue;
+    const keys = residueKeysFromMask(target.model, mask);
+    const atomList = [];
+    for (let index = 0; index < mask.length; index += 1) if (mask[index]) atomList.push(target.model.atoms[index]);
+    results.push({ entry: entryById(target.id), model: target.model, keys, atoms: atomList });
+    residues += keys.size;
+    atoms += count;
+  }
+  return { text, results, residues, atoms };
+}
+
+function requireSelection(text, entries = state.entries) {
+  const resolved = resolveSelection(text, entries);
+  if (!resolved.residues) throw new CommandError(`Nothing matches "${text}".`);
+  return resolved;
+}
+
+function describeResolution(resolved) {
+  if (!resolved.residues) return 'nothing matches';
+  const where = resolved.results.length === 1 ? (state.entries.length > 1 ? ` in ${resolved.results[0].entry.name}` : '') : ` in ${resolved.results.length} structures`;
+  return `${formatNumber(resolved.residues)} residue${resolved.residues === 1 ? '' : 's'}, ${formatNumber(resolved.atoms)} atom${resolved.atoms === 1 ? '' : 's'}${where}`;
+}
+
+// Makes a resolved selection the current selection of every structure it touches.
+function applySelection(resolved, options = {}) {
+  for (const entry of state.entries) {
+    entry.selection = new Set(resolved.results.find((result) => result.entry === entry)?.keys ?? []);
+    entry.selectedAtom = null;
+  }
+  if (!state.selection.size) setActiveEntry(resolved.results[0].entry);
+  if (options.frame) fitView(true, false, resolved.results.flatMap((result) => result.atoms));
+  onSelectionChanged();
+}
+
+function findEntry(text) {
+  const value = String(text ?? '').trim();
+  const lower = value.toLowerCase();
+  if (!value) return null;
+  const byIndex = value.match(/^#?(\d+)$/);
+  if (byIndex) return state.entries[Number(byIndex[1]) - 1] ?? null;
+  return state.entries.find((entry) => entry.name.toLowerCase() === lower || entry.fetchId?.toLowerCase() === lower)
+    ?? state.entries.find((entry) => entry.name.toLowerCase().startsWith(lower))
+    ?? null;
+}
+
+function requireEntry(text) {
+  const entry = findEntry(text);
+  if (!entry) throw new CommandError(`No structure "${text}". Open structures: ${state.entries.map((item, index) => `#${index + 1} ${item.name}`).join(', ')}.`);
+  return entry;
+}
+
+function markOverridesChanged(entry) {
+  entry.display.overrideKey = `o${(state.overrideCounter = (state.overrideCounter ?? 0) + 1)}`;
+  markSceneDirty();
+}
+
+function setResidueStyles(entry, keys, style) {
+  const styles = new Map(entry.display.residueStyles ?? []);
+  for (const key of keys) {
+    if (style) styles.set(key, style);
+    else styles.delete(key);
+  }
+  entry.display.residueStyles = styles.size ? styles : null;
+  markOverridesChanged(entry);
+}
+
+// keys === null clears every hidden residue of the structure.
+function setHiddenResidues(entry, keys, hidden = true) {
+  const set = keys === null ? new Set() : new Set(entry.display.hiddenResidues ?? []);
+  for (const key of keys ?? []) {
+    if (hidden) set.add(key);
+    else set.delete(key);
+  }
+  entry.display.hiddenResidues = set.size ? set : null;
+  markOverridesChanged(entry);
+  if (entry.surface.kind !== 'off') refreshSurface(entry);
+}
+
+function setColorOverrides(entry, keys, hex) {
+  const overrides = new Map(entry.colorOverrides ?? []);
+  const color = hex ? hexColor(hex) : null;
+  for (const key of keys) {
+    if (color) overrides.set(key, color);
+    else overrides.delete(key);
+  }
+  entry.colorOverrides = overrides.size ? overrides : null;
+  markColorsDirty();
+}
+
+// Selection card buttons: style or hide the selected residues of the active structure.
+function styleSelection({ overlay = null, hide = false, color = null, reset = false }) {
+  const entry = state.active;
+  const keys = [...state.selection];
+  if (!entry || !keys.length) {
+    showToast('Select residues first.', true);
+    return;
+  }
+  if (overlay) {
+    const current = keys.every((key) => entry.display.residueStyles?.get(key) === overlay);
+    setResidueStyles(entry, keys, current ? null : overlay);
+  }
+  if (hide) {
+    setHiddenResidues(entry, keys, true);
+    clearSelection(false);
+    showToast(`Hid ${keys.length} residue${keys.length === 1 ? '' : 's'}. "All" in the Chains card shows them again.`);
+  }
+  if (color) setColorOverrides(entry, keys, color);
+  if (reset) {
+    setResidueStyles(entry, keys, null);
+    setColorOverrides(entry, keys, null);
+  }
+}
+
+// Runs one command line. Plain selections ("chain A and resi 10-20") are treated as "select".
+// Returns { ok, message, data } and reports the outcome with a toast unless options.quiet.
+async function runCommand(text, options = {}) {
+  const source = String(text ?? '').trim();
+  try {
+    if (!source) throw new CommandError('Type a command, for example "help".');
+    let parsed = parseCommand(source, { schemes: COLOR_SCHEME_IDS });
+    if (!parsed) {
+      if (!looksLikeSelection(source)) throw new CommandError(`"${source.split(/\s+/)[0]}" is not a command or a selection. Type "help" for the list.`);
+      parsed = parseCommand(`select ${source}`);
+    }
+    if (!state.structure && !['fetch', 'add', 'help'].includes(parsed.name)) throw new CommandError('Open a structure first.');
+    const outcome = await executeCommand(parsed, options);
+    const result = typeof outcome === 'object' && outcome ? outcome : { message: outcome ?? '' };
+    rememberCommand(source);
+    if (!options.quiet && result.message) showToast(result.message);
+    return { ok: true, message: result.message ?? '', data: result.data };
+  } catch (error) {
+    if (!(error instanceof CommandError) && error?.name !== 'SelectionError') console.error(error);
+    if (!options.quiet) showToast(error.message, true);
+    return { ok: false, message: error.message };
+  }
+}
+
+async function executeCommand(parsed, options) {
+  switch (parsed.name) {
+    case 'select': {
+      const resolved = requireSelection(parsed.selection);
+      applySelection(resolved, { frame: options.frame });
+      return {
+        message: `Selected ${describeResolution(resolved)}.`,
+        data: options.remote ? { residues: resolved.residues, atoms: resolved.atoms, structures: resolved.results.map((result) => ({ name: result.entry.name, residues: [...result.keys] })) } : undefined,
+      };
+    }
+    case 'list':
+      return {
+        message: state.entries.map((entry, index) => `#${index + 1} ${entry.name}${entry === state.active ? ' (active)' : ''}${entry.visible ? '' : ' (hidden)'}`).join(', '),
+        data: state.entries.map((entry, index) => ({
+          index: index + 1,
+          name: entry.name,
+          active: entry === state.active,
+          visible: entry.visible,
+          chains: entry.structure.chains.filter((chain) => chain.polymerKind).map((chain) => chain.id),
+          comparison: entry.comparison ? { reference: entryById(entry.comparison.referenceId)?.name, ...entry.comparison.stats } : null,
+        })),
+      };
+    case 'zoom':
+    case 'orient': {
+      const atoms = parsed.selection ? requireSelection(parsed.selection).results.flatMap((result) => result.atoms) : null;
+      fitView(true, parsed.name === 'orient', atoms);
+      return '';
+    }
+    case 'focus': {
+      const resolved = requireSelection(parsed.selection);
+      const target = resolved.results.find((result) => result.entry === state.active) ?? resolved.results[0];
+      setActiveEntry(target.entry);
+      await focusResidues([...target.keys]);
+      return `Focused ${formatNumber(target.keys.size)} residue${target.keys.size === 1 ? '' : 's'}${state.entries.length > 1 ? ` in ${target.entry.name}` : ''}.`;
+    }
+    case 'show':
+    case 'hide':
+      return representationCommand(parsed);
+    case 'color':
+      return colorCommand(parsed);
+    case 'label':
+    case 'unlabel': {
+      const resolved = parsed.selection ? requireSelection(parsed.selection) : null;
+      const targets = resolved ? resolved.results : [{ entry: state.active, keys: new Set(state.selection) }];
+      if (!resolved && !state.selection.size) {
+        if (parsed.name === 'unlabel') {
+          for (const entry of state.entries) entry.labels = new Set();
+          requestRender();
+          return 'Removed all labels.';
+        }
+        throw new CommandError('Select residues or give a selection, for example "label resn STI".');
+      }
+      let count = 0;
+      for (const { entry, keys } of targets) {
+        const labels = new Set(entry.labels);
+        for (const key of [...keys].slice(0, 300)) {
+          if (parsed.name === 'label') labels.add(key);
+          else labels.delete(key);
+          count += 1;
+        }
+        entry.labels = labels;
+      }
+      requestRender();
+      return `${parsed.name === 'label' ? 'Labeled' : 'Unlabeled'} ${count} residue${count === 1 ? '' : 's'}.`;
+    }
+    case 'fetch':
+    case 'add': {
+      const entry = await fetchStructure(parsed.id, { add: parsed.name === 'add' });
+      if (!entry) throw new CommandError(`Could not open ${parsed.id}.`);
+      return { message: `Opened ${entry.name}.`, data: { name: entry.name, atoms: activeModelOf(entry).atoms.length, chains: entry.structure.chains.filter((chain) => chain.polymerKind).map((chain) => chain.id) } };
+    }
+    case 'remove': {
+      const entry = requireEntry(parsed.structure);
+      if (state.entries.length < 2) throw new CommandError('The last structure cannot be removed; open another one instead.');
+      removeEntry(entry);
+      return `Removed ${entry.name}.`;
+    }
+    case 'activate': {
+      const entry = requireEntry(parsed.structure);
+      setActiveEntry(entry);
+      return `${entry.name} is active.`;
+    }
+    case 'superpose':
+      return superposeCommand(parsed);
+    case 'alphafold':
+      await compareWithAlphaFold();
+      return '';
+    case 'overlay': {
+      if (state.active.structure.models.length < 2) throw new CommandError(`${state.active.name} has one model; overlays need an ensemble such as an NMR structure.`);
+      const wanted = parsed.state === 'toggle' ? !state.active.overlay : parsed.state === 'on';
+      if (wanted !== Boolean(state.active.overlay)) toggleModelOverlay();
+      return '';
+    }
+    case 'preset':
+      if (!REPRESENTATION_PRESETS[parsed.value]) throw new CommandError(`Presets: ${Object.keys(REPRESENTATION_PRESETS).join(', ')}.`);
+      applyRepresentationPreset(parsed.value);
+      return '';
+    case 'lighting':
+      if (!LIGHTING_PRESETS[parsed.value]) throw new CommandError(`Lighting presets: ${Object.keys(LIGHTING_PRESETS).join(', ')}.`);
+      applyLightingPreset(parsed.value);
+      return '';
+    case 'bg':
+      if (!BACKGROUNDS[parsed.value]) throw new CommandError(`Backgrounds: ${Object.keys(BACKGROUNDS).join(', ')}.`);
+      setBackground(parsed.value);
+      return '';
+    case 'distance': {
+      const a = requireSingleAtom(parsed.from);
+      const b = requireSingleAtom(parsed.to);
+      const measurement = { type: 'distance', atoms: [a, b], value: measureValue('distance', [a.atom, b.atom]) };
+      state.measurements.push(measurement);
+      renderMeasurements();
+      markSceneDirty();
+      return { message: `Distance ${formatMeasurement(measurement)}.`, data: { distance: measurement.value } };
+    }
+    case 'turn':
+      rotateView(parsed.axis, parsed.degrees);
+      return '';
+    case 'spin':
+      setSpin(parsed.state === 'toggle' ? !state.spin : parsed.state === 'on');
+      return '';
+    case 'reset':
+      resetView(true);
+      return '';
+    case 'save':
+      if (options.remote) return { message: 'Session document returned.', data: await sessionDocument() };
+      await saveSession();
+      return '';
+    case 'link':
+      if (options.remote) {
+        const link = await sessionLink().catch((error) => {
+          throw new CommandError(error.message);
+        });
+        return { message: link, data: { link } };
+      }
+      return copySessionLink();
+    case 'mvs': {
+      if (!options.remote) {
+        await exportMolViewSpec();
+        return '';
+      }
+      const { remote, spec, files } = await buildMolViewSpecExport();
+      if (remote) return { message: 'MolViewSpec (.mvsj) returned.', data: { format: 'mvsj', spec } };
+      const archive = await createZip([{ name: 'index.mvsj', data: JSON.stringify(spec) }, ...files]);
+      return { message: 'MolViewSpec archive (.mvsx) returned as base64.', data: { format: 'mvsx', base64: bytesToBase64(archive) } };
+    }
+    case 'png': {
+      els.exportSize.value = String(parsed.scale);
+      els.exportTransparent.checked = parsed.transparent;
+      const canvas = await renderImageCanvas();
+      const dataURL = options.returnImage ? canvas.toDataURL('image/png') : null;
+      if (!options.returnImage) {
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+        downloadBlob(`${fileStem()}.png`, blob);
+      }
+      return { message: `${options.returnImage ? 'Rendered' : 'Saved'} ${canvas.width} × ${canvas.height} PNG.`, data: options.returnImage ? { image: dataURL, width: canvas.width, height: canvas.height } : undefined };
+    }
+    case 'help': {
+      if (parsed.topic) {
+        const command = COMMANDS.find((item) => item.name === parsed.topic || item.aliases.includes(parsed.topic));
+        if (!command) throw new CommandError(`No command "${parsed.topic}".`);
+        return `${command.syntax}: ${command.summary}.`;
+      }
+      els.helpDialog.showModal();
+      els.helpCommands.scrollIntoView({ block: 'start' });
+      return '';
+    }
+    default:
+      throw new CommandError(`"${parsed.name}" is not available.`);
+  }
+}
+
+function representationCommand({ name, representation, selection }) {
+  const show = name === 'show';
+  if (!selection) {
+    switch (representation) {
+      case 'water':
+        els.showWater.checked = show;
+        updateDisplay({ showWater: show });
+        return '';
+      case 'hydrogens':
+        els.showHydrogen.checked = show;
+        updateDisplay({ showHydrogen: show });
+        return '';
+      case 'surface':
+        for (const entry of styleTargets()) {
+          entry.surface.kind = show ? (entry.surface.kind === 'off' ? 'ses' : entry.surface.kind) : 'off';
+          entry.surface.keys = null;
+          entry.surface.keysKey = '';
+        }
+        syncStyleControls();
+        refreshSurface();
+        return '';
+      case 'labels':
+        if (show) throw new CommandError('Give residues to label, for example "show labels resn STI".');
+        for (const entry of state.entries) entry.labels = new Set();
+        requestRender();
+        return '';
+      case 'cartoon':
+      case 'trace':
+        updateDisplay({ polymer: show ? representation : 'none' });
+        syncStyleControls();
+        return '';
+      case 'everything':
+        for (const entry of state.entries) {
+          if (show) {
+            entry.visible = true;
+            if (entry.display.hiddenResidues) setHiddenResidues(entry, null);
+          } else {
+            entry.visible = false;
+          }
+        }
+        renderStructureList();
+        markSceneDirty();
+        refreshSurface();
+        return show ? '' : 'Hid all structures; "show everything" shows them again.';
+      default:
+        if (show) {
+          applyRepresentationPreset(representation);
+        } else {
+          for (const entry of state.entries) if (entry.display.residueStyles) setResidueStyles(entry, [...entry.display.residueStyles.keys()], null);
+        }
+        syncStyleControls();
+        return '';
+    }
+  }
+  const resolved = requireSelection(selection);
+  for (const { entry, keys } of resolved.results) {
+    switch (representation) {
+      case 'sticks':
+      case 'ball-stick':
+      case 'spacefill':
+        if (show) {
+          setResidueStyles(entry, keys, representation);
+          if (entry.display.hiddenResidues) setHiddenResidues(entry, keys, false);
+        } else {
+          setResidueStyles(entry, keys, null);
+        }
+        break;
+      case 'surface': {
+        const polymerKeys = entry.surface.keys ?? new Set(activeModelOf(entry).residues.filter((residue) => residue.kind !== 'water').map((residue) => residue.key));
+        const next = show && !entry.surface.keys ? new Set() : new Set(polymerKeys);
+        for (const key of keys) {
+          if (show) next.add(key);
+          else next.delete(key);
+        }
+        entry.surface.keys = next;
+        entry.surface.keysKey = `s${(state.overrideCounter = (state.overrideCounter ?? 0) + 1)}`;
+        if (show && entry.surface.kind === 'off') entry.surface.kind = 'ses';
+        refreshSurface(entry);
+        break;
+      }
+      case 'labels': {
+        const labels = new Set(entry.labels);
+        for (const key of [...keys].slice(0, 300)) {
+          if (show) labels.add(key);
+          else labels.delete(key);
+        }
+        entry.labels = labels;
+        requestRender();
+        break;
+      }
+      case 'water':
+      case 'hydrogens':
+        throw new CommandError(`"${name} ${representation}" applies to the whole scene; leave out the selection.`);
+      default:
+        setHiddenResidues(entry, keys, !show);
+    }
+  }
+  syncStyleControls();
+  return `${show ? 'Showing' : 'Hiding'} ${representation === 'everything' || representation === 'cartoon' ? '' : `${representation} for `}${describeResolution(resolved)}.`;
+}
+
+function colorCommand({ selection, color, scheme, reset }) {
+  if (scheme) {
+    setColorScheme(scheme);
+    syncStyleControls();
+    return '';
+  }
+  if (reset) {
+    if (selection) {
+      for (const { entry, keys } of requireSelection(selection).results) setColorOverrides(entry, keys, null);
+    } else {
+      for (const entry of styleTargets()) if (entry.colorOverrides) setColorOverrides(entry, [...entry.colorOverrides.keys()], null);
+    }
+    return 'Custom colors removed.';
+  }
+  if (!selection) {
+    for (const entry of styleTargets()) {
+      entry.color.scheme = 'uniform';
+      entry.color.uniformColor = color;
+    }
+    syncStyleControls();
+    markColorsDirty();
+    return '';
+  }
+  const resolved = requireSelection(selection);
+  for (const { entry, keys } of resolved.results) setColorOverrides(entry, keys, color);
+  return `Colored ${describeResolution(resolved)}.`;
+}
+
+function superposeCommand({ mobile, reference, fit }) {
+  const all = ['all', '*'].includes(mobile.toLowerCase());
+  const fixed = reference ? requireEntry(reference) : null;
+  const moving = all ? null : requireEntry(mobile);
+  const referenceEntry = fixed ?? (moving === state.active ? state.entries.find((entry) => entry !== moving) : state.active);
+  const mobiles = all ? state.entries.filter((entry) => entry !== referenceEntry) : [moving];
+  if (!referenceEntry || !mobiles.length || mobiles.includes(referenceEntry)) throw new CommandError('Superposition needs two different structures, for example "superpose 1AKE onto 4AKE".');
+  const fitKeys = fit ? requireSelection(fit, [referenceEntry]).results[0].keys : null;
+  const results = runSuperposition({ reference: referenceEntry, mobiles, fitKeys });
+  const lines = results.map((item) => (item.error
+    ? `${item.mobile.name}: ${item.error.message}`
+    : `${item.mobile.name} onto ${referenceEntry.name}: ${item.result.stats.rmsd.toFixed(2)} Å over ${item.result.stats.keptCount} pairs, TM-score ${item.result.stats.tmScore.toFixed(3)}`));
+  if (results.every((item) => item.error)) throw new CommandError(lines.join('; '));
+  return { message: lines.join('; '), data: results.map((item) => ({ name: item.mobile.name, stats: item.result?.stats ?? null, error: item.error?.message ?? null })) };
+}
+
+function requireSingleAtom(text) {
+  const resolved = requireSelection(text);
+  const atoms = resolved.results.flatMap((result) => result.atoms.map((atom) => ({ entry: result.entry, model: result.model, atom })));
+  if (atoms.length !== 1) throw new CommandError(`"${text}" matches ${formatNumber(atoms.length)} atoms; a distance needs exactly one (for example add @CA).`);
+  return atoms[0];
+}
+
+function rotateView(axis, degrees) {
+  const basis = cameraBasis(state.camera);
+  const vector = axis === 'x' ? basis.right : axis === 'y' ? basis.up : basis.forward;
+  state.camera.rotation = quatNormalize(quatMultiply(quatFromAxisAngle(vector, (-degrees * Math.PI) / 180), state.camera.rotation));
+  state.cameraAnimation = null;
+  requestRender();
+}
+
+function setBackground(name) {
+  state.background = name;
+  setActiveButton('[data-background]', document.querySelector(`[data-background="${name}"]`));
+  requestRender();
+}
+
+function renderHelpCommands() {
+  els.helpCommands.innerHTML = `<h3>Commands</h3>
+    <p class="hint">Type in the search box (<kbd>/</kbd>). Plain selections select; ↑ and ↓ recall earlier commands.</p>
+    <dl class="command-list">${COMMANDS.map((command) => `<div><dt><code>${escapeHTML(command.syntax)}</code></dt><dd>${escapeHTML(command.summary)}</dd></div>`).join('')}</dl>
+    <h3>Selections</h3>
+    <dl class="command-list">
+      <div><dt><code>chain A+B</code> <code>resi 40-80</code> <code>resn STI</code> <code>name CA</code> <code>elem FE</code></dt><dd>Chains, residue numbers (with insertion codes), residue and atom names (<code>*</code> wildcards) and elements</dd></div>
+      <div><dt><code>/A:40-80@CA</code> <code>#2</code> <code>:HEM</code></dt><dd>ChimeraX-style specs: #structure, /chain, :residues, @atoms</dd></div>
+      <div><dt><code>protein</code> <code>nucleic</code> <code>ligand</code> <code>ion</code> <code>water</code> <code>hetatm</code> <code>backbone</code> <code>sidechain</code> <code>helix</code> <code>sheet</code></dt><dd>Classes</dd></div>
+      <div><dt><code>and</code> <code>or</code> <code>not</code> <code>( )</code></dt><dd>Logic; words next to each other mean "and"</dd></div>
+      <div><dt><code>within 5 of X</code> <code>around 5 of X</code> <code>byres X</code> <code>bychain X</code></dt><dd>Neighborhoods (in Å, across structures) and expansion to whole residues or chains</dd></div>
+      <div><dt><code>b &gt; 60</code> <code>plddt &lt; 70</code> <code>deviation &gt; 2</code> <code>rsa &gt; 0.4</code> <code>uniprot 175</code></dt><dd>Values: B-factor, confidence, superposition deviation, lDDT, RMSF, relative SASA, UniProt numbering</dd></div>
+      <div><dt><code>sele</code> <code>focus</code> <code>sites</code> <code>covered</code> <code>aligned</code></dt><dd>Current selection, focus, proteomics sites, peptide coverage, residues paired in a comparison</dd></div>
+    </dl>`;
+}
+
+/* ---------- Remote control ---------- */
+
+// With --remote-control, commands from scripts on this computer (for example a Jupyter notebook)
+// arrive over Server-Sent Events; the outcome, including PNG images, sessions and MolViewSpec,
+// goes back to the server, which answers the script.
+function connectRemoteControl() {
+  if (typeof EventSource === 'undefined') return;
+  const source = new EventSource('/api/remote/events');
+  source.addEventListener('command', async (event) => {
+    let request;
+    try {
+      request = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    const result = await runCommand(request.command, { remote: true, returnImage: true });
+    try {
+      await fetch(`/api/remote/result/${encodeURIComponent(request.id)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ok: result.ok, message: result.message, data: result.data ?? null }),
+      });
+    } catch (error) {
+      console.warn('Could not return a remote-control result', error);
+    }
+  });
+  els.gpuBadge.title = `${els.gpuBadge.title} · remote control is on`;
+}
+
 /* ---------- Structures and comparison ---------- */
 
 const EYE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z" /><circle cx="12" cy="12" r="2.8" /></svg>';
@@ -2162,10 +2785,10 @@ function runSuperposition(options = {}) {
     showToast('Choose two different structures to superpose.', true);
     return [];
   }
-  const refChain = options.refChain ?? (els.compareRefChain.value || '*');
-  const mobChain = options.mobChain ?? (els.compareMobChain.value || '*');
-  let fitKeys = null;
-  if (options.fitSelection ?? els.compareFitSelection.checked) {
+  const refChain = options.refChain ?? (options.reference ? '*' : els.compareRefChain.value || '*');
+  const mobChain = options.mobChain ?? (options.reference ? '*' : els.compareMobChain.value || '*');
+  let fitKeys = options.fitKeys ?? null;
+  if (!fitKeys && (options.fitSelection ?? (!options.reference && els.compareFitSelection.checked))) {
     fitKeys = new Set(reference.selection);
     if (fitKeys.size < 3) {
       showToast(`Select at least three residues of ${reference.name} to fit on (for example one domain), or untick "Fit on selected residues".`, true);
@@ -2175,12 +2798,13 @@ function runSuperposition(options = {}) {
   const results = [];
   for (const mobile of mobiles) {
     try {
-      const result = compareStructures(pairOf(reference), pairOf(mobile), {
+      const recipe = {
         refChains: refChain !== '*' ? [refChain] : null,
         mobChains: mobChain !== '*' && mobiles.length === 1 ? [mobChain] : null,
-        fitKeys,
-      });
-      applyComparison(reference, mobile, result);
+        fitKeys: fitKeys ? [...fitKeys] : null,
+      };
+      const result = compareStructures(pairOf(reference), pairOf(mobile), { ...recipe, fitKeys });
+      applyComparison(reference, mobile, result, recipe);
       results.push({ mobile, result });
     } catch (error) {
       console.warn(error);
@@ -2217,7 +2841,8 @@ function stylePredictedComparison(reference, mobile) {
   return true;
 }
 
-function applyComparison(reference, mobile, result) {
+// `recipe` records how the comparison was made, so a restored session can recompute it.
+function applyComparison(reference, mobile, result, recipe = {}) {
   applyEntryTransform(mobile, result.transform);
   const byMobile = new Map();
   const byReference = new Map();
@@ -2225,7 +2850,7 @@ function applyComparison(reference, mobile, result) {
     byMobile.set(pair.mob.key, { key: pair.ref.key, distance: pair.distance, lddt: pair.lddt, fitted: pair.fitted });
     byReference.set(pair.ref.key, { key: pair.mob.key, distance: pair.distance, lddt: pair.lddt, fitted: pair.fitted });
   }
-  mobile.comparison = { referenceId: reference.id, time: performance.now(), stats: result.stats, chainPairs: result.chainPairs, byMobile, byReference };
+  mobile.comparison = { referenceId: reference.id, time: performance.now(), stats: result.stats, chainPairs: result.chainPairs, byMobile, byReference, recipe };
   if (mobile.display.residueFilter) trimToAligned(mobile, true);
   state.correspondences.clear();
   updateLocationHash();
@@ -2489,10 +3114,12 @@ async function compareWithAlphaFold() {
     }
     model.color.scheme = 'plddt';
     let result = null;
+    let recipe = null;
     let lastError = null;
     for (const options of [{ correspondence: 'uniprot', refChains: [chainId], accession }, { refChains: [chainId] }]) {
       try {
         result = compareStructures(pairOf(reference), pairOf(model), options);
+        recipe = options;
         if (result.stats.pairCount >= 10) break;
         result = null;
       } catch (error) {
@@ -2500,7 +3127,7 @@ async function compareWithAlphaFold() {
       }
     }
     if (result) {
-      applyComparison(reference, model, result);
+      applyComparison(reference, model, result, recipe);
       stylePredictedComparison(reference, model);
       results.push({ mobile: model, result });
     } else {
@@ -2516,8 +3143,7 @@ async function compareWithAlphaFold() {
 
 // Shows every model of an ensemble at once, superposed on the core they share, with per-residue
 // RMSF; a second call returns to one model at a time.
-function toggleModelOverlay() {
-  const entry = state.active;
+function toggleModelOverlay(entry = state.active) {
   if (!entry || entry.structure.models.length < 2) return;
   stopModelPlayback();
   if (entry.overlay) {
@@ -2569,6 +3195,477 @@ function toggleModelOverlay() {
   renderStructureList();
   markSceneDirty();
   fitView(true, false);
+}
+
+/* ---------- Sessions and MolViewSpec ---------- */
+
+const SESSION_FORMAT = 'proteoscope-session';
+const SESSION_VERSION = 1;
+
+// A session records how to rebuild the workspace: where each structure came from (fetched ID,
+// bundled example, or the embedded text of a local file), its style, position, comparisons,
+// selections and proteomics overlays, plus the camera and scene settings.
+async function sessionDocument(options = {}) {
+  const structures = [];
+  for (const entry of state.entries) structures.push(await serializeEntry(entry, options));
+  const camera = state.camera;
+  return {
+    format: SESSION_FORMAT,
+    version: SESSION_VERSION,
+    created: new Date().toISOString(),
+    application: 'Proteoscope',
+    title: state.active?.structure.meta.title ?? '',
+    view: {
+      camera: { target: [...camera.target], distance: camera.distance, rotation: [...camera.rotation], fov: camera.fov, orthographic: camera.orthographic },
+      lighting: { ...state.lighting },
+      background: state.background,
+      clip: { ...state.clip },
+      secondaryMode: state.secondaryMode,
+      styleScope: state.styleScope,
+      legendCollapsed: Boolean(state.legendCollapsed),
+    },
+    active: state.entries.indexOf(state.active),
+    structures,
+    measurements: state.measurements.map((measurement) => ({
+      type: measurement.type,
+      atoms: measurement.atoms.map((item) => ({ structure: state.entries.indexOf(item.entry), model: item.model.number, residue: item.atom.residueKey, atom: item.atom.name })),
+    })),
+  };
+}
+
+async function serializeEntry(entry, options) {
+  const origin = entry.origin ?? { type: 'file', name: entry.name };
+  let source;
+  if (origin.type === 'fetch' || origin.type === 'sample') {
+    source = { type: origin.type, id: origin.id };
+  } else {
+    if (options.link) throw new Error(`${entry.name} is a local file, so it cannot travel in a link. Save the session as a file instead.`);
+    source = { type: 'file', name: origin.name, encoding: 'gzip-base64', data: bytesToBase64(await compressText(origin.text ?? '')) };
+  }
+  const display = { ...entry.display };
+  delete display.residueFilter;
+  delete display.residueFilterKey;
+  delete display.overrideKey;
+  display.visibleChains = entry.display.visibleChains ? [...entry.display.visibleChains] : null;
+  display.residueStyles = entry.display.residueStyles ? [...entry.display.residueStyles] : null;
+  display.hiddenResidues = entry.display.hiddenResidues ? [...entry.display.hiddenResidues] : null;
+  const referenceIndex = entry.comparison ? state.entries.findIndex((item) => item.id === entry.comparison.referenceId) : -1;
+  const proteomics = entry.proteomics;
+  return {
+    name: entry.name,
+    source,
+    visible: entry.visible,
+    assembly: entry.structure.activeAssemblyId,
+    activeModel: entry.activeModel,
+    display,
+    color: { ...entry.color },
+    colorOverrides: entry.colorOverrides ? [...entry.colorOverrides].map(([key, color]) => [key, colorToHex(color)]) : null,
+    surface: { kind: entry.surface.kind, color: entry.surface.color, opacity: entry.surface.opacity, keys: entry.surface.keys ? [...entry.surface.keys] : null },
+    transform: entry.transform,
+    comparison: referenceIndex >= 0 ? { reference: referenceIndex, ...entry.comparison.recipe } : null,
+    trimmed: Boolean(entry.display.residueFilter),
+    overlay: Boolean(entry.overlay),
+    selection: [...entry.selection],
+    focus: entry.focus ? [...entry.focus.residues] : null,
+    labels: [...entry.labels],
+    proteomics: {
+      coverage: proteomics.coverage ? [...proteomics.coverage] : null,
+      data: proteomics.data ? [...proteomics.data] : null,
+      dataLabel: proteomics.dataLabel,
+      sites: proteomics.sites.map((site) => ({ residue: site.residue.key, label: site.label, mismatch: Boolean(site.mismatch) })),
+      crosslinks: proteomics.crosslinks.map((link) => ({ ...linkFields(link), atomA: atomRef(link.atomA), atomB: atomRef(link.atomB) })),
+    },
+  };
+}
+
+function linkFields(link) {
+  const { atomA, atomB, ...fields } = link;
+  return fields;
+}
+
+function atomRef(atom) {
+  return atom ? { residue: atom.residueKey, atom: atom.name } : null;
+}
+
+async function saveSession() {
+  const document0 = await sessionDocument();
+  downloadText(`${fileStem()}.proteoscope.json`, JSON.stringify(document0), 'application/json');
+  showToast(`Saved the session (${state.entries.length} structure${state.entries.length === 1 ? '' : 's'}). Open or drop the file to restore it.`);
+}
+
+async function sessionLink() {
+  const document0 = await sessionDocument({ link: true });
+  return `${location.origin}${location.pathname}#session=${await encodeLinkPayload(JSON.stringify(document0))}`;
+}
+
+async function copySessionLink() {
+  let link;
+  try {
+    link = await sessionLink();
+  } catch (error) {
+    throw new CommandError(error.message);
+  }
+  try {
+    await navigator.clipboard.writeText(link);
+    return `Copied a link to this view (${formatNumber(link.length)} characters). It opens in Proteoscope on this port.`;
+  } catch {
+    history.replaceState(null, '', link);
+    return 'The link is now in the address bar; copy it from there.';
+  }
+}
+
+function isSessionDocument(value) {
+  return value && typeof value === 'object' && value.format === SESSION_FORMAT;
+}
+
+// Rebuilds a saved workspace. Structures load in order, then positions, comparisons, styles,
+// selections and the view are reapplied.
+async function restoreSession(document0) {
+  if (!isSessionDocument(document0)) throw new Error('This file is not a Proteoscope session.');
+  if (document0.version > SESSION_VERSION) throw new Error('This session was saved by a newer version of Proteoscope.');
+  const items = document0.structures ?? [];
+  if (!items.length) throw new Error('The session contains no structures.');
+  const view = document0.view ?? {};
+  if (view.secondaryMode && view.secondaryMode !== state.secondaryMode) {
+    state.secondaryMode = view.secondaryMode;
+    setActiveButton('[data-ss-mode]', document.querySelector(`[data-ss-mode="${view.secondaryMode}"]`));
+  }
+  const entries = [];
+  const problems = [];
+  for (const [index, item] of items.entries()) {
+    showLoading(`Restoring ${item.name ?? `structure ${index + 1}`} (${index + 1} of ${items.length})`);
+    const add = entries.some(Boolean);
+    let entry = null;
+    try {
+      entry = await loadSessionSource(item.source, { add, name: item.name });
+    } catch (error) {
+      problems.push(`${item.name}: ${error.message}`);
+    }
+    entries.push(entry);
+    if (entry) await applyEntrySettings(entry, item);
+  }
+  // Positions first, then comparisons (whose fits are then near-identity), then the rest.
+  items.forEach((item, index) => {
+    const entry = entries[index];
+    if (entry && item.transform) applyEntryTransform(entry, item.transform);
+  });
+  items.forEach((item, index) => {
+    const entry = entries[index];
+    const reference = entries[item.comparison?.reference];
+    if (!entry || !reference) return;
+    try {
+      const { reference: ignored, ...recipe } = item.comparison;
+      const fitKeys = recipe.fitKeys ? new Set(recipe.fitKeys) : null;
+      applyComparison(reference, entry, compareStructures(pairOf(reference), pairOf(entry), { ...recipe, fitKeys }), recipe);
+      if (item.trimmed) trimToAligned(entry, true);
+    } catch (error) {
+      problems.push(`${item.name}: ${error.message}`);
+    }
+  });
+  items.forEach((item, index) => {
+    const entry = entries[index];
+    if (entry && item.overlay && !entry.overlay) toggleModelOverlay(entry);
+    if (entry) applyEntryState(entry, item);
+  });
+  state.measurements = (document0.measurements ?? []).map((measurement) => {
+    const atoms = measurement.atoms.map((ref) => {
+      const entry = entries[ref.structure];
+      const model = entry?.structure.models.find((item) => item.number === ref.model);
+      const atom = model?.residueMap.get(ref.residue)?.atomByName.get(ref.atom);
+      return atom ? { entry, model, atom } : null;
+    });
+    return atoms.every(Boolean) ? { type: measurement.type, atoms, value: measureValue(measurement.type, atoms.map((item) => item.atom)) } : null;
+  }).filter(Boolean);
+  applySessionView(view);
+  const active = entries[document0.active] ?? entries.find(Boolean);
+  if (active) {
+    state.active = null;
+    setActiveEntry(active);
+  }
+  for (const entry of state.entries) refreshSurface(entry);
+  updateStructureUI();
+  renderMeasurements();
+  markSceneDirty();
+  hideLoading();
+  if (problems.length) showToast(`Session restored with problems: ${problems.join('; ')}`, true);
+  else showToast(`Restored the session (${state.entries.length} structure${state.entries.length === 1 ? '' : 's'}).`);
+  for (const entry of state.entries) if (entry.focus) computeFocusInteractionsFor(entry);
+}
+
+async function loadSessionSource(source, options) {
+  if (source?.type === 'fetch') {
+    const entry = await fetchStructure(source.id, { add: options.add, activate: false });
+    if (!entry) throw new Error(`could not fetch ${source.id}`);
+    return entry;
+  }
+  if (source?.type === 'sample') {
+    const sample = state.samples.find((item) => item.id === source.id);
+    if (!sample) throw new Error(`the bundled example ${source.id} is not available`);
+    return loadStructureFromURL(sample.url, sample.name, { add: options.add, activate: false, origin: { type: 'sample', id: sample.id } });
+  }
+  if (source?.type === 'file') {
+    const text = source.encoding === 'gzip-base64' ? await decompressText(base64ToBytes(source.data)) : source.data;
+    return loadStructureFromText(text, source.name ?? options.name ?? 'structure', { add: options.add, activate: false, source: 'Session file', origin: { type: 'file', name: source.name, text } });
+  }
+  throw new Error('unknown source');
+}
+
+async function applyEntrySettings(entry, item) {
+  if (item.name) entry.name = item.name;
+  entry.visible = item.visible !== false;
+  if (item.assembly && item.assembly !== entry.structure.activeAssemblyId) await activateAssembly(item.assembly, entry);
+  entry.activeModel = Math.min(Math.max(0, item.activeModel ?? 0), entry.structure.models.length - 1);
+  const display = item.display ?? {};
+  Object.assign(entry.display, {
+    ...display,
+    visibleChains: display.visibleChains ? new Set(display.visibleChains) : null,
+    residueStyles: display.residueStyles ? new Map(display.residueStyles) : null,
+    hiddenResidues: display.hiddenResidues ? new Set(display.hiddenResidues) : null,
+    residueFilter: null,
+    residueFilterKey: '',
+    overrideKey: `session-${entry.id}`,
+  });
+  Object.assign(entry.color, item.color ?? {});
+  entry.colorOverrides = item.colorOverrides ? new Map(item.colorOverrides.map(([key, hex]) => [key, hexColor(hex)])) : null;
+  Object.assign(entry.surface, {
+    kind: item.surface?.kind ?? 'off',
+    color: item.surface?.color ?? 'scheme',
+    opacity: item.surface?.opacity ?? 1,
+    keys: item.surface?.keys ? new Set(item.surface.keys) : null,
+    keysKey: item.surface?.keys ? `session-${entry.id}` : '',
+    key: '',
+    data: null,
+  });
+}
+
+function applyEntryState(entry, item) {
+  const model = activeModelOf(entry);
+  const known = (keys) => (keys ?? []).filter((key) => model.residueMap.has(key));
+  entry.selection = new Set(known(item.selection));
+  entry.labels = new Set(known(item.labels));
+  const focusKeys = known(item.focus);
+  entry.focus = focusKeys.length ? { residues: new Set(focusKeys), neighborhood: focusNeighborhood(model, focusKeys, 5) } : null;
+  const proteomics = item.proteomics ?? {};
+  entry.proteomics = {
+    ...emptyProteomics(),
+    coverage: proteomics.coverage ? new Map(proteomics.coverage) : null,
+    data: proteomics.data ? new Map(proteomics.data) : null,
+    dataLabel: proteomics.dataLabel ?? '',
+    sites: (proteomics.sites ?? []).map((site) => ({ residue: model.residueMap.get(site.residue), label: site.label, mismatch: site.mismatch })).filter((site) => site.residue),
+    crosslinks: (proteomics.crosslinks ?? []).map((link) => ({
+      ...link,
+      atomA: model.residueMap.get(link.atomA?.residue)?.atomByName.get(link.atomA?.atom) ?? null,
+      atomB: model.residueMap.get(link.atomB?.residue)?.atomByName.get(link.atomB?.atom) ?? null,
+    })).filter((link) => link.atomA && link.atomB),
+  };
+  const overrides = new Map();
+  for (const site of entry.proteomics.sites) overrides.set(site.residue.key, site.mismatch ? [1, 0.7, 0.2] : [1, 0.28, 0.72]);
+  entry.proteomics.siteOverrides = overrides.size ? overrides : null;
+}
+
+function applySessionView(view) {
+  if (view.lighting) {
+    const preset = LIGHTING_PRESETS[view.lighting.preset] ? view.lighting.preset : 'standard';
+    applyLightingPreset(preset);
+    state.lighting = { ...state.lighting, ...view.lighting };
+    for (const [id, key] of [['ao-strength', 'ao'], ['outline-strength', 'outline'], ['fog-strength', 'fog'], ['glow-scale', 'glow'], ['specular', 'specular'], ['ao-radius', 'aoRadius']]) {
+      document.querySelector(`#${id}`).value = String(state.lighting[key]);
+    }
+  }
+  if (view.background && BACKGROUNDS[view.background]) setBackground(view.background);
+  if (view.clip) {
+    state.clip = { near: Number(view.clip.near) || 0, far: Number.isFinite(view.clip.far) ? view.clip.far : 1 };
+    document.querySelector('#clip-near').value = String(state.clip.near);
+    document.querySelector('#clip-far').value = String(state.clip.far);
+  }
+  if (view.styleScope) state.styleScope = view.styleScope === 'active' ? 'active' : 'all';
+  state.legendCollapsed = Boolean(view.legendCollapsed);
+  if (view.camera) {
+    setProjection(Boolean(view.camera.orthographic));
+    Object.assign(state.camera, {
+      target: [...view.camera.target],
+      distance: view.camera.distance,
+      rotation: [...view.camera.rotation],
+      fov: view.camera.fov ?? state.camera.fov,
+    });
+    state.cameraAnimation = null;
+    state.camera.sceneRadius = sceneBoundsFromEntries().radius;
+    updateViewOffset();
+  }
+  syncControlOutputs();
+  requestRender();
+}
+
+async function computeFocusInteractionsFor(entry) {
+  if (entry !== state.active || !entry.focus) return;
+  await computeFocusInteractions([...entry.focus.residues]);
+}
+
+async function openSessionFile(text) {
+  const parsed = JSON.parse(text);
+  if (!isSessionDocument(parsed)) return false;
+  await restoreSession(parsed);
+  return true;
+}
+
+// MolViewSpec export for Mol*: an .mvsj file when every structure has a public URL, otherwise a
+// self-contained .mvsx archive with the structure files inside.
+async function exportMolViewSpec() {
+  const { remote, spec, files } = await buildMolViewSpecExport();
+  const json = JSON.stringify(spec, null, 1);
+  if (remote) {
+    downloadText(`${fileStem()}.mvsj`, json, 'application/json');
+    showToast('Saved MolViewSpec (.mvsj). Drop it onto molstar.org/viewer to open it in Mol*.');
+  } else {
+    const archive = await createZip([{ name: 'index.mvsj', data: json }, ...files]);
+    downloadBlob(`${fileStem()}.mvsx`, new Blob([archive], { type: 'application/zip' }));
+    showToast('Saved MolViewSpec (.mvsx) with the structure files inside. Drop it onto molstar.org/viewer to open it in Mol*.');
+  }
+}
+
+// Exports read geometry and colors directly, so pending scene work is done first (the render
+// loop may not have run, for example in a background tab).
+function ensureSceneCurrent() {
+  if (state.dirty.scene) rebuildScene();
+  if (state.dirty.colors) updateColors();
+  if (state.dirty.flags) updateFlags();
+}
+
+async function buildMolViewSpecExport() {
+  ensureSceneCurrent();
+  const visible = state.entries.filter((entry) => entry.visible);
+  if (!visible.length) throw new CommandError('Show at least one structure to export.');
+  const remote = visible.every((entry) => entry.origin?.type === 'fetch' && entry.sourceURL);
+  const files = [];
+  const structures = [];
+  for (const [index, entry] of visible.entries()) {
+    let url = entry.sourceURL;
+    if (!remote) {
+      const text = await structureText(entry);
+      const extension = entry.structure.format === 'mmcif' ? 'cif' : 'pdb';
+      url = `structures/${index + 1}-${entry.name.replace(/[^A-Za-z0-9_.-]+/g, '_')}.${extension}`;
+      files.push({ name: url, data: text });
+    }
+    structures.push(mvsStructure(entry, url));
+  }
+  const spec = buildMolViewSpec({
+    title: state.active ? `${state.active.name}: ${titleCase(String(state.active.structure.meta.title || '').replace(/^[0-9A-Za-z-]+:\s*/, '')) || 'Proteoscope view'}` : 'Proteoscope view',
+    description: `Exported from Proteoscope: ${visible.map((entry) => entry.name).join(', ')}.`,
+    background: colorToHex(BACKGROUNDS[state.background]?.top ?? [0, 0, 0]),
+    camera: mvsCamera(),
+    structures,
+  });
+  return { remote, spec, files };
+}
+
+async function structureText(entry) {
+  if (entry.origin?.text) return entry.origin.text;
+  if (entry.origin?.type === 'sample') {
+    const sample = state.samples.find((item) => item.id === entry.origin.id);
+    if (sample) return (await fetch(sample.url)).text();
+  }
+  if (entry.origin?.type === 'fetch') {
+    const request = normalizeFetchQuery(entry.origin.id);
+    if (request) return (await fetch(request.url)).text();
+  }
+  throw new CommandError(`The file for ${entry.name} is not available.`);
+}
+
+const MVS_POLYMER = { cartoon: 'cartoon', trace: 'backbone', 'ball-stick': 'ball_and_stick', sticks: 'ball_and_stick', spacefill: 'spacefill' };
+const MVS_ATOMIC = { 'ball-stick': 'ball_and_stick', sticks: 'ball_and_stick', spacefill: 'spacefill' };
+
+function mvsStructure(entry, url) {
+  const model = activeModelOf(entry);
+  const part = state.partByModel.get(model);
+  const display = entry.display;
+  const assembly = entry.structure.activeAssemblyId;
+  const colorOf = (atom) => (part && state.atomColors ? colorToHex([...state.atomColors.subarray((part.offset + atom.id) * 4, (part.offset + atom.id) * 4 + 3)]) : '#cccccc');
+  const residueInfo = (residue) => ({ chain: residue.authChain ?? residue.chain, seq: residue.resSeq, iCode: residue.iCode || '' });
+  const visibleResidue = (residue) => (!display.visibleChains || display.visibleChains.has(residue.chain))
+    && !display.hiddenResidues?.has(residue.key)
+    && (!display.residueFilter || display.residueFilter.has(residue.key));
+  const polymer = model.residues.filter((residue) => (residue.kind === 'protein' || residue.kind === 'nucleic') && visibleResidue(residue));
+  const complete = polymer.length === model.residues.filter((residue) => residue.kind === 'protein' || residue.kind === 'nucleic').length;
+  const components = [];
+  if (MVS_POLYMER[display.polymer] && polymer.length) {
+    components.push({
+      selector: complete ? 'polymer' : residueSelector(polymer.map(residueInfo)),
+      representations: [{
+        type: MVS_POLYMER[display.polymer],
+        params: display.polymer === 'sticks' ? { size_factor: 0.6 } : undefined,
+        colors: residueColors(polymer.map((residue) => ({ ...residueInfo(residue), color: colorOf(residue.representative ?? residue.atoms[0]) }))),
+      }],
+    });
+  }
+  // Atom colors grouped per residue and element (type_symbol), falling back to atom names when
+  // one element carries several colors.
+  const atomicColors = (residues) => {
+    const byColor = new Map();
+    const push = (color, expression) => {
+      if (!byColor.has(color)) byColor.set(color, []);
+      byColor.get(color).push(expression);
+    };
+    for (const residue of residues) {
+      const base = { auth_asym_id: residue.authChain ?? residue.chain, auth_seq_id: residue.resSeq };
+      if (residue.iCode) base.pdbx_PDB_ins_code = residue.iCode;
+      const byElement = new Map();
+      for (const atom of residue.atoms) {
+        if (atom.isHydrogen && !display.showHydrogen) continue;
+        if (!byElement.has(atom.element)) byElement.set(atom.element, []);
+        byElement.get(atom.element).push(atom);
+      }
+      for (const [element, atoms] of byElement) {
+        const colors = new Set(atoms.map(colorOf));
+        if (colors.size === 1) push([...colors][0], { ...base, type_symbol: element });
+        else for (const atom of atoms) push(colorOf(atom), { ...base, auth_atom_id: atom.name });
+      }
+    }
+    return [...byColor].map(([color, selector]) => ({ color, selector }));
+  };
+  const addAtomic = (residues, style) => {
+    if (!residues.length || !MVS_ATOMIC[style]) return;
+    components.push({ selector: residueSelector(residues.map(residueInfo)), representations: [{ type: MVS_ATOMIC[style], colors: atomicColors(residues) }] });
+  };
+  const ligands = model.residues.filter((residue) => (residue.kind === 'ligand' || residue.kind === 'ion') && visibleResidue(residue) && !display.residueStyles?.has(residue.key));
+  addAtomic(ligands, display.ligand === 'spacefill' ? 'spacefill' : display.ligand === 'none' ? null : 'ball-stick');
+  if (display.showWater) addAtomic(model.residues.filter((residue) => residue.kind === 'water' && visibleResidue(residue)), 'ball-stick');
+  for (const style of ['sticks', 'ball-stick', 'spacefill']) {
+    addAtomic(model.residues.filter((residue) => display.residueStyles?.get(residue.key) === style && visibleResidue(residue)), style);
+  }
+  const focus = entry.focus?.neighborhood;
+  if (focus) addAtomic(model.residues.filter((residue) => focus.has(residue.key) && residue.kind === 'protein' && !display.residueStyles?.has(residue.key) && visibleResidue(residue)), 'sticks');
+  if (entry.surface.kind !== 'off') {
+    const surfaceResidues = model.residues.filter((residue) => residue.kind !== 'water' && visibleResidue(residue) && (!entry.surface.keys || entry.surface.keys.has(residue.key)));
+    components.push({
+      selector: residueSelector(surfaceResidues.map(residueInfo)),
+      representations: [{
+        type: 'surface',
+        params: { surface_type: entry.surface.kind === 'gaussian' ? 'gaussian' : 'molecular' },
+        colors: residueColors(surfaceResidues.map((residue) => ({ ...residueInfo(residue), color: colorOf(residue.representative ?? residue.atoms[0]) }))),
+        opacity: entry.surface.opacity,
+      }],
+    });
+  }
+  for (const key of entry.labels) {
+    const residue = model.residueMap.get(key);
+    if (residue) components.push({ selector: residueSelector([residueInfo(residue)]), representations: [], labels: [`${residue.resName} ${residue.resSeq}${residue.iCode || ''}`] });
+  }
+  return {
+    url,
+    format: entry.structure.format === 'mmcif' ? 'mmcif' : 'pdb',
+    structure: assembly && assembly !== ASYMMETRIC_UNIT_ID ? { type: 'assembly', assembly_id: assembly } : { type: 'model', model_index: Math.max(0, entry.structure.models.indexOf(model)) },
+    transform: entry.transform,
+    components,
+  };
+}
+
+function mvsCamera() {
+  const basis = cameraBasis(state.camera);
+  return {
+    target: [...state.camera.target],
+    position: referenceCameraPosition(state.camera.target, basis.eye, state.camera.fov),
+    up: basis.up,
+  };
 }
 
 /* ---------- Structure UI ---------- */
@@ -3035,9 +4132,12 @@ function surfaceWorker() {
 }
 
 function surfaceAtoms(entry, model) {
-  const { visibleChains, residueFilter } = entry.display;
+  const { visibleChains, residueFilter, hiddenResidues } = entry.display;
+  const only = entry.surface.keys;
   return model.atoms.filter((atom) => atom.kind !== 'water' && !atom.isHydrogen
     && (!visibleChains || visibleChains.has(atom.chain))
+    && !hiddenResidues?.has(atom.residueKey)
+    && (!only || only.has(atom.residueKey))
     && (!residueFilter || (atom.kind !== 'protein' && atom.kind !== 'nucleic') || residueFilter.has(atom.residueKey)));
 }
 
@@ -3068,7 +4168,7 @@ async function refreshEntrySurface(entry) {
   }
   const model = activeModelOf(entry);
   const atoms = surfaceAtoms(entry, model);
-  const key = [entry.structure.activeAssemblyId, model.number, surface.kind, entry.display.visibleChains ? [...entry.display.visibleChains].sort().join(',') : '*', entry.display.residueFilterKey || '*', entry.transformVersion].join('|');
+  const key = [entry.structure.activeAssemblyId, model.number, surface.kind, entry.display.visibleChains ? [...entry.display.visibleChains].sort().join(',') : '*', entry.display.residueFilterKey || '*', entry.display.overrideKey || '*', surface.keysKey || '*', entry.transformVersion].join('|');
   if (key === surface.key && surface.data) {
     if (!state.renderer.meshIds().includes(meshId)) await applySurfaceColors(entry, true);
     return;
@@ -4082,48 +5182,124 @@ function stopModelPlayback() {
 
 /* ---------- Search ---------- */
 
+const COLOR_SCHEME_IDS = COLOR_SCHEMES.map((scheme) => scheme.id);
+const HISTORY_KEY = 'proteoscope.commandHistory';
+
+// The search box finds residues and atoms, previews selections ("chain A and resi 40-80") with a
+// live count, and runs commands ("show sticks within 5 of resn STI"); Enter picks the first row.
 function renderSearch() {
-  const query = els.searchInput.value.trim().toLowerCase();
-  if (!query || !state.structure) {
+  const text = els.searchInput.value.trim();
+  state.historyCursor = -1;
+  if (!text || !state.structure) {
     clearSearchResults();
     return;
   }
-  if (!state.structure.searchItems) state.structure.searchItems = buildSearchItems(state.structure);
-  const terms = query.split(/\s+/).filter(Boolean);
-  const results = [];
-  for (const item of state.structure.searchItems) {
-    if (terms.every((term) => item.haystack.includes(term))) {
-      results.push(item);
-      if (results.length >= 40) break;
+  const items = [];
+  const command = commandPreview(text);
+  if (command) {
+    items.push(command);
+  } else {
+    if (looksLikeSelection(text)) items.push(selectionPreview(text));
+    else if (!/\s/.test(text)) {
+      for (const suggestion of suggestCommands(text, 4)) items.push({ kind: 'suggest', label: suggestion.syntax, detail: suggestion.summary, fill: `${suggestion.name} ` });
+    }
+    if (!state.structure.searchItems) state.structure.searchItems = buildSearchItems(state.structure);
+    const terms = text.toLowerCase().split(/\s+/).filter(Boolean);
+    let found = 0;
+    for (const item of state.structure.searchItems) {
+      if (terms.every((term) => item.haystack.includes(term))) {
+        items.push({ kind: 'residue', label: item.label, detail: `${item.type} · ${item.sublabel}`, result: item });
+        found += 1;
+        if (found >= 40) break;
+      }
     }
   }
   const fragment = document.createDocumentFragment();
-  results.forEach((result, index) => {
+  items.forEach((item, index) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.dataset.index = String(index);
-    if (index === 0) button.classList.add('is-active');
-    button.innerHTML = `<strong>${escapeHTML(result.label)}</strong><span>${escapeHTML(result.type)} · ${escapeHTML(result.sublabel)}</span>`;
+    button.className = `search-${item.kind}${item.error ? ' is-error' : ''}${index === 0 ? ' is-active' : ''}`;
+    button.innerHTML = `<strong>${escapeHTML(item.label)}</strong><span>${escapeHTML(item.detail ?? '')}</span>`;
     button.addEventListener('mousedown', (event) => event.preventDefault());
-    button.addEventListener('click', () => chooseSearchResult(result));
+    button.addEventListener('click', () => chooseSearchItem(item));
     fragment.appendChild(button);
   });
   els.searchResults.replaceChildren(fragment);
-  els.searchResults.classList.toggle('is-visible', results.length > 0);
-  els.searchResults.results = results;
+  els.searchResults.classList.toggle('is-visible', items.length > 0);
+  els.searchResults.results = items;
+}
+
+function commandPreview(text) {
+  let parsed;
+  try {
+    parsed = parseCommand(text, { schemes: COLOR_SCHEME_IDS });
+  } catch (error) {
+    if (!(error instanceof CommandError)) throw error;
+    return { kind: 'command', label: text, detail: error.message, error: true, text };
+  }
+  if (!parsed) return null;
+  let detail = parsed.command.summary;
+  const selection = parsed.selection ?? parsed.fit ?? null;
+  if (selection) {
+    try {
+      detail = `${detail} · ${describeResolution(resolveSelection(selection))}`;
+    } catch (error) {
+      return { kind: 'command', label: text, detail: error.message, error: true, text };
+    }
+  }
+  return { kind: 'command', label: `▸ ${text}`, detail, text };
+}
+
+function selectionPreview(text) {
+  try {
+    const resolved = resolveSelection(text);
+    return { kind: 'selection', label: `Select ${text}`, detail: describeResolution(resolved), text, empty: !resolved.residues };
+  } catch (error) {
+    return { kind: 'selection', label: text, detail: error.message, error: true, text };
+  }
+}
+
+async function chooseSearchItem(item) {
+  if (!item) return;
+  if (item.kind === 'suggest') {
+    els.searchInput.value = item.fill;
+    els.searchInput.focus();
+    renderSearch();
+    return;
+  }
+  if (item.kind === 'residue') {
+    chooseSearchResult(item.result);
+    return;
+  }
+  if (item.error) {
+    showToast(item.detail, true);
+    return;
+  }
+  const result = await runCommand(item.kind === 'selection' ? `select ${item.text}` : item.text, { frame: item.kind === 'selection' });
+  if (result.ok) clearSearch();
 }
 
 function onSearchKey(event) {
   const buttons = [...els.searchResults.querySelectorAll('button')];
   const active = buttons.findIndex((button) => button.classList.contains('is-active'));
+  const listOpen = els.searchResults.classList.contains('is-visible') && buttons.length > 0;
+  if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && (!listOpen || state.historyCursor >= 0)) {
+    if (recallHistory(event.key === 'ArrowUp' ? 1 : -1)) event.preventDefault();
+    return;
+  }
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault();
     const next = Math.max(0, Math.min(buttons.length - 1, active + (event.key === 'ArrowDown' ? 1 : -1)));
     buttons.forEach((button, index) => button.classList.toggle('is-active', index === next));
     buttons[next]?.scrollIntoView({ block: 'nearest' });
+  } else if (event.key === 'Tab' && els.searchResults.results?.[Math.max(0, active)]?.kind === 'suggest') {
+    event.preventDefault();
+    chooseSearchItem(els.searchResults.results[Math.max(0, active)]);
   } else if (event.key === 'Enter') {
-    const result = els.searchResults.results?.[Math.max(0, active)];
-    if (result) chooseSearchResult(result);
+    event.preventDefault();
+    const item = els.searchResults.results?.[Math.max(0, active)];
+    if (item) chooseSearchItem(item);
+    else if (els.searchInput.value.trim()) runCommand(els.searchInput.value).then((result) => result.ok && clearSearch());
   } else if (event.key === 'Escape') {
     clearSearch();
     els.searchInput.blur();
@@ -4135,6 +5311,36 @@ function chooseSearchResult(result) {
   if (atom) state.selectedAtom = atom;
   selectResidues([result.residueKey], { frame: true, keepAtom: true });
   clearSearchResults();
+}
+
+function loadHistory() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '[]');
+    return Array.isArray(stored) ? stored.filter((item) => typeof item === 'string').slice(0, 100) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberCommand(text) {
+  const history = (state.commandHistory ??= loadHistory());
+  if (history[0] !== text) history.unshift(text);
+  history.length = Math.min(history.length, 100);
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  } catch {
+    // Storage can be unavailable (private windows); history then lasts for this page only.
+  }
+}
+
+function recallHistory(step) {
+  const history = (state.commandHistory ??= loadHistory());
+  if (!history.length) return false;
+  const cursor = Math.max(-1, Math.min(history.length - 1, (state.historyCursor ?? -1) + step));
+  state.historyCursor = cursor;
+  els.searchInput.value = cursor >= 0 ? history[cursor] : '';
+  clearSearchResults();
+  return true;
 }
 
 function clearSearch() {
@@ -4169,6 +5375,7 @@ function updateExportInfo() {
 }
 
 async function renderImageCanvas() {
+  ensureSceneCurrent();
   const { width, height, factor } = exportDimensions();
   const aspect = width / height;
   const exportCamera = { ...cloneCamera(state.camera), offset: [0, 0] };
@@ -4493,14 +5700,31 @@ function escapeHTML(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 }
 
+// Yields so the loading message can paint. Background tabs get no animation frames, so a timer
+// keeps loading moving there too.
 function nextFrame() {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      resolve();
+    };
+    requestAnimationFrame(finish);
+    setTimeout(finish, 60);
+  });
 }
 
 
 // Console scripting API for power users (and automated checks).
 globalThis.proteoscope = {
   state,
+  run: (text, options = {}) => runCommand(text, { quiet: true, ...options }),
+  select: (text) => runCommand(`select ${text}`, { quiet: true }),
+  session: () => sessionDocument(),
+  molViewSpec: () => buildMolViewSpecExport(),
+  restoreSession,
+  sessionLink,
   fetch: fetchStructure,
   add: (query) => fetchStructure(query, { add: true }),
   structures: () => state.entries.map((entry) => ({ id: entry.id, name: entry.name, active: entry === state.active, visible: entry.visible, comparison: entry.comparison?.stats ?? null })),
@@ -4513,7 +5737,7 @@ globalThis.proteoscope = {
   },
   compareWithAlphaFold,
   overlayModels: toggleModelOverlay,
-  select: (keys) => selectResidues(keys, { frame: true }),
+  selectResidues: (keys) => selectResidues(keys, { frame: true }),
   focus: focusResidues,
   representation: applyRepresentationPreset,
   color: setColorScheme,

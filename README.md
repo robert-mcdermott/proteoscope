@@ -50,6 +50,15 @@ Highlights:
   - Cross-link validation.
   - Custom per-residue data.
   - UniProt annotations mapped onto the structure.
+- **Selections and commands.** A PyMOL/ChimeraX-style selection language
+  and command line in the search box (`show sticks within 5 of resn STI`,
+  `color magenta /A:315`, `superpose 1AKE onto 4AKE`), with live previews
+  and history.
+- **Sessions and sharing.** Save and reopen the whole workspace, copy a link
+  that rebuilds the view, or export MolViewSpec to open the view in Mol*.
+- **Scripting.** Drive Proteoscope from Python or Jupyter with
+  `--remote-control`: fetch, superpose, select and render images from a
+  notebook.
 - **Figures.** Supersampled PNG up to 4× with transparent background and
   legend; clipboard copy; spin videos.
 - **Private.** Local files are parsed in the browser; `--offline` disables
@@ -186,7 +195,8 @@ a loaded model to show its PAE plot.
 
 ## The Workspace
 
-- **Top bar:** structure title, search (press `/`), renderer badge, panel toggles.
+- **Top bar:** structure title, the search box and command line (press `/`),
+  renderer badge, panel toggles.
 - **Left panel tabs:**
   - **Structure:** the structures in the scene (when there are several), entry
     metadata (method, resolution, R-free, organism, deposition date),
@@ -227,6 +237,7 @@ a loaded model to show its PAE plot.
 | Focus a residue or ligand | Double-click, or select and press `F` |
 | Reset view | `R` |
 | Representation presets | `1` cartoon, `2` ball & stick, `3` sticks, `4` spacefill, `5` trace, `6` surface |
+| Search, selections and commands | `/`, then type; ↑ and ↓ recall earlier commands |
 | Distance / angle / torsion ruler | `D` / `A` / `T` |
 | Label selection | `L` |
 | Spin | `S` |
@@ -341,6 +352,60 @@ Pick a ruler in the toolbar or press `D` (distance), `A` (angle) or `T`
 (torsion/dihedral), then click 2, 3 or 4 atoms. Values appear as 3D labels
 and in the Measurements card. Remove one with ×, or press Backspace to remove
 the last.
+
+## Selections and Commands
+
+![Erlotinib in the EGFR kinase pocket (1M17) styled from the command line: side-chain sticks within 4.5 Å, the hinge hydrogen bond from Met769 measured at 2.70 Å, and a live selection preview in the search box](docs/images/command-line.jpg)
+
+The search box finds residues and atoms, and it is also a command line. Type
+a selection and it previews the match live ("22 residues, 108 atoms");
+press Enter to select and frame it. Type a command and Enter runs it.
+↑ and ↓ recall earlier commands, and Tab completes a command name.
+
+| Type | Result |
+| --- | --- |
+| `chain A and resi 40-80` | Selects residues 40–80 of chain A |
+| `within 5 of resn STI` | Everything within 5 Å of imatinib |
+| `show sticks byres (within 4.5 of ligand) and protein` | Side-chain sticks around every ligand, on the cartoon |
+| `color magenta /A:315` | Colors residue 315 of chain A |
+| `hide water` · `hide chain B` · `show everything` | Hide solvent, hide a chain, show everything again |
+| `distance /A:769@N to :AQ4@N2` | The hinge hydrogen bond to erlotinib in 1M17 (2.70 Å) |
+| `superpose 1AKE onto 4AKE fit /A:1-29+60-121+160-214` | Fits on the adenylate kinase CORE domain |
+| `select deviation > 5` | Residues that moved more than 5 Å after superposing |
+| `focus resn HEM and chain A` · `label sele` · `zoom #2` | Focus a ligand, label the selection, frame a structure |
+
+**Selection language.** PyMOL-style keywords with ChimeraX-style atom specs:
+
+- **Identifiers:** `chain A+B`, `resi 40-80+100A` (author numbering, with
+  insertion codes), `resn STI`, `name CA` and `elem FE`, with `*` wildcards.
+  `uniprot 175` uses UniProt numbering; `#2` or `structure 1AKE` picks a
+  structure.
+- **Atom specs:** `/A:40-80@CA,CB` (chain, residues, atoms), `:HEM`, `#2/B`.
+- **Classes:** `protein`, `nucleic`, `polymer`, `ligand`, `ion`, `metal`,
+  `water`, `hetatm`, `hydrogen`, `backbone`, `sidechain`, `helix`, `sheet`,
+  `coil`.
+- **Logic:** `and`, `or`, `not` and parentheses; words next to each other mean
+  "and".
+- **Neighborhoods:** `within 5 of X`, `around 5 of X` (excluding X), and
+  `byres X` / `bychain X` to expand to whole residues or chains. Distances
+  reach across structures, so `within 5 of (#1 and ligand)` finds residues of a
+  superposed structure near another structure's ligand.
+- **Values:** `b > 60`, `q < 1`, `plddt < 70`, `deviation > 2`, `lddt < 0.7`,
+  `rmsf > 2`, `rsa > 0.4` (after **Compute SASA**).
+- **Sets:** `sele`, `focus`, `sites` (proteomics), `covered` (peptides),
+  `aligned` (paired in a comparison).
+
+**Commands.** `select`, `zoom`, `orient`, `focus`, `show`/`hide` (sticks,
+ball-stick, spheres, cartoon, surface, water, hydrogens, labels, everything),
+`color` (a name, a hex value, a scheme, or `default`), `label`/`unlabel`,
+`fetch`/`add`/`remove`/`activate`/`list`, `superpose`, `alphafold`,
+`overlay`, `preset`, `lighting`, `bg`, `distance`, `turn`, `spin`, `reset`,
+`save`, `link`, `mvs`, `png` and `help`. The help dialog (`?`) lists the
+syntax of each.
+
+Per-residue styling is also on the **Selection** card: **Sticks**, **Color**,
+**Hide** and **Reset** apply to the selected residues. **All** in the Chains
+card shows hidden residues again.
 
 ## Comparing Structures
 
@@ -482,6 +547,31 @@ screen:
 
 Interaction tables export as CSV.
 
+## Sessions and Sharing
+
+- **Save session** (Structure tab, or the `save` command) writes a
+  `.proteoscope.json` file. It records:
+  - Where each structure came from: a fetched PDB ID or UniProt accession, a
+    bundled example, or the local file itself, embedded and compressed.
+  - Styles, per-residue styling and colors, surfaces, superpositions (refitted
+    when the session opens), ensemble overlays and trimming.
+  - Selections, focus, labels, proteomics overlays and measurements.
+  - The camera, lighting, background, clipping and secondary-structure source.
+
+  Open a session like any file, or drop it on the window. Solvent
+  accessibility is recomputed on demand, and PAE files you opened yourself are
+  not included (AlphaFold DB PAE matrices are fetched again).
+- **Copy link** (or `link`) puts the whole session in the URL
+  (`#session=…`) when every structure was fetched or is a bundled example.
+  The link opens in Proteoscope at the same address and port.
+- **MolViewSpec** (or `mvs`) exports the view for
+  [Mol*](https://molstar.org/viewer/): an `.mvsj` file that downloads the
+  structures from RCSB PDB and AlphaFold DB, or an `.mvsx` archive with the
+  files inside when some are local. It carries representations, per-residue
+  colors, sticks, surfaces, labels, superposition transforms, the camera and
+  the background; Proteoscope's lighting effects are not part of the format.
+  Drop the file onto the Mol* viewer to open it.
+
 ## Biological Assemblies and Ensembles
 
 - **Assemblies.** When a file defines biological assemblies (PDBx/mmCIF
@@ -536,6 +626,7 @@ proteoscope [flags] [structure files...]
   --cache-dir path    fetch cache location (default: user cache dir/proteoscope)
   --no-cache          do not read or write the fetch cache
   --dev               serve web/ and data/ from disk for development
+  --remote-control    accept commands from scripts on this computer (see Scripting)
   --version           print the version and exit
 ```
 
@@ -545,23 +636,49 @@ cross-site requests.
 
 ## Scripting
 
-The page exposes a small console API for automation:
+**In the browser console,** `proteoscope.run()` executes any command and
+returns `{ ok, message, data }`:
 
 ```js
-await proteoscope.fetch('6OIM');                  // PDB ID or UniProt accession
-proteoscope.representation('cartoon');            // cartoon, ball-stick, sticks, spacefill, trace, surface
-proteoscope.color('plddt');                       // any scheme id from the Style tab
-proteoscope.lighting('illustrative');
-const ligand = proteoscope.residues().find((r) => r.resName === 'MOV');
-await proteoscope.focus([ligand.key]);            // frame, side chains, interactions
+await proteoscope.run('fetch 2HYY');
+await proteoscope.run('show sticks byres (within 4.5 of resn STI) and protein');
+await proteoscope.run('color salmon resn STI');
+const { data } = await proteoscope.run('select within 4 of resn STI');   // residue keys per structure
 const png = await proteoscope.snapshot({ scale: 3, transparent: true });  // data URL
-
-// Comparisons
-await proteoscope.add('P01116');                  // add the AlphaFold model of KRAS to the scene
-proteoscope.superpose('AF-P01116-F1', '6OIM');    // moving, reference; returns RMSD, TM-score, lDDT
-proteoscope.structures();                         // names, visibility and comparison statistics
-// With 6OIM active, `await proteoscope.compareWithAlphaFold()` does both steps.
+const session = await proteoscope.session();                              // the session as JSON
 ```
+
+**From Python or Jupyter,** start Proteoscope with `--remote-control`, open it
+in a browser, and POST commands to `/api/remote/command`. The open page runs
+each command and the reply carries its result; `png`, `save`, `link` and `mvs`
+return data instead of downloading a file.
+
+```python
+import base64
+import requests
+
+def ps(command):
+    reply = requests.post("http://127.0.0.1:8765/api/remote/command",
+                          json={"command": command}, timeout=180).json()
+    if not reply.get("ok"):
+        raise RuntimeError(reply.get("message") or reply.get("error"))
+    return reply
+
+ps("fetch 4AKE")
+ps("add 1AKE")
+print(ps("superpose 1AKE onto 4AKE fit /A:1-29+60-121+160-214")["message"])
+moved = ps("select deviation > 5 and chain A")["data"]    # residue keys that moved > 5 Å
+ps("color deviation")
+image = ps("png 2")["data"]["image"]                      # PNG as a data URL
+
+from IPython.display import Image
+Image(base64.b64decode(image.split(",", 1)[1]))
+```
+
+Commands go to the most recently opened Proteoscope page. Remote control is
+off unless the flag is given; it answers only on the loopback address, and
+requests from web pages on other sites are refused, but any program on your
+computer can send commands while it is on.
 
 ## Development
 
@@ -618,6 +735,9 @@ node --test "web/lib/*.test.mjs"
 | `web/lib/dssp.js` | DSSP secondary-structure assignment |
 | `web/lib/cartoon.js` | Protein and nucleic-acid cartoon meshes |
 | `web/lib/align.js`, `web/lib/superpose.js`, `web/lib/compare.js` | Sequence alignment, least-squares superposition, TM-score, lDDT, RMSF, chain pairing |
+| `web/lib/select.js`, `web/lib/commands.js` | Selection language and command-line parsing |
+| `web/lib/mvs.js`, `web/lib/zip.js`, `web/lib/codec.js` | MolViewSpec export, `.mvsx` archives, session compression and links |
+| `remote.go` | Remote control for scripts (`--remote-control`) |
 | `web/lib/scene.js`, `web/lib/coloring.js` | Representation and color-scheme logic |
 | `web/lib/renderer.js` | WebGPU renderer: impostors, G-buffer, SSAO, outlines, FXAA, picking, capture |
 | `web/lib/renderer-canvas.js` | Canvas 2D fallback renderer |

@@ -17,8 +17,10 @@ export function buildScene(model, structure, display, context = {}) {
   const focus = context.focusResidues ?? new Set();
   const emphasis = context.emphasisResidues ?? new Set();
   const offset = context.atomOffset ?? 0;
+  const hidden = display.hiddenResidues;
+  const overlays = display.residueStyles;
   const chainVisible = (chain) => !display.visibleChains || display.visibleChains.has(chain);
-  const residueVisible = (residue) => chainVisible(residue.chain) && (!display.residueFilter || display.residueFilter.has(residue.key));
+  const residueVisible = (residue) => chainVisible(residue.chain) && !hidden?.has(residue.key) && (!display.residueFilter || display.residueFilter.has(residue.key));
 
   let cartoon = null;
   if (display.polymer === 'cartoon') {
@@ -34,8 +36,12 @@ export function buildScene(model, structure, display, context = {}) {
     if (!chainVisible(atom.chain)) continue;
     if (atom.isHydrogen && !display.showHydrogen) continue;
     const residue = model.residues[model.atomResidue[index]];
+    if (hidden?.has(residue.key)) continue;
     if (display.residueFilter && !display.residueFilter.has(residue.key) && (residue.kind === 'protein' || residue.kind === 'nucleic')) continue;
-    styles[index] = atomStyle(atom, residue, display, cartoon, focus.has(residue.key) || emphasis.has(residue.key));
+    const overlay = overlays?.get(residue.key);
+    styles[index] = overlay
+      ? overlayStyle(atom, residue, display, cartoon, overlay)
+      : atomStyle(atom, residue, display, cartoon, focus.has(residue.key) || emphasis.has(residue.key));
     if (styles[index]) visible[index] = 1;
   }
   if (cartoon) {
@@ -146,6 +152,19 @@ function atomStyle(atom, residue, display, cartoon, inFocus) {
   }
   if (atom.kind === 'nucleic') return NUCLEIC_BACKBONE.has(atom.name) && !inFocus ? STYLE.none : STYLE.sidechain;
   return STYLE.none;
+}
+
+// A per-residue representation set with "show sticks <selection>" and similar commands. On a
+// cartoon, sticks and balls show the side chain (anchored at CA) so the ribbon stays readable;
+// spheres show the whole residue. Elsewhere the residue takes the chosen style throughout.
+function overlayStyle(atom, residue, display, cartoon, overlay) {
+  const style = representationStyle(overlay);
+  const onRibbon = (display.polymer === 'cartoon' && cartoon?.covered.has(residue.key)) || display.polymer === 'trace';
+  if (!onRibbon || overlay === 'spacefill' || (atom.kind !== 'protein' && atom.kind !== 'nucleic')) return style;
+  if (atom.isHydrogen && !display.showHydrogen) return STYLE.none;
+  if (atom.kind === 'protein' && SIDECHAIN_EXCLUDED.has(atom.name) && !(atom.name === 'N' && residue.parent === 'PRO')) return STYLE.none;
+  if (atom.kind === 'nucleic' && NUCLEIC_BACKBONE.has(atom.name)) return STYLE.none;
+  return overlay === 'sticks' ? STYLE.sidechain : style;
 }
 
 function atomRadius(atom, style, display) {

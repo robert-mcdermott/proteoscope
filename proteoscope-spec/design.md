@@ -75,6 +75,8 @@ graph LR
     Surface[surface-worker.js<br/>surface.js + electrostatics.js]
     Proteomics[proteomics.js]
     Compare[compare.js<br/>align.js + superpose.js]
+    Select[select.js + commands.js]
+    Share[mvs.js + zip.js + codec.js]
     Views[sequence-view.js<br/>plots.js]
 
     App --> Parse --> Structure --> DSSP
@@ -87,6 +89,8 @@ graph LR
     App -. worker .-> Surface
     App -. lazy .-> Proteomics
     App --> Compare
+    App --> Select
+    App --> Share
     App --> Views
 ```
 
@@ -317,6 +321,35 @@ ambient occlusion or outlines.
   shared reference) drive mirrored selection, hover and focus, deviation and
   lDDT coloring of both structures, and the aligned sequence row.
 
+## Selections, Commands and Sessions
+
+- **Selections** (`select.js`) parse to an AST (keywords, ChimeraX atom specs,
+  Boolean logic with implicit AND) and evaluate to one atom mask per
+  structure. Predicates compile once per structure; `within`/`around` use a
+  spatial hash over the reference atoms of every structure; per-residue values
+  (deviation, lDDT, RMSF, relative SASA) and sets (selection, focus, sites)
+  come from a context the app supplies, so the module stays pure.
+- **Commands** (`commands.js`) only parse; `runCommand` in the app executes
+  them and returns `{ ok, message, data }`, which serves the search box, the
+  console API and the remote-control API alike. Plain selections run as
+  `select`.
+- **Per-residue styling** lives in each entry's display settings: extra
+  representations (`residueStyles`), hidden residues, and a surface residue
+  set; color overrides merge with proteomics site colors. On a cartoon, sticks
+  show the side chain anchored at Cα.
+- **Sessions** serialize each entry's source and settings, not its derived
+  data: structures are fetched or decompressed again, transforms reapplied,
+  comparisons refitted from their recorded recipe (which then yields a
+  near-identity fit), and residue-keyed state restored. Links deflate the same
+  JSON into `#session=`.
+- **MolViewSpec** export builds a Mol* node tree from the scene: one
+  `download → parse → structure (→ transform) → component → representation →
+  color` branch per structure, with colors read from the live atom colors and
+  grouped into residue ranges or per-element selectors.
+- **Remote control** (`remote.go`) relays commands from
+  `POST /api/remote/command` to the newest page over Server-Sent Events and
+  returns the page's posted result, with a timeout.
+
 ## Interaction Design
 
 - **Camera.**
@@ -364,7 +397,7 @@ The canvas fills the window, and panels float over it.
 
 ## Known Limitations
 
-See `roadmap.md` §6. In particular:
+See `roadmap.md` §7. In particular:
 
 - Superposition needs sequence (or UniProt) correspondence; there is no
   structure-only alignment yet.

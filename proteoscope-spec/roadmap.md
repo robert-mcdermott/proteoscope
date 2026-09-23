@@ -1,9 +1,9 @@
 # Proteoscope Review and Roadmap
 
 This document records a review of Proteoscope v0.4, the state of the field it
-competes in (researched September 2026), what the `wave1` branch changes, the
-first slice of wave 2 (structure comparison, `wave2` branch), and a
-prioritized plan for later waves.
+competes in (researched September 2026), what each wave of work delivered
+(`wave1`: the rebuild; `wave2`: structure comparison; `wave3`: selections,
+commands, sessions and scripting), and a prioritized plan for what comes next.
 
 ## 1. Where v0.4 stood
 
@@ -91,8 +91,10 @@ Missing capabilities relative to the tools researchers use daily:
 | pLDDT and PAE linked to 3D | Yes | Yes | pLDDT via B-factor | Yes | Yes (AFDB, AF3, ColabFold) |
 | Proteomics overlays (peptides, PTMs, cross-links) | No | Plugins (XMAS) | Plugins (PyXlinkViewer) | PTM annotations | **Built in, local-only** |
 | Superposition | TM-align | Matchmaker | align/super | VAST+/TM-align | Sequence-based with pruning; RMSD, TM-score, lDDT (wave 2) |
-| Density maps | Yes | Yes | Yes | Yes | Wave 3 |
-| Sessions, shareable state | MolViewSpec | Sessions | Sessions | Short URLs | Wave 2 |
+| Density maps | Yes | Yes | Yes | Yes | Planned |
+| Sessions, shareable state | MolViewSpec | Sessions | Sessions | Short URLs | Session files, links, MolViewSpec export (wave 3) |
+| Selection language, command line | Selection scripts (MolScript, PyMOL, VMD, Jmol syntax) | Command line | Command line | Commands | PyMOL/ChimeraX-style, in the search box (wave 3) |
+| Scripting from notebooks | JavaScript API; MolViewSpec Python builder | Python; REST remote control | Python API; XML-RPC | icn3dpy | Console API; REST remote control (wave 3) |
 
 Recurring researcher pain points from papers, forums, and issue trackers:
 
@@ -289,7 +291,7 @@ Proteoscope's positioning follows from this:
   checks, and dev mode.
 - The 12 MB ribosome mmCIF and PDB files parse to identical models.
 
-## 4. Wave 2, first slice: comparing structures
+## 4. Wave 2: comparing structures
 
 Comparison was the largest gap left after wave 1: researchers constantly set a
 prediction against an experiment, apo against holo, wild type against mutant,
@@ -356,35 +358,96 @@ Checks on real structures:
 | Hemoglobin R (1HHO assembly) onto T (4HHB) | One αβ dimer within 1.1–1.5 Å, the other rotated (2.7–4.5 Å): the T→R quaternary change |
 | NMR ensemble 1JM7, 14 models | Mean core RMSD 0.86 Å; median RMSF 0.63 Å; termini up to 10.7 Å |
 
-## 5. Roadmap
+## 5. Wave 3: selections, commands, sessions and scripting
+
+Wave 2 made Proteoscope useful for comparisons; wave 3 makes work
+reproducible and scriptable, which serious projects and figure revisions need.
+
+### Selection language (`web/lib/select.js`)
+
+- PyMOL-style keywords (`chain`, `resi` with insertion codes, `resn`, `name`,
+  `elem`, `ss`, `entity`, `uniprot`, `model`), classes (`protein`, `ligand`,
+  `water`, `backbone`, `sidechain`, `helix`, …), Boolean logic with implicit
+  AND, and wildcards.
+- ChimeraX-style atom specs: `#2/A:40-80@CA`.
+- Neighborhoods (`within`, `around`, `beyond`) measured across structures, and
+  `byres` / `bychain` expansion.
+- Value predicates over per-residue data from earlier waves: B-factor,
+  occupancy, pLDDT, superposition deviation, lDDT, RMSF and relative SASA;
+  sets for the selection, focus, proteomics sites, peptide coverage and
+  aligned residues.
+- Errors name the offending word and its position.
+
+### Command line (`web/lib/commands.js`, search box)
+
+- The search box previews selections with live counts and runs commands:
+  selection, framing, focus, per-residue show/hide/color/label, loading,
+  superposition, AlphaFold comparison, overlays, presets, lighting,
+  background, distances, rotation, sessions, links, MolViewSpec and images.
+- History (↑/↓), completion (Tab), and a generated command reference in the
+  help dialog.
+- Per-residue representations and colors in the scene (side-chain sticks on
+  the cartoon, spheres, hidden residues, restricted surfaces), also available
+  as buttons on the selection card.
+
+### Sessions and sharing
+
+- **Session files** (`.proteoscope.json`, versioned) record each structure's
+  source (fetched ID, bundled example, or the embedded, gzip-compressed local
+  file), styles and per-residue styling, transforms, comparison recipes
+  (refitted on open), overlays, selections, focus, labels, proteomics overlays,
+  measurements and the view.
+- **Links** carry the same document, deflate-compressed, in `#session=` when
+  every structure can be fetched again.
+- **MolViewSpec** export for Mol*: `.mvsj` with RCSB and AlphaFold DB URLs, or
+  `.mvsx` (a ZIP with the structure files) for local files. Colors are grouped
+  into residue ranges and per-element atom selectors; superpositions become
+  `transform` nodes (column-major rotation); the camera is converted to MVS's
+  60° reference camera. A two-structure export was checked in the public Mol*
+  viewer: the superposition, colors and ligands matched Proteoscope.
+
+### Remote control (`remote.go`)
+
+- `--remote-control` exposes `POST /api/remote/command`; the page receives
+  commands over Server-Sent Events and posts results back, so Python or
+  Jupyter can fetch, superpose, select (getting residue keys back), measure,
+  and render PNGs or sessions.
+- Off by default; loopback Host headers only; browsers on other origins are
+  refused by the existing guard.
+
+### Validation
+
+- 21 new JavaScript tests (the selection language on hemoglobin and on
+  insertion codes, command parsing, compression and links, ZIP archives, the
+  MolViewSpec tree, and per-residue styling in the scene), for 136 in total.
+- 5 Go tests for remote control, run behind the same request guard as the real
+  server: off by default, a full round trip through a simulated page,
+  timeouts, stale results, and cross-site refusal.
+- In the browser: session save and restore, a `#session=` link opened in a
+  fresh page (and in a background tab), and a script driving the page through
+  the REST API, including a returned PNG.
+
+## 6. Roadmap
 
 Priorities are ordered by value to researchers, weighed against effort.
 
-### Wave 2: comparison, reproducibility, confidence
+### Next: predicted complexes and validation
 
-1. **Multiple structures and superposition.** Delivered in the first slice
-   (§4). Still open: structure-only alignment (TM-align or US-align) for
-   remote homologs, and animated morphs between superposed conformations.
-2. **Sessions and shareable state.**
-   - Save and restore camera, styles, selections, and proteomics overlays as
-     JSON.
-   - Import and export MolViewSpec for interoperability with Mol*.
-3. **Selection language.**
-   - A PyMOL/ChimeraX-style grammar, such as
-     `chain A and resi 40-80 and not solvent` or `within 5 of resn STI`.
-   - A command palette.
-   - Documented use of the console API from Jupyter and other notebooks.
-4. **Prediction confidence beyond single chains:**
-   - AlphaFold 3 and Boltz `chain_pair_iptm` matrices.
+1. **Prediction confidence beyond single chains:**
+   - Open AlphaFold 3, Boltz, Chai-1 and ColabFold output folders directly and
+     rank their models.
+   - Chain-pair ipTM matrices and interface scores such as ipSAE and pDockQ2.
    - Contact-probability maps.
    - PAE-based domain clustering, as in ChimeraX's `alphafold pae`.
    - Per-atom pLDDT for ligands.
-5. **Validation.**
-   - Accurate Top8000 Ramachandran and rotamer contours.
-   - Clashscore.
-   - wwPDB validation report overlays: RSRZ and geometry outliers.
+2. **Validation.**
+   - wwPDB validation report overlays: RSRZ or Q-score and geometry outliers,
+     read from each entry's validation file.
+   - Accurate Top8000 Ramachandran and rotamer contours; clashscore.
+3. **Comparison follow-ups:** structure-only alignment (TM-align or US-align)
+   for remote homologs, and animated morphs between superposed conformations.
 
-### Wave 3: data types
+### Later: data types
 
 - **Density maps.** Cryo-EM maps (MRC/CCP4, fetched from EMDB) and X-ray
   2Fo-Fc and Fo-Fc maps (from PDBe/RCSB), rendered as isosurfaces extracted by
@@ -402,7 +465,7 @@ Priorities are ordered by value to researchers, weighed against effort.
   - Structural-change mapping for limited-proteolysis (LiP-MS) data.
   - Cross-link distance histograms.
 
-### Wave 4: scale and reach
+### Later: scale and reach
 
 - **Large structures.**
   - Typed-array atom storage and BinaryCIF parsing.
@@ -412,7 +475,7 @@ Priorities are ordered by value to researchers, weighed against effort.
   scripted figure batches.
 - **Other.** WebXR, localization, and accessibility audits.
 
-## 6. Known limitations
+## 7. Known limitations
 
 - **Superposition** pairs residues by sequence (or UniProt numbering), so
   remote homologs with little sequence identity need a structure-only aligner,
@@ -427,5 +490,10 @@ Priorities are ordered by value to researchers, weighed against effort.
 - **Canvas fallback** does not draw surfaces, ambient occlusion, or outlines.
   WebGPU is still missing on Firefox for Linux and Intel Macs, and on Chrome
   with AMD GPUs on Linux.
+- **Sessions** do not store PAE files opened by hand or computed SASA, and
+  links only work for fetched structures and bundled examples.
+- **MolViewSpec export** covers representations, colors, labels, transforms
+  and the camera; lighting effects, measurements and interaction lines are not
+  part of the format and are left out.
 - **Fetch cache** entries never expire; clear the cache directory to refresh
   them.

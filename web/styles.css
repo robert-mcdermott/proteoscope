@@ -2080,3 +2080,109 @@ button:disabled {
   border-color: rgba(76, 201, 240, 0.55);
   background: var(--accent-soft);
 }
+
+/* ---------- Command line, selection styling, sessions ---------- */
+
+.search-results button.search-command strong,
+.search-results button.search-selection strong {
+  color: var(--mint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+}
+
+.search-results button.search-suggest strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.76rem;
+  color: rgba(248, 245, 238, 0.85);
+}
+
+.search-results button.is-error strong {
+  color: var(--gold);
+}
+
+.search-results button.is-error span {
+  color: rgba(255, 209, 102, 0.8);
+}
+
+.selection-style {
+  margin-top: 6px;
+}
+
+.color-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(248, 245, 238, 0.06);
+  padding: 4px 9px 4px 5px;
+  color: rgba(248, 245, 238, 0.9);
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.color-chip input {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 4px;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.color-chip input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color-chip input::-webkit-color-swatch {
+  border: 0;
+  border-radius: 4px;
+}
+
+.help-commands {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.help-commands h3 {
+  margin: 12px 0 6px;
+}
+
+.command-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.command-list div {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 10px;
+  font-size: 0.76rem;
+}
+
+.command-list dt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.command-list code {
+  color: var(--mint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+}
+
+.command-list dd {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+@media (max-width: 700px) {
+  .command-list div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1px;
+  }
+}
