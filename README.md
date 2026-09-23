@@ -9,9 +9,11 @@ happen in your browser, so local files never leave your computer.
 
 It covers the everyday structural biology loop: open a structure by file, PDB
 ID or UniProt accession; style it; find and focus a ligand or residue; see its
-interactions, surface and electrostatics; judge model quality (B-factors,
-AlphaFold pLDDT and PAE, Ramachandran); compare it with other structures or
-its AlphaFold prediction; map proteomics data onto it; and export a
+interactions, surface and electrostatics; judge model quality (the wwPDB
+validation report, B-factors, AlphaFold pLDDT and PAE, MolProbity-style
+Ramachandran); triage the models of AlphaFold 3, Boltz, Chai-1 and ColabFold
+runs; compare it with other structures or its AlphaFold prediction; interpret
+variants with AlphaMissense; map proteomics data onto it; and export a
 publication-ready figure.
 
 Highlights:
@@ -33,7 +35,21 @@ Highlights:
   - Ramachandran plot and per-residue profiles.
   - Distance, angle and torsion rulers.
 - **AlphaFold.** Fetch any UniProt accession from AlphaFold DB; view pLDDT
-  coloring and an interactive PAE plot linked to the 3D view.
+  coloring, an interactive PAE plot linked to the 3D view, rigid domains
+  clustered from the PAE, and MSA depth.
+- **Predicted complexes.**
+  - Open AlphaFold 3, AlphaFold Server (.zip), Boltz, Chai-1 and ColabFold
+    outputs, folders included, and rank their models.
+  - Chain-pair ipTM plus interface scores computed from the PAE: ipSAE,
+    pDockQ, pDockQ2 and LIS, following Dunbrack's reference definitions.
+  - Contact probabilities, per-atom ligand pLDDT and MSA depth.
+  - How many of your cross-links each model satisfies.
+- **Validation.**
+  - The wwPDB validation report on the structure: outliers per residue,
+    clashes drawn in 3D, and fit to density (RSRZ, or Q-score for cryo-EM)
+    with percentiles.
+  - Ramachandran classes on MolProbity's Top8000 contours for any model,
+    predicted ones included.
 - **Comparison.**
   - Several structures in one scene, each with its own style.
   - Superposition by sequence alignment with outlier pruning, reporting RMSD,
@@ -46,7 +62,8 @@ Highlights:
   - ProtParam-style sequence properties.
   - Peptide coverage from MaxQuant, DIA-NN, Spectronaut, ProForma or Comet
     output.
-  - PTM and variant sites, with UniProt numbering.
+  - PTM and variant sites, with UniProt numbering, and AlphaMissense
+    pathogenicity for every substitution of human proteins.
   - Cross-link validation.
   - Custom per-residue data.
   - UniProt annotations mapped onto the structure.
@@ -176,8 +193,9 @@ You can also run it from PowerShell:
 | --- | --- |
 | **RCSB PDB** | Type a PDB ID (for example `4HHB`, or an extended ID such as `pdb_00004hhb`) in **Open structure** and press **Fetch**. The PDBx/mmCIF file is downloaded from RCSB. |
 | **AlphaFold DB** | Type a UniProt accession (for example `P04637`). The current AlphaFold DB model and its predicted aligned error (PAE) matrix are downloaded. |
-| **Local file** | Click **Open local file** or drag files onto the window. Accepts `.pdb`, `.ent`, `.cif` and `.mmcif`, optionally gzip-compressed (`.gz`). Several files open together. |
-| **Command line** | `proteoscope structure.cif model.pdb.gz` opens every file at startup; the first is active. |
+| **Local file** | Click **Open local file** or drag files onto the window. Accepts `.pdb`, `.ent`, `.cif`, `.mmcif` and BinaryCIF `.bcif`, optionally gzip-compressed (`.gz`). Several files open together. |
+| **Prediction output** | Drop a prediction folder or an AlphaFold Server `.zip`, or click **Open prediction folder…**. AlphaFold 3, AlphaFold Server, Boltz-1/2, Chai-1 and ColabFold layouts are recognized; see [Predicted Complexes](#predicted-complexes). |
+| **Command line** | `proteoscope structure.cif model.pdb.gz af3_output/my_job/` opens every file and folder at startup; the first structure is active. |
 | **Examples** | **Bundled examples** lists the structures embedded from `data/`. |
 | **Deep link** | `http://127.0.0.1:8765/#fetch=4HHB` fetches on load. `#fetch=4AKE,1AKE&superpose` loads both and superposes the second onto the first. |
 
@@ -185,30 +203,35 @@ A new structure replaces the scene unless **Add to the scene instead of
 replacing** is ticked; see [Comparing Structures](#comparing-structures).
 
 Remote downloads go through the local Proteoscope server, which only contacts
-`files.rcsb.org`, `alphafold.ebi.ac.uk` and `rest.uniprot.org`. Results are
-cached on disk under your user cache directory, for example
-`~/Library/Caches/proteoscope` on macOS. Start with `--offline` to disable all
-network access; cached entries are still served.
+`files.rcsb.org` (structures and validation reports), `alphafold.ebi.ac.uk`
+(models, PAE, MSAs and AlphaMissense) and `rest.uniprot.org`. Nothing needs an
+API key. Results are cached on disk under your user cache directory, for
+example `~/Library/Caches/proteoscope` on macOS, and refetched after 30 days
+(`--cache-max-age`); the `refresh` command downloads the active structure
+again. Start with `--offline` to disable all network access; cached entries
+are still served.
 
-AlphaFold 3, ColabFold and AlphaFold DB PAE files (`.json`) can be dropped onto
-a loaded model to show its PAE plot.
+PAE files can also be dropped onto a loaded model: AlphaFold DB, AlphaFold 3
+and ColabFold `.json`, or Boltz `.npz`. An `.a3m` alignment colors the model by
+MSA depth.
 
 ## The Workspace
 
 - **Top bar:** structure title, the search box and command line (press `/`),
   renderer badge, panel toggles.
 - **Left panel tabs:**
-  - **Structure:** the structures in the scene (when there are several), entry
-    metadata (method, resolution, R-free, organism, deposition date),
-    biological assemblies, composition and molecules, and the
-    secondary-structure source.
+  - **Structure:** the structures in the scene (when there are several), the
+    ranked models of an opened prediction, entry metadata (method,
+    resolution, R-free, organism, deposition date), biological assemblies,
+    composition and molecules, and the secondary-structure source.
   - **Style:** representations, surface, color scheme, sizes, lighting and
     effects, background, projection and clipping. With several structures,
     changes apply to all of them or only to the active one.
-  - **Analysis:** structure comparison, interactions, solvent accessibility,
-    Ramachandran plot, per-residue profile, PAE.
+  - **Analysis:** structure comparison, the validation report, interactions,
+    solvent accessibility, Ramachandran plot, per-residue profile, PAE with
+    domains, contact probabilities and MSA depth.
   - **Proteomics:** sequence properties, UniProt annotations, peptides,
-    sites and variants, cross-links, custom data.
+    sites and variants with AlphaMissense, cross-links, custom data.
 - **Right panel:**
   - Chains: click to show or hide; double-click to show only that chain.
   - Selection details, interactions of the focused residue, and measurements.
@@ -291,7 +314,12 @@ are recognized automatically.
 | Hydrophobicity | Kyte-Doolittle scale |
 | Nucleotide | A, C, G, U/T |
 | B-factor | Blue-white-red, viridis or magma colormaps |
-| AlphaFold confidence (pLDDT) | AlphaFold DB colors: >90 dark blue, 70–90 light blue, 50–70 yellow, <50 orange. Applied automatically to predicted models. |
+| AlphaFold confidence (pLDDT) | AlphaFold DB colors: >90 dark blue, 70–90 light blue, 50–70 yellow, <50 orange. Applied automatically to predicted models; ligands of AlphaFold 3, Boltz and Chai-1 models are colored per atom. |
+| PAE domains | Rigid domains clustered from the PAE matrix (**Find domains**) |
+| MSA depth | Aligned sequences per residue, log scale from red (1) to blue (≥ 1,000) |
+| Validation outliers (wwPDB) | Outlier criteria per residue, as in the report's residue plot: green none, yellow 1, orange 2, red 3 or more |
+| Fit to density | RSRZ (X-ray; above 2 is an outlier) or Q-score (cryo-EM), from the validation report |
+| AlphaMissense pathogenicity | Mean score of the 19 substitutions at each position, blue (benign) to red (pathogenic) |
 | Solvent exposure | Relative SASA, after **Compute SASA** |
 | Peptide coverage / Custom residue data | From the Proteomics tab |
 | Structure | One color per structure; the default when a scene holds several |
@@ -391,17 +419,20 @@ press Enter to select and frame it. Type a command and Enter runs it.
   reach across structures, so `within 5 of (#1 and ligand)` finds residues of a
   superposed structure near another structure's ligand.
 - **Values:** `b > 60`, `q < 1`, `plddt < 70`, `deviation > 2`, `lddt < 0.7`,
-  `rmsf > 2`, `rsa > 0.4` (after **Compute SASA**).
+  `rmsf > 2`, `rsa > 0.4` (after **Compute SASA**), `am > 0.564`
+  (AlphaMissense), `msa < 30` (MSA depth), and `rsrz > 2`, `rscc < 0.8` and
+  `qscore < 0.4` (validation report).
 - **Sets:** `sele`, `focus`, `sites` (proteomics), `covered` (peptides),
-  `aligned` (paired in a comparison).
+  `aligned` (paired in a comparison), `outliers` (validation report).
 
 **Commands.** `select`, `zoom`, `orient`, `focus`, `show`/`hide` (sticks,
 ball-stick, spheres, cartoon, surface, water, hydrogens, labels, everything),
 `color` (a name, a hex value, a scheme, or `default`), `label`/`unlabel`,
-`fetch`/`add`/`remove`/`activate`/`list`, `superpose`, `alphafold`,
-`overlay`, `preset`, `lighting`, `bg`, `distance`, `turn`, `spin`, `reset`,
-`save`, `link`, `mvs`, `png` and `help`. The help dialog (`?`) lists the
-syntax of each.
+`fetch`/`add`/`remove`/`activate`/`list`/`refresh`, `superpose`,
+`alphafold`, `overlay`, `ranking`, `domains`, `msa`, `validate` (with
+`clashes`, `fit`, `refresh` or `off`), `missense`, `preset`, `lighting`, `bg`,
+`distance`, `turn`, `spin`, `reset`, `save`, `link`, `mvs`, `png` and `help`.
+The help dialog (`?`) lists the syntax of each.
 
 Per-residue styling is also on the **Selection** card: **Sticks**, **Color**,
 **Hide** and **Reset** apply to the selected residues. **All** in the Chains
@@ -464,6 +495,93 @@ Checked against known cases:
 | EGFR (1M17) vs AlphaFold model P00533 | 0.78 Å over 249 of 312 pairs; TM-score 0.89; lDDT 0.92 |
 | Hemoglobin R state (1HHO assembly) onto T state (4HHB) | One αβ dimer fits within 1.1–1.5 Å, the other is rotated (2.7–4.5 Å) |
 
+## Predicted Complexes
+
+Structure predictors write a folder of ranked models with their confidence
+data. Proteoscope reads the whole folder, ranks the models, and scores every
+interface, so you can decide which predicted interactions to believe without
+uploading anything.
+
+**Opening.** Drop the folder, choose it with **Open prediction folder…**, drop
+the AlphaFold Server `.zip`, or name the folder on the command line
+(`proteoscope af3_output/my_job/`). What is read from each tool:
+
+| Tool | Models | Confidence |
+| --- | --- | --- |
+| AlphaFold 3 | `seed-*_sample-*/…model.cif` | `summary_confidences.json` (ranking score, pTM, ipTM, chain-pair ipTM), `confidences.json` (PAE, contact probabilities, per-atom pLDDT), MSAs from `…_data.json` |
+| AlphaFold Server | `fold_*_model_N.cif` in the downloaded `.zip` | `summary_confidences_N.json`, `full_data_N.json` |
+| Boltz-1 / Boltz-2 | `…_model_N.cif` | `confidence_…json`, `pae_…npz` (written with `--write_full_pae`), `plddt_…npz`, Boltz-2 `affinity_…json`, MSAs from `msa/` |
+| Chai-1 | `pred.model_idx_N.cif` | `scores.model_idx_N.npz` (aggregate score, pTM, ipTM, chain-pair ipTM, clashes) |
+| ColabFold | `…_relaxed_rank_…pdb` (else unrelaxed) | `…_scores_rank_…json` (pLDDT, PAE, pTM, ipTM), `.a3m` |
+
+AlphaFold 3 runs saved with compressed outputs (`.zst`) must be decompressed
+first (`zstd -d`). Chai-1 does not write PAE to disk, so its models get the
+scores Chai reports but not the PAE-based ones.
+
+**Ranking.** The **Prediction** group (Structure tab) lists the models by the
+tool's own ranking score. Click a model to show it in place of the current one;
+**Superpose all models** opens them all, superposed on the top-ranked model,
+to see where they disagree. **Export CSV** saves every model and chain pair
+with the scores below; `ranking` lists them from the command line.
+
+**Interface scores.** For each chain pair, computed from the model's PAE,
+pLDDT and coordinates with the definitions of Dunbrack's `ipsae.py`:
+
+- **ipTM** as the predictor reports it (for ColabFold, recomputed from the
+  PAE). The matrix under the table shows it for every chain pair, with chain
+  pTM on the diagonal; switch it to ipSAE or pDockQ2. Click a cell to select
+  that interface.
+- **ipSAE** (Dunbrack 2025): pTM-style scores averaged only over residue pairs
+  whose PAE is below 10 Å (15 Å for AlphaFold 2 / ColabFold), so disordered
+  tails and extra domains do not drag the score down the way they do ipTM.
+- **pDockQ** (Bryant et al. 2022) and **pDockQ2** (Zhu et al. 2023): interface
+  pLDDT, the number of Cβ contacts within 8 Å, and (pDockQ2) the PAE of the
+  contacting pairs.
+- **LIS** (Kim et al. 2024): the mean of (12 − PAE)/12 over inter-chain pairs
+  with PAE below 12 Å.
+
+**More confidence data.**
+
+- *Contact probability* (AlphaFold 3) sits next to the PAE in the Analysis
+  tab.
+- *Find domains* clusters the PAE into rigid domains as ChimeraX does.
+- *MSA depth* colors each residue by how many sequences were aligned to it;
+  shallow alignments are the most common cause of low confidence.
+- *Cross-links* mapped in the Proteomics tab add a column with how many links
+  each model satisfies.
+
+Sessions keep the model, its PAE, contact probabilities and scores.
+
+## Validation
+
+![EGFR with erlotinib (1M17) colored by wwPDB validation outliers, clashes drawn as pink lines, and the report's percentile summary, ligand fit and worst residues](docs/images/validation.jpg)
+
+**Load report** (Analysis tab, or `validate`) fetches the wwPDB validation
+report of the active PDB entry, the same report RCSB and PDBe publish with
+every entry.
+
+- **Summary.** Clashscore, Ramachandran and side-chain outliers, RSRZ
+  outliers and R-free (X-ray), or the average Q-score (cryo-EM), each with
+  its percentile rank among PDB entries.
+- **Per residue.** **Color outliers** colors every residue by how many
+  criteria it fails: clashes, bond and angle outliers, Ramachandran and
+  rotamer outliers, and RSRZ above 2. **Color density fit** shows RSRZ (X-ray)
+  or Q-score (cryo-EM) along the chain. The selection card lists each
+  residue's problems with RSRZ, RSCC, Q-score and EDIAm.
+- **Ligands.** Each ligand's fit (RSCC, RSRZ) and its Mogul geometry
+  outliers, so an unconvincing pose stands out.
+- **Clashes.** **Show clashes** draws every reported clash between the atoms
+  involved.
+- **Selections.** `select outliers`, `rsrz > 2`, `rscc < 0.8` and
+  `qscore < 0.4` combine with the rest of the language, for example
+  `outliers and within 5 of ligand`.
+
+The **Ramachandran plot** draws MolProbity's Top8000 contours (Williams et
+al. 2018) for the six residue categories (general, glycine, trans- and
+cis-proline, pre-proline, Ile/Val) and classifies every residue with
+MolProbity's criteria. That works for predicted models and local files too;
+with a report loaded, the report's classes are shown.
+
 ## Analysis Tab
 
 ![AlphaFold DB model of p53 (P04637) colored by pLDDT, with the per-residue confidence profile and the predicted aligned error matrix](docs/images/alphafold-pae.jpg)
@@ -479,13 +597,25 @@ Checked against known cases:
   - It also gives each chain's buried surface area in the complex.
   - After an interface analysis, it adds the buried surface area of that
     interface.
-- **Ramachandran plot.** φ/ψ per residue, colored by secondary structure, with
-  glycine and proline marked. Click a point to select the residue. The shaded
-  regions are an approximate guide, not MolProbity contours.
+- **Ramachandran plot.** φ/ψ per residue on MolProbity Top8000 contours, with
+  favored, allowed (yellow) and outlier (red) residues; choose a residue
+  category to see its own contours. Glycine and proline are marked. Click a
+  point to select the residue.
 - **Per-residue profile.** B-factor or pLDDT, relative SASA, hydrophobicity
-  (9-residue window) or custom data along the sequence. Click to select.
-- **Predicted aligned error.** The PAE heatmap for AlphaFold models. Drag a
-  rectangle to select the residues of both ranges in 3D.
+  (9-residue window), AlphaMissense, MSA depth, fit to density or custom data
+  along the sequence. Click to select.
+- **Predicted aligned error.** The PAE heatmap for AlphaFold models and
+  predictions. Drag a rectangle to select the residues of both ranges in 3D.
+  - **Contact probability** switches the heatmap to AlphaFold 3's contact
+    probabilities.
+  - **Find domains** clusters the PAE into rigid domains. This follows
+    ChimeraX's `alphafold pae colorDomains`: residue pairs under 5 Å PAE are
+    weighted by 1/PAE and grouped by greedy modularity. It lists each domain's
+    residues and mean pLDDT.
+  - **MSA depth** colors by the number of aligned sequences (AlphaFold DB
+    models, prediction folders, or a dropped `.a3m`).
+
+![The AlphaFold DB model of p53 (P04637) split into rigid domains from its PAE: the DNA-binding domain, the N-terminal transactivation region and the C-terminal region with the tetramerization helix](docs/images/pae-domains.jpg)
 
 ## Proteomics Tab
 
@@ -520,6 +650,14 @@ Everything in this tab runs in the browser. Nothing is uploaded.
   - Sites can use structure (author) or UniProt numbering. Wild-type
     mismatches are flagged, which catches numbering offsets.
   - Sites are highlighted, labeled and focused.
+  - **AlphaMissense** (Cheng et al. 2023) fetches the pathogenicity of every
+    possible substitution from AlphaFold DB (human proteins) and colors the
+    structure by the mean score at each position. Substitutions such as
+    `R175H` then show their own score. The selection card lists the most
+    damaging substitutions at a residue, and `am > 0.564` selects likely
+    pathogenic positions. The scores are for research, not clinical use.
+
+![p53 bound to DNA (1TUP) colored by AlphaMissense, with the six most frequent cancer hotspots mapped and scored](docs/images/alphamissense.jpg)
 - **Cross-links (XL-MS).**
   - Paste links such as `A:K123-B:K45`, or CSV with Protein1, Residue1,
     Protein2 and Residue2 columns.
@@ -558,9 +696,12 @@ Interaction tables export as CSV.
   - Selections, focus, labels, proteomics overlays and measurements.
   - The camera, lighting, background, clipping and secondary-structure source.
 
-  Open a session like any file, or drop it on the window. Solvent
-  accessibility is recomputed on demand, and PAE files you opened yourself are
-  not included (AlphaFold DB PAE matrices are fetched again).
+  - PAE matrices and contact probabilities you opened (at 0.125 Å and 1/255
+    steps), prediction scores, and MSA depth. Solvent accessibility, PAE
+    domains, validation reports and AlphaMissense are recomputed or fetched
+    again when the session opens; AlphaFold DB PAE matrices are fetched again.
+
+  Open a session like any file, or drop it on the window.
 - **Copy link** (or `link`) puts the whole session in the URL
   (`#session=…`) when every structure was fetched or is a bundled example.
   The link opens in Proteoscope at the same address and port.
@@ -607,6 +748,12 @@ Interaction tables export as CSV.
   - `_refine`, `_reflns` and `_em_3d_reconstruction` for resolution and
     R-factors, plus the organism and deposition-date categories.
   - ModelCIF `_ma_qa_metric_local` for per-residue pLDDT.
+- **BinaryCIF** (`.bcif`, as served by RCSB's and PDBe's model servers) is
+  decoded in the browser and read like PDBx/mmCIF.
+- **Predicted models** are recognized from ModelCIF records or the method and
+  software names (AlphaFold, ColabFold, ESMFold, Boltz, Chai-1, OpenFold). The
+  B-factor column is read as pLDDT, rescaled when a predictor writes it on a
+  0–1 scale.
 - **Chain and residue identifiers.** Author chain and residue IDs are used for
   display.
 - **Alternate conformers.** The highest-occupancy conformer is kept.
@@ -617,13 +764,14 @@ Interaction tables export as CSV.
 ## Command-Line Options
 
 ```text
-proteoscope [flags] [structure files...]
+proteoscope [flags] [structure files or prediction folders...]
 
   --host string       interface to bind (default 127.0.0.1)
   --port int          preferred port; nearby ports are tried if busy (default 8765)
   --no-open           do not open a browser
   --offline           disable remote fetching (cached entries still work)
   --cache-dir path    fetch cache location (default: user cache dir/proteoscope)
+  --cache-max-age d   refetch cached downloads older than this (default 720h; 0 keeps them)
   --no-cache          do not read or write the fetch cache
   --dev               serve web/ and data/ from disk for development
   --remote-control    accept commands from scripts on this computer (see Scripting)
@@ -728,15 +876,20 @@ node --test "web/lib/*.test.mjs"
 
 | Path | Responsibility |
 | --- | --- |
-| `main.go`, `fetch.go`, `cache.go`, `local.go`, `security.go` | Local server, embedded assets, fetch proxy and cache, command-line files, request hardening |
+| `main.go`, `fetch.go`, `cache.go`, `local.go`, `security.go` | Local server, embedded assets, fetch proxy and cache, command-line files and folders, request hardening |
+| `validation.go` | wwPDB validation reports, reduced from XML to per-residue JSON |
 | `web/app.js` | Application state, UI wiring, render loop, analysis and proteomics panels |
-| `web/lib/parse.js` | PDB and PDBx/mmCIF parsing, assemblies |
+| `web/lib/parse.js`, `web/lib/bcif.js` | PDB, PDBx/mmCIF and BinaryCIF parsing, assemblies |
+| `web/lib/predictions.js`, `web/lib/interface-scores.js` | Prediction folders (AlphaFold 3, Boltz, Chai-1, ColabFold), tokens, ipSAE, pDockQ, pDockQ2, LIS |
+| `web/lib/pae-domains.js`, `web/lib/msa.js`, `web/lib/npy.js` | PAE domain clustering, MSA depth, NumPy arrays |
+| `web/lib/validation.js`, `web/lib/ramachandran.js`, `web/lib/rama-top8000.js` | Validation-report mapping, MolProbity Top8000 Ramachandran classes and data |
+| `web/lib/missense.js` | AlphaMissense tables |
 | `web/lib/structure.js` | Residues, polymer typing, bonds, secondary structure, sequences, UniProt mapping |
 | `web/lib/dssp.js` | DSSP secondary-structure assignment |
 | `web/lib/cartoon.js` | Protein and nucleic-acid cartoon meshes |
 | `web/lib/align.js`, `web/lib/superpose.js`, `web/lib/compare.js` | Sequence alignment, least-squares superposition, TM-score, lDDT, RMSF, chain pairing |
 | `web/lib/select.js`, `web/lib/commands.js` | Selection language and command-line parsing |
-| `web/lib/mvs.js`, `web/lib/zip.js`, `web/lib/codec.js` | MolViewSpec export, `.mvsx` archives, session compression and links |
+| `web/lib/mvs.js`, `web/lib/zip.js`, `web/lib/codec.js` | MolViewSpec export, ZIP reading and writing, session compression and links |
 | `remote.go` | Remote control for scripts (`--remote-control`) |
 | `web/lib/scene.js`, `web/lib/coloring.js` | Representation and color-scheme logic |
 | `web/lib/renderer.js` | WebGPU renderer: impostors, G-buffer, SSAO, outlines, FXAA, picking, capture |
@@ -764,7 +917,8 @@ problem, open `http://127.0.0.1:8765/?renderer=canvas`.
 ### Fetching fails
 
 Check your network connection, and make sure Proteoscope was not started with
-`--offline`. The error message shows RCSB's or AlphaFold DB's reply, for
+`--offline`. When the network is down, downloads older than the cache's
+maximum age are still served from the cache. The error message shows RCSB's or AlphaFold DB's reply, for
 example when an entry does not exist. Very large entries can take longer than
 the 45-second download limit on slow connections; download the file and open
 it locally instead.
@@ -776,11 +930,21 @@ printed in the terminal.
 
 ### My downloaded file does not load
 
-Use a coordinate file ending in `.pdb`, `.ent`, `.cif` or `.mmcif`,
-optionally gzip-compressed. Validation reports, sequence files, BinaryCIF and
-PDFs are not coordinate files.
+Use a coordinate file ending in `.pdb`, `.ent`, `.cif`, `.mmcif` or `.bcif`,
+optionally gzip-compressed. Validation reports, sequence files and PDFs are
+not coordinate files. For a prediction, open the whole output folder (or the
+AlphaFold Server `.zip`) so the confidence files come along.
 
 ## License
 
 Proteoscope is licensed under the Apache License 2.0. See [LICENSE](LICENSE)
 for the full license text.
+
+### Data credits
+
+- The MolProbity Top8000 Ramachandran distributions come from the Richardson
+  Lab's [reference_data](https://github.com/rlabduke/reference_data)
+  (CC BY 4.0; Williams et al., *Protein Science* 2018).
+- AlphaMissense predictions (Cheng et al., *Science* 2023) are fetched from
+  AlphaFold DB under CC BY 4.0.
+- Validation reports come from the wwPDB.

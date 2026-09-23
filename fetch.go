@@ -57,8 +57,11 @@ type fetchError struct {
 	message string
 }
 
+// AlphaFold DB renamed entryId to modelEntityId in October 2025 (the old name is still served for
+// now); both are read.
 type afdbMeta struct {
 	EntryID                string          `json:"entryId"`
+	ModelEntityID          string          `json:"modelEntityId,omitempty"`
 	UniprotAccession       string          `json:"uniprotAccession"`
 	UniprotDescription     string          `json:"uniprotDescription"`
 	Gene                   string          `json:"gene"`
@@ -69,8 +72,17 @@ type afdbMeta struct {
 
 type afdbEntry struct {
 	afdbMeta
-	CifURL    string `json:"cifUrl"`
-	PaeDocURL string `json:"paeDocUrl"`
+	CifURL           string `json:"cifUrl"`
+	PaeDocURL        string `json:"paeDocUrl"`
+	AmAnnotationsURL string `json:"amAnnotationsUrl"`
+	MsaURL           string `json:"msaUrl"`
+}
+
+func (m afdbMeta) id() string {
+	if m.ModelEntityID != "" {
+		return m.ModelEntityID
+	}
+	return m.EntryID
 }
 
 func (e *fetchError) Error() string {
@@ -151,6 +163,22 @@ func (a *app) fetchAlphaFoldPAE(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (a *app) fetchAlphaMissense(w http.ResponseWriter, r *http.Request) {
+	if accession, ok := accessionParam(w, r); ok {
+		a.serveRemote(w, r, "afdb", accession+".missense.csv", func(ctx context.Context) (payload, error) {
+			return a.remote.alphaMissense(ctx, accession)
+		})
+	}
+}
+
+func (a *app) fetchAlphaFoldMSA(w http.ResponseWriter, r *http.Request) {
+	if accession, ok := accessionParam(w, r); ok {
+		a.serveRemote(w, r, "afdb", accession+".msa.a3m", func(ctx context.Context) (payload, error) {
+			return a.remote.alphaFoldMSA(ctx, accession)
+		})
+	}
+}
+
 func (a *app) fetchUniProt(w http.ResponseWriter, r *http.Request) {
 	if accession, ok := accessionParam(w, r); ok {
 		a.serveRemote(w, r, "uniprot", accession+".json", func(ctx context.Context) (payload, error) {
@@ -167,18 +195,31 @@ func accessionParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return accession, ok
 }
 
+// Serves a download from the cache when it is fresh. "?refresh=1" skips the cache; an expired
+// entry is refetched and still served, marked stale, if the upstream cannot be reached.
 func (a *app) serveRemote(w http.ResponseWriter, r *http.Request, kind, name string, fetch func(context.Context) (payload, error)) {
-	if cached, ok := a.cache.load(kind, name); ok {
+	refresh := r.URL.Query().Get("refresh") != ""
+	cached, ok, stale := a.cache.load(kind, name)
+	if ok && !stale && !refresh {
 		writePayload(w, cached, "hit")
 		return
 	}
 	if a.offline {
+		if ok {
+			writePayload(w, cached, "stale")
+			return
+		}
 		writeError(w, http.StatusForbidden, offlineMessage)
 		return
 	}
 	fresh, err := fetch(r.Context())
 	if err != nil {
 		log.Printf("fetch %s/%s: %v", kind, name, err)
+		var fetchErr *fetchError
+		if ok && !(errors.As(err, &fetchErr) && fetchErr.status == http.StatusNotFound) {
+			writePayload(w, cached, "stale")
+			return
+		}
 		writeFetchError(w, err)
 		return
 	}
@@ -244,7 +285,54 @@ func (u *upstream) alphaFoldModel(ctx context.Context, accession string) (payloa
 	if _, err := u.alphaFoldFileURL(entry.PaeDocURL); err == nil {
 		result.headers["X-Proteoscope-Pae"] = "/api/fetch/afdb/" + accession + "/pae"
 	}
+	if _, err := u.alphaFoldFileURL(entry.AmAnnotationsURL); err == nil && entry.AmAnnotationsURL != "" {
+		result.headers["X-Proteoscope-Missense"] = "/api/fetch/afdb/" + accession + "/missense"
+	}
+	if _, err := u.alphaFoldFileURL(entry.MsaURL); err == nil && entry.MsaURL != "" {
+		result.headers["X-Proteoscope-Msa"] = "/api/fetch/afdb/" + accession + "/msa"
+	}
 	return result, nil
+}
+
+// The multiple sequence alignment (A3M) AlphaFold DB used for a model, published since v6.
+func (u *upstream) alphaFoldMSA(ctx context.Context, accession string) (payload, error) {
+	entry, err := u.alphaFoldEntry(ctx, accession)
+	if err != nil {
+		return payload{}, err
+	}
+	if entry.MsaURL == "" {
+		return payload{}, fetchErrorf(http.StatusNotFound, "AlphaFold DB has no MSA for %s", accession)
+	}
+	file, err := u.alphaFoldFileURL(entry.MsaURL)
+	if err != nil {
+		return payload{}, err
+	}
+	body, err := u.alphaFoldFile(ctx, file)
+	if err != nil {
+		return payload{}, err
+	}
+	return textPayload(body, path.Base(file.Path), file.String()), nil
+}
+
+// AlphaMissense pathogenicity for every possible substitution (Cheng et al. 2023), published by
+// AlphaFold DB for human proteins as one CSV per UniProt entry.
+func (u *upstream) alphaMissense(ctx context.Context, accession string) (payload, error) {
+	entry, err := u.alphaFoldEntry(ctx, accession)
+	if err != nil {
+		return payload{}, err
+	}
+	if entry.AmAnnotationsURL == "" {
+		return payload{}, fetchErrorf(http.StatusNotFound, "AlphaFold DB has no AlphaMissense predictions for %s (they cover human proteins only)", accession)
+	}
+	file, err := u.alphaFoldFileURL(entry.AmAnnotationsURL)
+	if err != nil {
+		return payload{}, err
+	}
+	body, err := u.alphaFoldFile(ctx, file)
+	if err != nil {
+		return payload{}, err
+	}
+	return textPayload(body, path.Base(file.Path), file.String()), nil
 }
 
 func (u *upstream) alphaFoldPAE(ctx context.Context, accession string) (payload, error) {
@@ -287,7 +375,7 @@ func selectAlphaFoldEntry(entries []afdbEntry, accession string) (afdbEntry, err
 	}
 	canonical := "AF-" + accession + "-F1"
 	for _, entry := range entries {
-		if entry.EntryID == canonical {
+		if entry.id() == canonical {
 			return entry, nil
 		}
 	}

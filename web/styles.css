@@ -1009,6 +1009,174 @@ button:disabled {
   color: var(--text);
 }
 
+.result-box h4 {
+  margin: 9px 0 3px;
+  color: var(--mint);
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.result-box code {
+  color: var(--text);
+  font-size: 0.68rem;
+}
+
+/* Prediction folders and AlphaFold Server archives */
+.folder-button {
+  display: block;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(248, 245, 238, 0.04);
+  padding: 6px 10px;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+}
+
+.folder-button:hover {
+  border-color: rgba(76, 201, 240, 0.5);
+  color: var(--text);
+}
+
+.folder-button input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.prediction-models {
+  max-height: 230px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.prediction-table,
+.pair-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.prediction-table th,
+.prediction-table td {
+  padding: 4px 5px;
+  border-bottom: 1px solid rgba(248, 245, 238, 0.07);
+  text-align: left;
+}
+
+.prediction-table th {
+  color: var(--text-faint);
+  font-weight: 700;
+}
+
+.prediction-table tbody tr {
+  cursor: pointer;
+}
+
+.prediction-table tbody tr:hover {
+  background: rgba(248, 245, 238, 0.06);
+}
+
+.prediction-table tbody tr.is-active {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.prediction-table .loaded {
+  color: var(--accent);
+  font-size: 0.6rem;
+}
+
+.prediction-table .good,
+.interface-table .good {
+  color: var(--ok);
+}
+
+.prediction-table .bad {
+  color: var(--danger);
+}
+
+.prediction-table .warn {
+  color: var(--gold);
+}
+
+.prediction-pairs {
+  margin-top: 8px;
+  overflow-x: auto;
+}
+
+.pair-matrix th {
+  padding: 3px;
+  color: var(--text-faint);
+  font-weight: 800;
+  text-align: center;
+}
+
+.pair-matrix td {
+  padding: 4px 2px;
+  border: 1px solid rgba(5, 7, 8, 0.6);
+  color: #0b0f11;
+  font-weight: 800;
+  text-align: center;
+  cursor: pointer;
+}
+
+.pair-matrix td.diagonal {
+  background: rgba(248, 245, 238, 0.06);
+  color: var(--text-faint);
+  font-weight: 700;
+  cursor: default;
+}
+
+.interface-table tbody tr {
+  cursor: pointer;
+}
+
+.interface-table tbody tr:hover {
+  background: rgba(248, 245, 238, 0.06);
+}
+
+/* Validation percentiles, as on the wwPDB report sliders */
+.validation-table td:last-child {
+  white-space: nowrap;
+}
+
+.percentile {
+  display: inline-block;
+  width: 70px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 4px;
+  background: rgba(248, 245, 238, 0.1);
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+.percentile i {
+  display: block;
+  height: 100%;
+}
+
+.swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+.domain-list {
+  display: grid;
+  gap: 1px;
+  margin-top: 5px;
+}
+
 .feature-row span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1019,6 +1187,20 @@ button:disabled {
   flex: 0 0 auto;
   color: var(--text-faint);
   font-style: normal;
+}
+
+/* Rows whose short label comes first and whose longer detail is truncated instead. */
+.feature-row.detail span {
+  flex: 0 0 auto;
+}
+
+.feature-row.detail em {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .coverage-bar {

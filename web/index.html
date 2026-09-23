@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#050708" />
     <title>Proteoscope</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=wave3" />
+    <link rel="stylesheet" href="/styles.css?v=wave4" />
   </head>
   <body>
     <main id="app" class="left-open right-open sequence-open">
@@ -63,13 +63,34 @@
                 <select id="sample-select"></select>
               </label>
               <label class="upload-zone" for="file-input">
-                <input id="file-input" type="file" accept=".pdb,.ent,.cif,.mmcif,.gz,.json,chemical/x-pdb,chemical/x-cif,text/plain" multiple />
+                <input id="file-input" type="file" accept=".pdb,.ent,.cif,.mmcif,.bcif,.gz,.json,.zip,.npz,.a3m,.csv,chemical/x-pdb,chemical/x-cif,text/plain" multiple />
                 <span class="upload-icon" aria-hidden="true">+</span>
                 <span>
                   <strong>Open local file</strong>
-                  <small>.pdb, .cif, .mmcif (optionally .gz) or AlphaFold PAE .json. Drop several files to compare them. Files stay on this computer.</small>
+                  <small>.pdb, .cif, .bcif (optionally .gz), a PAE .json, or an AlphaFold Server .zip. Drop several files to compare them, or a prediction folder. Files stay on this computer.</small>
                 </span>
               </label>
+              <label class="folder-button" for="folder-input" title="Open an AlphaFold 3, Boltz, Chai-1 or ColabFold output folder">
+                <input id="folder-input" type="file" webkitdirectory multiple />
+                Open prediction folder…
+              </label>
+            </div>
+
+            <div class="group" id="prediction-group" hidden>
+              <h3>Prediction <span id="prediction-count" class="count-badge"></span></h3>
+              <p id="prediction-title" class="hint"></p>
+              <div id="prediction-models" class="prediction-models"></div>
+              <div class="segmented three" role="group" aria-label="Chain-pair score">
+                <button type="button" data-pair-metric="iptm" class="is-active" title="ipTM for each chain pair, as reported by the predictor">ipTM</button>
+                <button type="button" data-pair-metric="ipsae" title="ipSAE (Dunbrack 2025): interface pTM restricted to confidently aligned residue pairs">ipSAE</button>
+                <button type="button" data-pair-metric="pdockq2" title="pDockQ2 (Zhu et al. 2023): interface pLDDT and PAE">pDockQ2</button>
+              </div>
+              <div id="prediction-pairs" class="prediction-pairs"></div>
+              <div id="prediction-detail" class="result-box"></div>
+              <div class="button-row">
+                <button id="prediction-superpose" type="button" title="Load every model and superpose them on the top-ranked one">Superpose all models</button>
+                <button id="prediction-export" type="button" title="Download the ranking and interface scores as CSV">Export CSV</button>
+              </div>
             </div>
 
             <div class="group" id="structures-group" hidden>
@@ -291,6 +312,18 @@
               <div id="compare-result" class="result-box" hidden></div>
             </div>
 
+            <div class="group" id="validation-group">
+              <h3>Validation</h3>
+              <p class="hint">The wwPDB validation report of a PDB entry: clashes, geometry, Ramachandran and rotamer outliers, and fit to the density. Requires network access.</p>
+              <div class="button-row">
+                <button id="validation-load" type="button">Load report</button>
+                <button id="validation-color" type="button" disabled>Color outliers</button>
+                <button id="validation-fit" type="button" disabled>Color density fit</button>
+              </div>
+              <label class="check"><input id="validation-clashes" type="checkbox" disabled /> Show clashes</label>
+              <div id="validation-result" class="result-box" hidden></div>
+            </div>
+
             <div class="group">
               <h3>Interactions</h3>
               <p class="hint">Double-click a ligand or residue (or select it and press <kbd>F</kbd>) to focus it. Non-covalent contacts to its surroundings are detected and drawn.</p>
@@ -319,7 +352,20 @@
 
             <div class="group">
               <h3>Ramachandran plot</h3>
-              <label class="field"><span>Chain</span><select id="rama-chain"></select></label>
+              <div class="field-grid">
+                <label class="field"><span>Chain</span><select id="rama-chain"></select></label>
+                <label class="field"><span>Residues</span>
+                  <select id="rama-category">
+                    <option value="all">All (general contours)</option>
+                    <option value="general">General</option>
+                    <option value="glycine">Glycine</option>
+                    <option value="transPro">trans-Proline</option>
+                    <option value="cisPro">cis-Proline</option>
+                    <option value="prePro">Pre-proline</option>
+                    <option value="ileVal">Ile / Val</option>
+                  </select>
+                </label>
+              </div>
               <canvas id="rama-canvas" class="plot square" width="600" height="600"></canvas>
               <p id="rama-summary" class="hint"></p>
             </div>
@@ -333,6 +379,9 @@
                     <option value="bfactor">B-factor / pLDDT</option>
                     <option value="sasa">Relative SASA</option>
                     <option value="hydrophobicity">Hydrophobicity (9-residue window)</option>
+                    <option value="missense">AlphaMissense (mean pathogenicity)</option>
+                    <option value="msa">MSA depth</option>
+                    <option value="densityfit">Fit to density (RSRZ / Q-score)</option>
                     <option value="data">Custom data</option>
                   </select>
                 </label>
@@ -342,9 +391,18 @@
 
             <div class="group" id="pae-group">
               <h3>Predicted aligned error</h3>
-              <p id="pae-hint" class="hint">Fetch an AlphaFold DB entry or open a PAE JSON (AlphaFold DB, AlphaFold 3, ColabFold) to see the PAE matrix. Drag on the plot to highlight residue ranges.</p>
+              <p id="pae-hint" class="hint">Fetch an AlphaFold DB entry, open a PAE JSON (AlphaFold DB, AlphaFold 3, ColabFold) or a prediction folder to see the PAE matrix. Drag on the plot to highlight residue ranges.</p>
+              <div id="pae-view" class="segmented two" role="group" aria-label="Matrix" hidden>
+                <button type="button" data-pae-view="pae" class="is-active">PAE</button>
+                <button type="button" data-pae-view="contacts" title="AlphaFold 3 contact probabilities (8 Å)">Contact probability</button>
+              </div>
               <canvas id="pae-canvas" class="plot square" width="600" height="600" hidden></canvas>
               <p id="pae-summary" class="hint"></p>
+              <div class="button-row">
+                <button id="pae-domains" type="button" disabled title="Cluster residues into rigid domains from the PAE (as ChimeraX's alphafold pae colorDomains)">Find domains</button>
+                <button id="msa-depth" type="button" disabled title="Color by the number of aligned sequences per residue (AlphaFold DB models, prediction folders, or a dropped .a3m)">MSA depth</button>
+              </div>
+              <div id="pae-domain-result" class="result-box" hidden></div>
             </div>
           </section>
 
@@ -393,7 +451,11 @@
                 </select>
                 <button id="site-map" type="button" class="primary">Show sites</button>
               </div>
+              <div class="button-row">
+                <button id="missense-load" type="button" title="AlphaMissense pathogenicity of every substitution (human proteins, from AlphaFold DB)">AlphaMissense</button>
+              </div>
               <div id="site-result" class="result-box" hidden></div>
+              <div id="missense-result" class="result-box" hidden></div>
             </div>
 
             <div class="group">
@@ -530,7 +592,7 @@
 
       <div id="tooltip" class="tooltip" role="status"></div>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
-      <div id="drop-overlay" class="drop-overlay" hidden><div>Drop structures, a PAE file or a session to open</div></div>
+      <div id="drop-overlay" class="drop-overlay" hidden><div>Drop structures, a prediction folder or .zip, a PAE file or a session to open</div></div>
 
       <div id="loading" class="loading">
         <div class="loading-mark"></div>
@@ -606,6 +668,6 @@
         </form>
       </dialog>
     </main>
-    <script type="module" src="/app.js?v=wave3"></script>
+    <script type="module" src="/app.js?v=wave4"></script>
   </body>
 </html>

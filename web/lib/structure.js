@@ -44,6 +44,10 @@ export function deriveModel(model, structure, options = {}) {
   model.bonds = buildBonds(model, structure.conect);
   model.bounds = computeBounds(model.atoms);
   model.bFactorRange = computeBFactorRange(model.atoms);
+  // Some predictors write pLDDT to the B-factor column on a 0–1 scale.
+  if (structure.meta?.isPredicted && !structure.residueConfidence?.size && model.bFactorRange.max <= 1) {
+    for (const residue of model.residues) if (Number.isFinite(residue.confidence)) residue.confidence *= 100;
+  }
   model.cartoonCache = new Map();
 }
 
@@ -359,9 +363,12 @@ function computeBackboneAngles(residues) {
     const next = residues[index + 1]?.linkedToPrevious ? residues[index + 1] : null;
     if (previous?.backbone.C) {
       residue.phi = degrees(dihedralAngle(point(previous.backbone.C), point(N), point(CA), point(C)));
+      // ω of the preceding peptide bond tells cis from trans prolines.
+      if (previous.backbone.CA) residue.omega = degrees(dihedralAngle(point(previous.backbone.CA), point(previous.backbone.C), point(N), point(CA)));
     }
     if (next?.backbone.N) {
       residue.psi = degrees(dihedralAngle(point(N), point(CA), point(C), point(next.backbone.N)));
+      residue.beforeProline = (next.parent ?? next.resName) === 'PRO';
     }
   }
 }

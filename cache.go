@@ -2,14 +2,19 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
+// Downloads older than maxAge are refetched (and served stale only if the refetch fails);
+// a zero maxAge keeps them forever.
 type diskCache struct {
 	dir      string
+	maxAge   time.Duration
 	warnOnce sync.Once
 }
 
@@ -18,7 +23,9 @@ type cacheMeta struct {
 	Headers     map[string]string `json:"headers"`
 }
 
-func openCache(dir string, disabled bool) *diskCache {
+const defaultCacheMaxAge = 30 * 24 * time.Hour
+
+func openCache(dir string, disabled bool, maxAge time.Duration) *diskCache {
 	if disabled {
 		return nil
 	}
@@ -33,27 +40,45 @@ func openCache(dir string, disabled bool) *diskCache {
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
-	return &diskCache{dir: dir}
+	return &diskCache{dir: dir, maxAge: maxAge}
 }
 
-func (c *diskCache) load(kind, name string) (payload, bool) {
+func formatAge(age time.Duration) string {
+	day := 24 * time.Hour
+	switch {
+	case age == day:
+		return "1 day"
+	case age%day == 0:
+		return fmt.Sprintf("%d days", age/day)
+	default:
+		return age.String()
+	}
+}
+
+// load returns a cached payload and whether it is older than the cache's maximum age.
+func (c *diskCache) load(kind, name string) (payload, bool, bool) {
 	if c == nil {
-		return payload{}, false
+		return payload{}, false, false
 	}
 	file := filepath.Join(c.dir, kind, name)
 	raw, err := os.ReadFile(file + ".meta.json")
 	if err != nil {
-		return payload{}, false
+		return payload{}, false, false
 	}
 	var meta cacheMeta
 	if err := json.Unmarshal(raw, &meta); err != nil || meta.ContentType == "" {
-		return payload{}, false
+		return payload{}, false, false
+	}
+	info, err := os.Stat(file)
+	if err != nil {
+		return payload{}, false, false
 	}
 	body, err := os.ReadFile(file)
 	if err != nil {
-		return payload{}, false
+		return payload{}, false, false
 	}
-	return payload{body: body, contentType: meta.ContentType, headers: meta.Headers}, true
+	stale := c.maxAge > 0 && time.Since(info.ModTime()) > c.maxAge
+	return payload{body: body, contentType: meta.ContentType, headers: meta.Headers}, true, stale
 }
 
 func (c *diskCache) store(kind, name string, p payload) {

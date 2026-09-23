@@ -371,3 +371,46 @@ selection, distance measurement, and PNG export.
 3. WHEN no page is connected or the page does not answer, THE System SHALL return an error rather than hang
 4. WHEN remote control is off or a request comes from a web page on another origin, THE System SHALL refuse it
 
+### Requirement 28: Predicted Complexes
+
+**User Story:** As a researcher running AlphaFold 3, Boltz, Chai-1 or ColabFold, I want to open a whole prediction and compare its models' interface confidence, so that I can decide which predicted interactions to trust without uploading my data.
+
+#### Acceptance Criteria
+
+1. WHEN a prediction folder, an AlphaFold Server archive or a folder named on the command line is opened, THE System SHALL recognize AlphaFold 3, AlphaFold Server, Boltz, Chai-1 and ColabFold layouts and list the models ranked by the tool's score
+2. WHEN a model has a PAE matrix, THE System SHALL report ipSAE, ipTM from PAE, pDockQ, pDockQ2 and LIS for every chain pair, following the reference definitions
+3. WHEN the predictor reports chain-pair ipTM, THE System SHALL show it as a chain-pair matrix, switchable to ipSAE and pDockQ2
+4. WHEN contact probabilities, per-atom ligand pLDDT or MSAs are present, THE System SHALL show them
+5. WHEN cross-links have been mapped, THE System SHALL report how many each model satisfies
+6. WHEN a PAE matrix is loaded, THE System SHALL cluster it into rigid domains on request
+
+### Requirement 29: Validation Reports
+
+**User Story:** As a structural biologist, I want to see a PDB entry's validation report on the structure, so that I can judge which regions and ligands are well supported by the data.
+
+#### Acceptance Criteria
+
+1. WHEN a validation report is requested for a PDB entry, THE System SHALL fetch the wwPDB report and show its summary metrics with percentiles
+2. WHEN the report is loaded, THE System SHALL color residues by the number of outlier criteria, draw clashes, color by fit to density (RSRZ or Q-score), and list ligand fit and the worst residues
+3. THE System SHALL classify residues on MolProbity Top8000 Ramachandran contours for any structure, using the report's classes when a report is loaded
+4. THE System SHALL expose outliers and per-residue fit values to the selection language
+
+### Requirement 30: Variant Effects
+
+**User Story:** As a researcher studying human variants, I want AlphaMissense predictions on the structure, so that I can relate substitutions to structural context.
+
+#### Acceptance Criteria
+
+1. WHEN AlphaMissense is requested for a structure of a human protein, THE System SHALL fetch the predictions and color residues by their mean pathogenicity, mapping through UniProt numbering and skipping wild-type mismatches
+2. WHEN substitutions are entered as sites, THE System SHALL show each one's AlphaMissense score and class
+3. THE System SHALL state that the predictions are for research, not clinical use
+
+### Requirement 31: Formats, Cache and Sessions
+
+**User Story:** As a user of Proteoscope, I want modern formats, fresh downloads and complete sessions, so that my data opens and my work reopens as I left it.
+
+#### Acceptance Criteria
+
+1. WHEN a BinaryCIF file is opened, THE System SHALL read it like PDBx/mmCIF
+2. WHEN a cached download is older than the maximum age, THE System SHALL fetch it again, and SHALL serve the cached copy if the fetch fails
+3. WHEN a session is saved, THE System SHALL include PAE matrices and contact probabilities opened by hand, prediction scores and MSA depth, and SHALL recompute SASA, PAE domains, validation and AlphaMissense on restore

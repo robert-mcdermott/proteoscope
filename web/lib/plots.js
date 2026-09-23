@@ -33,6 +33,8 @@ export function ramachandranDensity(phi, psi, kind = 'general') {
   return total;
 }
 
+// options.contours(φ, ψ) → 0 outlier, 1 allowed, 2 favored draws MolProbity-style contour regions;
+// without it an approximate Gaussian guide is shaded.
 export function drawRamachandran(canvas, residues, options = {}) {
   const ctx = canvas.getContext('2d');
   const size = canvas.width;
@@ -47,9 +49,14 @@ export function drawRamachandran(canvas, residues, options = {}) {
     for (let px = 0; px < w; px += 1) {
       const phi = -180 + (px / w) * 360;
       const psi = 180 - (py / w) * 360;
-      const density = ramachandranDensity(phi, psi, 'general');
       const offset = (py * w + px) * 4;
-      const level = density > 0.35 ? 2 : density > 0.05 ? 1 : 0;
+      let level;
+      if (options.contours) {
+        level = options.contours(phi, psi);
+      } else {
+        const density = ramachandranDensity(phi, psi, 'general');
+        level = density > 0.35 ? 2 : density > 0.05 ? 1 : 0;
+      }
       const colors = [[22, 27, 30], [36, 58, 74], [52, 104, 136]];
       image.data[offset] = colors[level][0];
       image.data[offset + 1] = colors[level][1];
@@ -95,10 +102,16 @@ export function drawRamachandran(canvas, residues, options = {}) {
   }
   const selected = options.selected ?? new Set();
   const radius = Math.max(2, size * 0.0065);
+  // With a validation report, MolProbity classes replace the secondary-structure colors, and
+  // outliers are drawn last so they stay on top.
+  const classOf = (residue) => String(options.classify?.(residue) ?? '').toUpperCase();
+  if (options.classify) points.sort((a, b) => (classOf(a.residue) === 'OUTLIER') - (classOf(b.residue) === 'OUTLIER'));
   for (const point of points) {
     const residue = point.residue;
     const isSelected = selected.has(residue.key);
-    ctx.fillStyle = isSelected ? '#59ff8c' : colorToHex(SECONDARY_COLORS[residue.ss] ?? SECONDARY_COLORS.coil);
+    const label = options.classify ? classOf(residue) : '';
+    const classColor = label === 'OUTLIER' ? '#ff4d5a' : label === 'ALLOWED' ? '#f5d547' : null;
+    ctx.fillStyle = isSelected ? '#59ff8c' : classColor ?? colorToHex(SECONDARY_COLORS[residue.ss] ?? SECONDARY_COLORS.coil);
     ctx.beginPath();
     if (residue.parent === 'GLY') {
       ctx.moveTo(point.x, point.y - radius * 1.3);
@@ -108,10 +121,10 @@ export function drawRamachandran(canvas, residues, options = {}) {
     } else if (residue.parent === 'PRO') {
       ctx.rect(point.x - radius, point.y - radius, radius * 2, radius * 2);
     } else {
-      ctx.arc(point.x, point.y, isSelected ? radius * 1.6 : radius, 0, Math.PI * 2);
+      ctx.arc(point.x, point.y, isSelected ? radius * 1.6 : label === 'OUTLIER' ? radius * 1.35 : radius, 0, Math.PI * 2);
     }
     ctx.fill();
-    if (isSelected) {
+    if (isSelected || label === 'OUTLIER') {
       ctx.strokeStyle = '#fff';
       ctx.stroke();
     }
@@ -215,10 +228,12 @@ export function drawPAE(canvas, pae, options = {}) {
   ctx.clearRect(0, 0, size, size);
   const image = new ImageData(n, n);
   const max = pae.max || 31.75;
+  // Contact probabilities: white (0) to dark purple (1).
+  const color = options.mode === 'contacts' ? contactColor : paeColor;
   for (let row = 0; row < n; row += 1) {
     for (let column = 0; column < n; column += 1) {
       const value = pae.matrix[row * n + column];
-      const [r, g, b] = paeColor(Math.min(1, Math.max(0, value / max)));
+      const [r, g, b] = color(Math.min(1, Math.max(0, value / max)));
       const offset = (row * n + column) * 4;
       image.data[offset] = r;
       image.data[offset + 1] = g;
@@ -268,6 +283,12 @@ export function drawPAE(canvas, pae, options = {}) {
       return { row, column };
     },
   };
+}
+
+function contactColor(t) {
+  const light = [247, 245, 250];
+  const dark = [63, 0, 125];
+  return [light[0] + (dark[0] - light[0]) * t, light[1] + (dark[1] - light[1]) * t, light[2] + (dark[2] - light[2]) * t];
 }
 
 function paeColor(t) {

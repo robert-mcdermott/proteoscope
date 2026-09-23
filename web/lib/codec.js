@@ -11,6 +11,25 @@ export async function decompressText(bytes, format = 'gzip') {
   return new Response(stream).text();
 }
 
+// compressText also accepts bytes; this is its binary counterpart.
+export async function decompressBytes(bytes, format = 'gzip') {
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(format));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+// PAE and similar matrices travel in sessions as bytes: value × scale, clamped to 0–255.
+export function quantizeMatrix(matrix, scale = 8) {
+  const bytes = new Uint8Array(matrix.length);
+  for (let index = 0; index < matrix.length; index += 1) bytes[index] = Math.min(255, Math.max(0, Math.round(matrix[index] * scale)));
+  return bytes;
+}
+
+export function dequantizeMatrix(bytes, scale = 8) {
+  const matrix = new Float32Array(bytes.length);
+  for (let index = 0; index < bytes.length; index += 1) matrix[index] = bytes[index] / scale;
+  return matrix;
+}
+
 export function bytesToBase64(bytes) {
   let binary = '';
   const chunk = 0x8000;

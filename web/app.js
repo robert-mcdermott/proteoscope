@@ -17,8 +17,27 @@ import { compareStructures, polymerChainResidues, superposeEnsemble } from './li
 import { composeTransforms, invertTransform, isIdentityTransform, transformPoint } from './lib/superpose.js';
 import { countMask, evaluateSelection, looksLikeSelection, parseSelection, residueKeysFromMask } from './lib/select.js';
 import { COMMANDS, CommandError, parseCommand, suggestCommands } from './lib/commands.js';
-import { base64ToBytes, bytesToBase64, compressText, decodeLinkPayload, decompressText, encodeLinkPayload } from './lib/codec.js';
-import { createZip } from './lib/zip.js';
+import { base64ToBytes, bytesToBase64, compressText, decodeLinkPayload, decompressBytes, decompressText, dequantizeMatrix, encodeLinkPayload, quantizeMatrix } from './lib/codec.js';
+import { createZip, isZip, listZip, readZipEntry } from './lib/zip.js';
+import { binaryCIFToText, isBinaryCIF } from './lib/bcif.js';
+import { mapValidation, validationLevel } from './lib/validation.js';
+import { MISSENSE_THRESHOLDS, missenseClass, parseAlphaMissense, rankedSubstitutions } from './lib/missense.js';
+import { paeDomains } from './lib/pae-domains.js';
+import { RAMA_CATEGORIES, RAMA_FAVORED, classifyRamachandran, loadTop8000, ramaDensity } from './lib/ramachandran.js';
+import { combineDepth, depthSummary, msaDepth } from './lib/msa.js';
+import { readNpz, readNpy, squareMatrix } from './lib/npy.js';
+import { interfaceScores } from './lib/interface-scores.js';
+import {
+  detectPredictionSets,
+  parseAF3Confidences,
+  parseAF3Summary,
+  parseBoltzAffinity,
+  parseBoltzConfidence,
+  parseChaiScores,
+  parseColabFoldScores,
+  rankModels,
+  tokensForPAE,
+} from './lib/predictions.js';
 import { buildMolViewSpec, referenceCameraPosition, residueColors, residueSelector } from './lib/mvs.js';
 import { buildCartoon } from './lib/cartoon.js';
 import { COLOR_SCHEMES, computeAtomColors, titleCase } from './lib/coloring.js';
@@ -160,6 +179,7 @@ const els = {
   sasaColor: document.querySelector('#sasa-color'),
   sasaResult: document.querySelector('#sasa-result'),
   ramaChain: document.querySelector('#rama-chain'),
+  ramaCategory: document.querySelector('#rama-category'),
   ramaCanvas: document.querySelector('#rama-canvas'),
   ramaSummary: document.querySelector('#rama-summary'),
   profileChain: document.querySelector('#profile-chain'),
@@ -226,6 +246,26 @@ const els = {
   exportCopy: document.querySelector('#export-copy'),
   exportMovie: document.querySelector('#export-movie'),
   helpDialog: document.querySelector('#help-dialog'),
+  folderInput: document.querySelector('#folder-input'),
+  predictionGroup: document.querySelector('#prediction-group'),
+  predictionCount: document.querySelector('#prediction-count'),
+  predictionTitle: document.querySelector('#prediction-title'),
+  predictionModels: document.querySelector('#prediction-models'),
+  predictionPairs: document.querySelector('#prediction-pairs'),
+  predictionDetail: document.querySelector('#prediction-detail'),
+  predictionSuperpose: document.querySelector('#prediction-superpose'),
+  predictionExport: document.querySelector('#prediction-export'),
+  validationLoad: document.querySelector('#validation-load'),
+  validationColor: document.querySelector('#validation-color'),
+  validationFit: document.querySelector('#validation-fit'),
+  validationClashes: document.querySelector('#validation-clashes'),
+  validationResult: document.querySelector('#validation-result'),
+  paeView: document.querySelector('#pae-view'),
+  paeDomainsButton: document.querySelector('#pae-domains'),
+  msaDepth: document.querySelector('#msa-depth'),
+  paeDomainResult: document.querySelector('#pae-domain-result'),
+  missenseLoad: document.querySelector('#missense-load'),
+  missenseResult: document.querySelector('#missense-result'),
 };
 
 const LIGHTING_PRESETS = {
@@ -283,7 +323,7 @@ const DEFAULT_DISPLAY = {
 const STRUCTURE_COLORS = ['#5aa9f0', '#f39c3d', '#5fd08e', '#e8659c', '#a78bfa', '#e8d44d', '#4fd1d9', '#c98b5c'].map(hexColor);
 const MAX_OVERLAY_MODELS = 60;
 const COMPARISON_SCHEMES = new Set(['deviation', 'lddt', 'rmsf']);
-const DATA_SCHEMES = new Set(['coverage', 'data', 'exposure', 'deviation', 'lddt', 'rmsf']);
+const DATA_SCHEMES = new Set(['coverage', 'data', 'exposure', 'deviation', 'lddt', 'rmsf', 'validation', 'densityfit', 'missense', 'domains', 'msa']);
 
 // Everything that belongs to one loaded structure. `state.structure`, `state.display`,
 // `state.selection` and the other per-structure fields below read and write the active entry.
@@ -307,6 +347,14 @@ function entryDefaults() {
     proteomics: emptyProteomics(),
     pae: null,
     paeSelection: null,
+    // wwPDB validation report, AlphaMissense scores, PAE domains, and MSA depth per residue.
+    validation: null,
+    missense: null,
+    domains: null,
+    msa: null,
+    // AlphaFold 3 contact probabilities, and the prediction set and model this entry came from.
+    contacts: null,
+    prediction: null,
   };
 }
 
@@ -316,6 +364,10 @@ const state = {
   samples: [],
   startup: null,
   entries: [],
+  predictionSets: [],
+  crosslinkRequest: null,
+  pairMetric: 'iptm',
+  paeView: 'pae',
   active: null,
   nextEntryId: 1,
   defaults: entryDefaults(),
@@ -432,11 +484,8 @@ async function init() {
       if (fallback) await loadStructureFromURL(fallback.url, fallback.name, { origin: { type: 'sample', id: fallback.id } });
     }
   } else if (startup?.files?.length) {
-    await guardedLoad(async () => {
-      await loadStructureFromURL(startup.files[0].url, startup.files[0].name);
-      for (const file of startup.files.slice(1)) await loadStructureFromURL(file.url, file.name, { add: true });
-      if (startup.files.length > 1) setActiveEntry(state.entries[0]);
-    });
+    // Files and folders named on the command line open like dropped ones.
+    await openFiles(startup.files.map(urlRef));
   } else if (fetchRequest) {
     // #fetch=4AKE,1AKE loads several entries; adding &superpose fits the others onto the first.
     const ids = fetchRequest.split(',').map((id) => id.trim()).filter(Boolean);
@@ -537,6 +586,11 @@ function bindEvents() {
     const files = [...(els.fileInput.files ?? [])];
     els.fileInput.value = '';
     await openFiles(files);
+  });
+  els.folderInput.addEventListener('change', async () => {
+    const files = [...(els.folderInput.files ?? [])].filter((file) => !file.name.startsWith('.'));
+    els.folderInput.value = '';
+    await openFiles(files.slice(0, MAX_FOLDER_FILES));
   });
   els.assemblySelect.addEventListener('change', () => activateAssembly(els.assemblySelect.value));
   document.querySelectorAll('[data-ss-mode]').forEach((button) => {
@@ -719,9 +773,31 @@ function bindEvents() {
     markSceneDirty();
   });
   els.interactionsExport.addEventListener('click', exportInteractionsCSV);
-  els.sasaRun.addEventListener('click', runSASA);
+  els.sasaRun.addEventListener('click', () => runSASA());
+  els.validationLoad.addEventListener('click', () => runCommand(state.active?.validation ? 'validate refresh' : 'validate'));
+  els.validationColor.addEventListener('click', () => setColorScheme('validation', [state.active]));
+  els.validationFit.addEventListener('click', () => setColorScheme('densityfit', [state.active]));
+  els.validationClashes.addEventListener('change', () => setShowClashes(els.validationClashes.checked));
+  els.paeDomainsButton.addEventListener('click', () => runCommand('domains'));
+  els.msaDepth.addEventListener('click', () => runCommand('msa'));
+  els.predictionSuperpose.addEventListener('click', () => guardedLoad(superposePredictionModels));
+  els.predictionExport.addEventListener('click', exportPredictionCSV);
+  document.querySelectorAll('[data-pair-metric]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.pairMetric = button.dataset.pairMetric;
+      renderPrediction();
+    });
+  });
+  document.querySelectorAll('[data-pae-view]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.paeView = button.dataset.paeView;
+      renderPAE();
+    });
+  });
+  els.missenseLoad.addEventListener('click', () => runCommand('missense'));
   els.sasaColor.addEventListener('click', () => setColorScheme('exposure', [state.active]));
   els.ramaChain.addEventListener('change', renderRamachandran);
+  els.ramaCategory.addEventListener('change', renderRamachandran);
   els.ramaCanvas.addEventListener('click', onRamaClick);
   els.profileChain.addEventListener('change', renderProfile);
   els.profileMetric.addEventListener('change', renderProfile);
@@ -770,7 +846,9 @@ function bindEvents() {
   window.addEventListener('drop', async (event) => {
     event.preventDefault();
     els.dropOverlay.hidden = true;
-    await openFiles([...(event.dataTransfer?.files ?? [])]);
+    // Folder entries must be taken from the event before any await.
+    const pending = collectDroppedFiles(event.dataTransfer);
+    await openFiles(await pending);
   });
 }
 
@@ -795,7 +873,7 @@ async function fetchStructure(query, options = {}) {
   let entry = null;
   await guardedLoad(async () => {
     showLoading(`Fetching ${request.label}`);
-    const response = await fetch(request.url);
+    const response = await fetch(options.refresh ? `${request.url}?refresh=1` : request.url);
     if (!response.ok) {
       let message = `Could not fetch ${request.label} (HTTP ${response.status}).`;
       try {
@@ -817,6 +895,9 @@ async function fetchStructure(query, options = {}) {
     updateLocationHash();
     const paeURL = response.headers.get('X-Proteoscope-Pae');
     if (paeURL) loadPAEFromURL(paeURL, entry);
+    // AlphaFold DB models have their alignment next to them (downloads cached before the header
+    // existed still get it).
+    entry.msaURL = response.headers.get('X-Proteoscope-Msa') || (request.url.startsWith('/api/fetch/afdb/') ? `${request.url}/msa` : null);
   });
   return entry;
 }
@@ -840,7 +921,7 @@ function applyRemoteMetadata(encoded, entry = state.active) {
     const meta = JSON.parse(new TextDecoder().decode(bytes));
     const structureMeta = entry.structure.meta;
     if (meta.uniprotDescription) {
-      structureMeta.title = `${meta.entryId || structureMeta.code}: ${meta.uniprotDescription}${meta.gene ? ` (${meta.gene})` : ''}`;
+      structureMeta.title = `${meta.entryId || meta.modelEntityId || structureMeta.code}: ${meta.uniprotDescription}${meta.gene ? ` (${meta.gene})` : ''}`;
     }
     if (meta.organismScientificName) structureMeta.organism = meta.organismScientificName;
     if (!structureMeta.method) structureMeta.method = `AlphaFold DB v${meta.latestVersion ?? ''} prediction`.replace(' v prediction', ' prediction');
@@ -869,18 +950,25 @@ function normalizeFetchQuery(query) {
   return null;
 }
 
+// Opens dropped or chosen files: prediction folders and AlphaFold Server archives become ranked
+// model sets; structures (.pdb, .cif, .bcif, optionally gzipped) open as entries; JSON files are
+// sessions or PAE matrices; .npz PAE, .a3m alignments and AlphaMissense tables annotate the active
+// structure.
 async function openFiles(files) {
-  const structures = files.filter((file) => !/\.json$/i.test(file.name));
-  const jsonFiles = files.filter((file) => /\.json$/i.test(file.name));
   await guardedLoad(async () => {
+    let refs = files.map((item) => (item.read ? item : fileRef(item)));
+    refs = await expandArchives(refs);
+    const { sets, rest } = detectPredictionSets(refs);
+    for (const [index, set] of sets.entries()) await openPredictionSet(set, { add: index > 0 || els.addMode.checked });
+    const structures = rest.filter((ref) => STRUCTURE_FILE.test(ref.name));
     let first = null;
-    for (const [index, file] of structures.entries()) {
-      showLoading(`Reading ${file.name}`);
-      const text = await readFileText(file);
-      const entry = await loadStructureFromText(text, file.name.replace(/\.gz$/i, ''), { source: 'Local file', add: index > 0 || els.addMode.checked });
+    for (const [index, ref] of structures.entries()) {
+      showLoading(`Reading ${ref.name}`);
+      const text = await structureFileText(ref);
+      const entry = await loadStructureFromText(text, ref.name.replace(/\.gz$/i, '').replace(/\.bcif$/i, '.cif'), { source: 'Local file', add: sets.length > 0 || index > 0 || els.addMode.checked });
       first ??= entry;
     }
-    if (structures.length) {
+    if (structures.length || sets.length) {
       els.sampleSelect.value = '';
       history.replaceState(null, '', location.pathname);
       if (structures.length > 1) {
@@ -888,33 +976,138 @@ async function openFiles(files) {
         showToast(`Opened ${structures.length} structures. Superpose them in the Analysis tab.`);
       }
     }
-    for (const file of jsonFiles) {
-      const text = await readFileText(file);
-      if (await openSessionFile(text)) {
-        history.replaceState(null, '', location.pathname + location.search);
-        continue;
-      }
-      loadPAEFromJSON(JSON.parse(text), file.name);
-    }
+    for (const ref of rest.filter((item) => !STRUCTURE_FILE.test(item.name))) await openAnnotationFile(ref);
   });
 }
 
-async function readFileText(file) {
-  if (/\.gz$/i.test(file.name)) {
-    if (typeof DecompressionStream === 'undefined') throw new Error('This browser cannot decompress .gz files. Please decompress the file first.');
-    const stream = file.stream().pipeThrough(new DecompressionStream('gzip'));
-    return new Response(stream).text();
-  }
-  return file.text();
+const STRUCTURE_FILE = /\.(pdb|ent|cif|mmcif|bcif)(\.gz)?$/i;
+
+// A uniform view of local files, archive members and server-provided files.
+function fileRef(file, path = file.webkitRelativePath || file.name) {
+  const gzip = /\.gz$/i.test(file.name);
+  const bytes = async () => {
+    const raw = new Uint8Array(await file.arrayBuffer());
+    return gzip ? decompressBytes(raw) : raw;
+  };
+  return {
+    name: file.name.replace(/\.gz$/i, ''),
+    path: path.replace(/\.gz$/i, ''),
+    size: file.size,
+    read: bytes,
+    text: async () => new TextDecoder().decode(await bytes()),
+  };
 }
+
+function urlRef(file) {
+  const read = async () => {
+    const response = await fetch(file.url);
+    if (!response.ok) throw new Error(`Could not read ${file.name} (HTTP ${response.status}).`);
+    return new Uint8Array(await response.arrayBuffer());
+  };
+  return { name: file.name, path: file.path || file.name, size: file.size, read, text: async () => new TextDecoder().decode(await read()) };
+}
+
+function bytesRef(name, path, data) {
+  return { name, path, size: data.length, read: async () => data, text: async () => new TextDecoder().decode(data) };
+}
+
+// ZIP archives (AlphaFold Server downloads) are opened into their members; .npz files stay whole.
+async function expandArchives(refs) {
+  const result = [];
+  for (const ref of refs) {
+    if (!/\.zip$/i.test(ref.name)) {
+      result.push(ref);
+      continue;
+    }
+    showLoading(`Reading ${ref.name}`);
+    const bytes = await ref.read();
+    if (!isZip(bytes)) throw new Error(`${ref.name} is not a ZIP archive.`);
+    const base = ref.path.replace(/\.zip$/i, '');
+    for (const entry of listZip(bytes)) {
+      if (/(^|\/)(__MACOSX|\.)/.test(entry.name)) continue;
+      const data = await readZipEntry(bytes, entry);
+      const name = entry.name.split('/').pop();
+      const member = bytesRef(name.replace(/\.gz$/i, ''), `${base}/${entry.name}`.replace(/\.gz$/i, ''), /\.gz$/i.test(name) ? await decompressBytes(data) : data);
+      result.push(member);
+    }
+  }
+  return result;
+}
+
+async function structureFileText(ref) {
+  const bytes = await ref.read();
+  if (/\.bcif$/i.test(ref.name) || isBinaryCIF(bytes)) return binaryCIFToText(bytes);
+  return new TextDecoder().decode(bytes);
+}
+
+// Files that describe the active structure rather than open a new one.
+async function openAnnotationFile(ref) {
+  const name = ref.name.toLowerCase();
+  if (name.endsWith('.json')) {
+    const text = await ref.text();
+    if (await openSessionFile(text)) {
+      history.replaceState(null, '', location.pathname + location.search);
+      return;
+    }
+    loadPAEFromJSON(JSON.parse(text), ref.name);
+    return;
+  }
+  if (!state.active) throw new Error(`Open a structure before ${ref.name}.`);
+  if (name.endsWith('.npz') || name.endsWith('.npy')) {
+    const matrix = await readPAEArray(ref);
+    if (!matrix) throw new Error(`${ref.name} does not contain a square PAE matrix.`);
+    setEntryPAE(state.active, matrix, ref.name);
+    return;
+  }
+  if (name.endsWith('.a3m') || name.endsWith('.a2m')) {
+    applyMSA(state.active, [msaDepth(await ref.text())], ref.name);
+    return;
+  }
+  if (name.endsWith('.csv') || name.endsWith('.tsv')) {
+    const text = await ref.text();
+    if (parseAlphaMissense(text)) {
+      showToast('This looks like an AlphaMissense table; use the AlphaMissense button in the Proteomics tab, which maps it by UniProt numbering.', true);
+      return;
+    }
+  }
+  throw new Error(`${ref.name}: unsupported file type.`);
+}
+
+async function collectDroppedFiles(dataTransfer) {
+  const entries = [...(dataTransfer?.items ?? [])].map((item) => item.webkitGetAsEntry?.()).filter(Boolean);
+  if (!entries.some((entry) => entry.isDirectory)) return [...(dataTransfer?.files ?? [])];
+  const refs = [];
+  const walk = async (entry, prefix) => {
+    if (refs.length > MAX_FOLDER_FILES) return;
+    if (entry.isFile) {
+      if (entry.name.startsWith('.')) return;
+      const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+      refs.push(fileRef(file, `${prefix}${entry.name}`));
+      return;
+    }
+    const reader = entry.createReader();
+    for (;;) {
+      const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+      if (!batch.length) break;
+      for (const child of batch) await walk(child, `${prefix}${entry.name}/`);
+    }
+  };
+  for (const entry of entries) await walk(entry, '');
+  if (refs.length > MAX_FOLDER_FILES) showToast(`Only the first ${MAX_FOLDER_FILES} files of the folder were read.`, true);
+  return refs;
+}
+
+const MAX_FOLDER_FILES = 4000;
 
 async function loadStructureFromURL(url, label, options = {}) {
   showLoading(`Loading ${label}`);
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Could not load ${label} (HTTP ${response.status}).`);
-  const text = await response.text();
+  const bytes = new Uint8Array(await response.arrayBuffer());
   const filename = response.headers.get('X-Proteoscope-Filename') || url.split('/').pop() || label;
-  return loadStructureFromText(text, filename, { source: label, ...options });
+  const binary = /\.bcif$/i.test(filename) || isBinaryCIF(bytes);
+  const text = binary ? binaryCIFToText(bytes) : new TextDecoder().decode(bytes);
+  return loadStructureFromText(text, binary ? filename.replace(/\.bcif$/i, '.cif') : filename, { source: label, ...options });
 }
 
 // Parses and derives a structure, then either replaces the scene or adds it as another entry.
@@ -922,6 +1115,8 @@ async function loadStructureFromText(text, label, options = {}) {
   showLoading(`Parsing ${label}`);
   await nextFrame();
   const structure = parseStructure(text, label);
+  // Files from prediction folders are predictions even when they carry no ModelCIF records.
+  if (options.predicted) structure.meta.isPredicted = true;
   structure.baseModels = structure.models;
   prepareAssemblyEstimates(structure);
   showLoading('Deriving residues, bonds and secondary structure');
@@ -1063,7 +1258,7 @@ function releaseEntryMeshes(entry) {
 
 // Clears result panels that describe the previous active structure.
 function resetPanels() {
-  for (const box of [els.interfaceResult, els.sasaResult, els.peptideResult, els.siteResult, els.xlResult, els.dataResult, els.uniprotResult]) {
+  for (const box of [els.interfaceResult, els.sasaResult, els.peptideResult, els.siteResult, els.xlResult, els.dataResult, els.uniprotResult, els.missenseResult]) {
     box.hidden = true;
     box.replaceChildren();
   }
@@ -1084,7 +1279,11 @@ function resetEntryAnalysis(entry) {
   entry.sasa = null;
   entry.proteomics = emptyProteomics();
   entry.pae = null;
+  entry.contacts = null;
   entry.paeSelection = null;
+  entry.validation = null;
+  entry.missense = null;
+  entry.domains = null;
   entry.surface.data = null;
   entry.surface.key = '';
   entry.overlay = false;
@@ -1359,6 +1558,11 @@ function sceneLines(entry) {
       caps: true,
     });
   }
+  const validation = entry.validation?.showClashes ? validationOf(entry) : null;
+  for (const clash of validation?.clashes ?? []) {
+    // Thicker for worse overlaps (all reported clashes overlap by at least 0.4 Å).
+    lines.push({ from: point(clash.atomA), to: point(clash.atomB), color: [1, 0.22, 0.55], radius: 0.06 + Math.min(0.12, clash.overlap * 0.1), caps: true });
+  }
   return lines;
 }
 
@@ -1420,6 +1624,20 @@ function colorExtras(entry = state.active) {
     }
   }
   if (scheme === 'rmsf' && entry.rmsf) extras.residueValues = entry.rmsf;
+  if (scheme === 'validation' || scheme === 'densityfit') {
+    const mapped = validationOf(entry);
+    if (mapped && scheme === 'validation') extras.residueValues = mapped.levels;
+    if (mapped && scheme === 'densityfit' && mapped.fit.values.size) {
+      extras.residueValues = mapped.fit.values;
+      extras.fitKind = mapped.fit.kind;
+    }
+  }
+  if (scheme === 'missense' && entry.missense) extras.residueValues = entry.missense.values;
+  if (scheme === 'domains' && entry.domains) {
+    extras.residueValues = entry.domains.values;
+    extras.domainCount = entry.domains.count;
+  }
+  if (scheme === 'msa' && entry.msa) extras.residueValues = entry.msa.values;
   return extras;
 }
 
@@ -1824,7 +2042,9 @@ function tooltipHTML(hit) {
   return `<strong>${escapeHTML(prefix + residueLabel(residue ?? atom) + modelNote)}</strong><span>${escapeHTML(parts.join(' · '))}</span>`;
 }
 
-function residueDataText(residue, entry = state.active) {
+// Per-residue values for the tooltip. The selection card shows AlphaMissense and validation in
+// rows of their own, so it leaves them out (options.card).
+function residueDataText(residue, entry = state.active, options = {}) {
   if (!residue) return '';
   const parts = [];
   const coverage = entry.proteomics.coverage?.get(residue.key);
@@ -1838,6 +2058,12 @@ function residueDataText(residue, entry = state.active) {
   if (deviation) parts.push(`${formatNumberShort(deviation.distance)} Å from ${comparison.partnerName}${Number.isFinite(deviation.lddt) ? ` · lDDT ${deviation.lddt.toFixed(2)}` : ''}`);
   const fluctuation = entry.rmsf?.get(residue.key);
   if (Number.isFinite(fluctuation)) parts.push(`RMSF ${fluctuation.toFixed(1)} Å`);
+  const missense = entry.missense?.values.get(residue.key);
+  if (Number.isFinite(missense) && !options.card) parts.push(`AlphaMissense ${missense.toFixed(2)}`);
+  const record = validationOf(entry)?.residues.get(residue.key);
+  if (record?.criteria.length && !options.card) parts.push(record.criteria.join(', '));
+  const depth = entry.msa?.values.get(residue.key);
+  if (Number.isFinite(depth)) parts.push(`MSA depth ${formatNumber(depth)}`);
   return parts.join(' · ');
 }
 
@@ -2132,7 +2358,18 @@ function selectionContext(entry) {
     sites: siteResidueKeys(entry),
     covered: entry.proteomics.coverage ? new Set(entry.proteomics.coverage.keys()) : null,
     aligned: deviation ? new Set(deviation.keys()) : null,
-    values: { deviation, lddt: comparison?.values('lddt') ?? null, rmsf: entry.rmsf ?? null, rsa: entry.sasa?.relative ?? null },
+    outliers: validationOf(entry)?.outlierKeys ?? null,
+    values: {
+      deviation,
+      lddt: comparison?.values('lddt') ?? null,
+      rmsf: entry.rmsf ?? null,
+      rsa: entry.sasa?.relative ?? null,
+      rsrz: validationOf(entry)?.values.rsrz ?? null,
+      rscc: validationOf(entry)?.values.rscc ?? null,
+      qscore: validationOf(entry)?.values.qscore ?? null,
+      am: entry.missense?.values ?? null,
+      msa: entry.msa?.values ?? null,
+    },
     uniprot: (residue) => uniprotNumber(entry, residue),
   };
 }
@@ -2383,6 +2620,61 @@ async function executeCommand(parsed, options) {
       const wanted = parsed.state === 'toggle' ? !state.active.overlay : parsed.state === 'on';
       if (wanted !== Boolean(state.active.overlay)) toggleModelOverlay();
       return '';
+    }
+    case 'ranking':
+      return rankingCommand(parsed.rank);
+    case 'domains':
+      return findPAEDomains();
+    case 'msa': {
+      const entry = state.active;
+      if (!entry.msa && entry.msaURL) {
+        showLoading('Loading the AlphaFold DB alignment');
+        try {
+          const response = await fetch(entry.msaURL);
+          if (!response.ok) throw new CommandError(await responseError(response, 'Could not load the alignment'));
+          applyMSA(entry, [msaDepth(await response.text())], 'AlphaFold DB MSA', { quiet: true });
+        } finally {
+          hideLoading();
+        }
+      }
+      if (!entry.msa) throw new CommandError('No alignment is known for this structure. Open a prediction folder with its MSA, drop an .a3m file, or fetch an AlphaFold DB model.');
+      setColorScheme('msa', [entry]);
+      renderPAE();
+      return `MSA depth: median ${formatNumber(entry.msa.summary.median)} sequences${entry.msa.summary.shallow ? `, ${entry.msa.summary.shallow} residues below ${entry.msa.summary.threshold}` : ''}.`;
+    }
+    case 'validate': {
+      const entry = state.active;
+      if (parsed.mode === 'off') {
+        entry.validation = null;
+        if (['validation', 'densityfit'].includes(entry.color.scheme)) setColorScheme(entry.structure.meta.isPredicted ? 'plddt' : 'chain', [entry]);
+        renderValidation();
+        renderRamachandran();
+        markSceneDirty();
+        return 'Validation report cleared.';
+      }
+      let message = '';
+      if (!entry.validation || parsed.mode === 'refresh') message = await loadValidation(entry, { refresh: parsed.mode === 'refresh' });
+      if (parsed.mode === 'clashes') {
+        setShowClashes(!entry.validation.showClashes, entry);
+        return entry.validation.showClashes ? `Showing ${validationOf(entry).clashes.length} clashes.` : 'Clashes hidden.';
+      }
+      if (parsed.mode === 'fit') {
+        if (!validationOf(entry).fit.values.size) throw new CommandError('This report has no per-residue fit to density (NMR entries have none).');
+        setColorScheme('densityfit', [entry]);
+        return message || `Colored by ${validationOf(entry).fit.kind === 'qscore' ? 'Q-score' : 'RSRZ'}.`;
+      }
+      setColorScheme('validation', [entry]);
+      return message || 'Colored by validation outliers.';
+    }
+    case 'missense':
+      return loadMissense(state.active, { accession: parsed.accession });
+    case 'refresh': {
+      const entry = state.active;
+      if (entry.origin?.type !== 'fetch' || !entry.fetchId) throw new CommandError('Only fetched structures can be downloaded again.');
+      const refreshed = await fetchStructure(entry.fetchId, { add: state.entries.length > 1, refresh: true });
+      if (!refreshed) throw new CommandError(`Could not download ${entry.fetchId} again.`);
+      if (state.entries.length > 1 && refreshed !== entry) removeEntry(entry);
+      return `Downloaded ${refreshed.name} again.`;
     }
     case 'preset':
       if (!REPRESENTATION_PRESETS[parsed.value]) throw new CommandError(`Presets: ${Object.keys(REPRESENTATION_PRESETS).join(', ')}.`);
@@ -3275,7 +3567,105 @@ async function serializeEntry(entry, options) {
       sites: proteomics.sites.map((site) => ({ residue: site.residue.key, label: site.label, mismatch: Boolean(site.mismatch) })),
       crosslinks: proteomics.crosslinks.map((link) => ({ ...linkFields(link), atomA: atomRef(link.atomA), atomB: atomRef(link.atomB) })),
     },
+    // Recomputed or refetched on restore rather than stored.
+    sasa: Boolean(entry.sasa),
+    validation: entry.validation ? { clashes: Boolean(entry.validation.showClashes) } : null,
+    missense: entry.missense ? { accessions: entry.missense.accessions } : null,
+    domains: Boolean(entry.domains),
+    msa: entry.msa ? { values: [...entry.msa.values], source: entry.msa.source } : null,
+    pae: options.link ? null : await serializePAE(entry),
+    prediction: entry.prediction ? predictionSessionFields(entry) : null,
   };
+}
+
+// The scores of a predicted model travel with it; the rest of its prediction folder does not.
+function predictionSessionFields(entry) {
+  const set = predictionSetOf(entry);
+  const model = predictionModelOf(entry);
+  if (!set || !model) return null;
+  const { pae, plddt, ...scores } = model.scores ?? {};
+  return {
+    tool: set.tool,
+    toolLabel: set.toolLabel,
+    name: set.name,
+    affinity: set.affinityResult ?? null,
+    model: {
+      id: model.id,
+      label: model.label,
+      rank: model.rank,
+      order: model.order,
+      scores,
+      chains: model.chains ?? null,
+      meanPlddt: Number.isFinite(model.meanPlddt) ? model.meanPlddt : null,
+      metrics: model.metrics ?? null,
+      tokenKeys: model.tokenKeys ?? null,
+      calpha: model.calpha ? [...model.calpha] : null,
+    },
+  };
+}
+
+function restorePrediction(entry, saved) {
+  if (!saved?.model) return;
+  const model = { ...saved.model, files: {}, entryId: entry.id, calpha: saved.model.calpha ? new Map(saved.model.calpha) : null, meanPlddt: saved.model.meanPlddt ?? NaN };
+  const set = { id: `prediction-${state.predictionSets.length + 1}`, tool: saved.tool, toolLabel: saved.toolLabel, name: saved.name, models: [model], files: [], affinityResult: saved.affinity, restored: true };
+  state.predictionSets.push(set);
+  entry.prediction = { setId: set.id, modelId: model.id };
+}
+
+// PAE matrices opened by hand (or from a prediction folder) are stored as bytes at 0.125 Å
+// steps; AlphaFold DB matrices of fetched entries are simply fetched again.
+async function serializePAE(entry) {
+  const pae = entry.pae;
+  if (!pae || (entry.origin?.type === 'fetch' && pae.source === 'AlphaFold DB')) return null;
+  return {
+    source: pae.source,
+    size: pae.size,
+    max: pae.max,
+    encoding: 'uint8x8-gzip-base64',
+    data: bytesToBase64(await compressText(quantizeMatrix(pae.matrix, 8))),
+    tokens: pae.residues.map((residue) => residue?.key ?? null),
+    // Contact probabilities in 1/255 steps.
+    contacts: entry.contacts ? bytesToBase64(await compressText(quantizeMatrix(entry.contacts.matrix, 255))) : null,
+  };
+}
+
+async function restorePAE(entry, saved) {
+  if (!saved?.data || saved.encoding !== 'uint8x8-gzip-base64') return;
+  const matrix = dequantizeMatrix(await decompressBytes(base64ToBytes(saved.data)), 8);
+  if (matrix.length !== saved.size * saved.size) return;
+  const model = activeModelOf(entry);
+  const residues = (saved.tokens ?? []).map((key) => (key ? model.residueMap.get(key) ?? null : null));
+  entry.pae = { size: saved.size, matrix, max: saved.max || 31.75, residues, chainBoundaries: chainBoundaries(residues), source: saved.source || 'Session file' };
+  if (saved.contacts) {
+    const contacts = dequantizeMatrix(await decompressBytes(base64ToBytes(saved.contacts)), 255);
+    if (contacts.length === matrix.length) entry.contacts = { size: saved.size, matrix: contacts };
+  }
+}
+
+// SASA, validation reports, AlphaMissense and PAE domains are rebuilt after the structures load.
+async function restoreEntryExtras(entry, item, problems) {
+  try {
+    if (item.prediction) restorePrediction(entry, item.prediction);
+    if (item.msa?.values) {
+      const values = new Map(item.msa.values.filter(([key]) => activeModelOf(entry).residueMap.has(key)));
+      if (values.size) entry.msa = { values, source: item.msa.source, summary: depthSummary([...values.values()]) };
+    }
+    if (item.pae) await restorePAE(entry, item.pae);
+    if (item.domains && entry.pae) computePAEDomains(entry);
+    if (item.sasa) await runSASA(entry);
+    if (item.validation) {
+      showLoading(`Loading the validation report for ${entry.name}`);
+      await loadValidation(entry);
+      entry.validation.showClashes = Boolean(item.validation.clashes);
+    }
+    if (item.missense) {
+      showLoading(`Loading AlphaMissense for ${entry.name}`);
+      // An accession typed for a local model is not in the file, so it comes from the session.
+      await loadMissense(entry, { color: false, accession: item.missense.accessions?.length === 1 ? item.missense.accessions[0] : null });
+    }
+  } catch (error) {
+    problems.push(`${entry.name}: ${error.message}`);
+  }
 }
 
 function linkFields(link) {
@@ -3382,10 +3772,14 @@ async function restoreSession(document0) {
     state.active = null;
     setActiveEntry(active);
   }
+  for (const [index, item] of items.entries()) {
+    if (entries[index]) await restoreEntryExtras(entries[index], item, problems);
+  }
   for (const entry of state.entries) refreshSurface(entry);
   updateStructureUI();
   renderMeasurements();
   markSceneDirty();
+  markColorsDirty();
   hideLoading();
   if (problems.length) showToast(`Session restored with problems: ${problems.join('; ')}`, true);
   else showToast(`Restored the session (${state.entries.length} structure${state.entries.length === 1 ? '' : 's'}).`);
@@ -3706,6 +4100,7 @@ function updateStructureUI() {
   renderInteractions();
   renderMeasurements();
   renderStructureList();
+  renderPrediction();
   renderStyleScope();
   updateCompareControls();
   refreshTabPanels();
@@ -3720,11 +4115,14 @@ function activeTabName() {
 function refreshTabPanels() {
   const tab = activeTabName();
   if (tab === 'analysis') {
+    renderValidation();
     renderRamachandran();
     renderProfile();
     renderPAE();
+    renderDomainResult();
   } else if (tab === 'proteomics') {
     renderProtParam();
+    renderMissense();
   }
 }
 
@@ -3976,6 +4374,8 @@ function renderSelectionPanel() {
   if (residue.kind === 'protein') {
     addDetail('Secondary', secondaryText(residue));
     if (Number.isFinite(residue.phi) || Number.isFinite(residue.psi)) addDetail('φ / ψ', `${formatAngle(residue.phi)} / ${formatAngle(residue.psi)}`);
+    const rama = model.ramaClasses?.get(residue.key);
+    if (rama) addDetail('Ramachandran', `${rama.rama.toLowerCase()} (${RAMA_CATEGORIES.find((item) => item.id === rama.category)?.label.toLowerCase()})`);
   }
   if (state.structure.meta.isPredicted && Number.isFinite(residue.confidence)) addDetail('pLDDT', residue.confidence.toFixed(1));
   else addDetail('Mean B', residue.bFactor.toFixed(1));
@@ -3984,7 +4384,17 @@ function renderSelectionPanel() {
   if (uniprot) addDetail('UniProt', `${uniprot.accession} ${residue.code}${uniprot.position}`);
   const relative = state.sasa?.relative?.get(residue.key);
   if (Number.isFinite(relative)) addDetail('Rel. SASA', `${(relative * 100).toFixed(0)}%`);
-  const extra = residueDataText(residue);
+  const missense = state.missense?.positions.get(residue.key);
+  if (missense) {
+    const top = rankedSubstitutions(missense.item, 4).map((item) => `${item.aa} ${item.score.toFixed(2)}`).join(', ');
+    addDetail('AlphaMissense', `mean ${missense.item.mean.toFixed(2)} (${missenseClass(missense.item.mean)}) · worst ${top}`, true);
+  }
+  const record = validationOf(state.active)?.residues.get(residue.key);
+  if (record) {
+    const fit = [Number.isFinite(record.rsrz) ? `RSRZ ${record.rsrz.toFixed(2)}` : '', Number.isFinite(record.rscc) ? `RSCC ${record.rscc.toFixed(2)}` : '', Number.isFinite(record.qscore) ? `Q ${record.qscore.toFixed(2)}` : '', Number.isFinite(record.ediam) ? `EDIAm ${record.ediam.toFixed(2)}` : ''].filter(Boolean).join(' · ');
+    addDetail('Validation', [record.criteria.length ? record.criteria.join(', ') : 'no outliers', record.rama && residue.kind === 'protein' ? `Rama ${record.rama.toLowerCase()}` : '', fit].filter(Boolean).join(' · '), true);
+  }
+  const extra = residueDataText(residue, state.active, { card: true });
   if (extra) addDetail('Data', extra, true);
   const atom = state.selectedAtom?.residueKey === residue.key ? state.selectedAtom : null;
   if (atom) {
@@ -4287,14 +4697,19 @@ async function applySurfaceColors(entry = state.active, force = true) {
   requestRender();
 }
 
-async function runSASA() {
-  if (!state.structure) return;
+// Computes SASA for an entry's active model; the panel shows it when the entry is active.
+async function runSASA(entry = state.active) {
+  if (!entry) return;
   if (typeof Worker === 'undefined') return;
-  const model = activeModel();
+  const shown = () => entry === state.active;
+  const structure = entry.structure;
+  const model = activeModelOf(entry);
   const atoms = model.atoms.filter((atom) => atom.kind !== 'water' && !atom.isHydrogen);
-  els.sasaResult.hidden = false;
-  els.sasaResult.textContent = `Computing SASA for ${formatNumber(atoms.length)} atoms…`;
-  const chainIndex = new Map(state.structure.chains.map((chain, index) => [chain.id, index]));
+  if (shown()) {
+    els.sasaResult.hidden = false;
+    els.sasaResult.textContent = `Computing SASA for ${formatNumber(atoms.length)} atoms…`;
+  }
+  const chainIndex = new Map(structure.chains.map((chain, index) => [chain.id, index]));
   const positions = new Float32Array(atoms.length * 3);
   const radii = new Float32Array(atoms.length);
   const groups = new Int32Array(atoms.length);
@@ -4308,7 +4723,7 @@ async function runSASA() {
   try {
     const started = performance.now();
     const result = await surfaceWorker().run('sasa-groups', { positions, radii, groups, options: { probe: 1.4, points: 96 } }, [positions.buffer, radii.buffer, groups.buffer]);
-    if (model !== activeModel()) return;
+    if (model !== activeModelOf(entry)) return;
     const atomSASA = new Float32Array(model.atoms.length);
     const isolatedSASA = new Float32Array(model.atoms.length);
     atoms.forEach((atom, index) => {
@@ -4325,13 +4740,15 @@ async function runSASA() {
       if (max) relative.set(residue.key, total / max);
     }
     const chains = [];
-    for (const chain of state.structure.chains.filter((item) => item.polymerKind)) {
+    for (const chain of structure.chains.filter((item) => item.polymerKind)) {
       const chainAtoms = atoms.filter((atom) => atom.chain === chain.id);
       const inComplex = chainAtoms.reduce((sum, atom) => sum + atomSASA[atom.id], 0);
       const alone = chainAtoms.reduce((sum, atom) => sum + isolatedSASA[atom.id], 0);
       chains.push({ id: chain.id, inComplex, alone, buried: alone - inComplex });
     }
-    state.sasa = { atomSASA, relative, absolute, chains, atoms };
+    entry.sasa = { atomSASA, relative, absolute, chains, atoms };
+    if (entry.color.scheme === 'exposure') markColorsDirty();
+    if (!shown()) return;
     els.sasaColor.disabled = false;
     const total = atoms.reduce((sum, atom) => sum + atomSASA[atom.id], 0);
     els.sasaResult.innerHTML = `Total SASA <strong>${formatNumber(Math.round(total))} Å²</strong> · ${((performance.now() - started) / 1000).toFixed(1)} s
@@ -4339,10 +4756,9 @@ async function runSASA() {
       <span class="hint">Buried = SASA of the isolated chain minus SASA in the complex (Å²).</span>`;
     renderSelectionPanel();
     renderProfile();
-    if (state.color.scheme === 'exposure') markColorsDirty();
   } catch (error) {
     console.error(error);
-    els.sasaResult.textContent = `SASA failed: ${error.message}`;
+    if (shown()) els.sasaResult.textContent = `SASA failed: ${error.message}`;
   }
 }
 
@@ -4364,19 +4780,51 @@ async function appendBuriedArea(chainA, chainB) {
 
 /* ---------- Plots ---------- */
 
-function renderRamachandran() {
+// Draws φ/ψ on MolProbity Top8000 contours. Residues are classified locally with the same criteria
+// (so predicted models and local files are covered too); a loaded wwPDB report's classes win.
+async function renderRamachandran() {
   if (!state.structure) return;
+  const entry = state.active;
   const model = activeModel();
   const chain = els.ramaChain.value || '*';
-  const residues = model.residues.filter((residue) => residue.kind === 'protein' && (chain === '*' || residue.chain === chain));
-  const result = drawRamachandran(els.ramaCanvas, residues, { selected: state.selection });
+  const category = els.ramaCategory.value || 'all';
+  let tables = null;
+  try {
+    tables = await loadTop8000();
+  } catch (error) {
+    console.warn('Top8000 tables unavailable', error);
+  }
+  if (entry !== state.active || model !== activeModel()) return;
+  const local = tables ? ramaClassesOf(model, tables) : null;
+  const validation = validationOf(entry);
+  const classOf = (residue) => validation?.residues.get(residue.key)?.rama || local?.get(residue.key)?.rama || '';
+  const residues = model.residues.filter((residue) => residue.kind === 'protein' && (chain === '*' || residue.chain === chain) && (category === 'all' || local?.get(residue.key)?.category === category));
+  const contourCategory = category === 'all' ? 'general' : category;
+  const allowed = RAMA_CATEGORIES.find((item) => item.id === contourCategory)?.allowed ?? 0.0005;
+  const contours = tables ? (phi, psi) => {
+    const density = ramaDensity(tables[contourCategory], phi, psi);
+    return density >= RAMA_FAVORED ? 2 : density >= allowed ? 1 : 0;
+  } : null;
+  const result = drawRamachandran(els.ramaCanvas, residues, { selected: state.selection, classify: local || validation ? classOf : null, contours });
   ramaPoints = result;
   const plotted = result.points.length;
-  const ssCounts = { helix: 0, sheet: 0 };
-  for (const item of result.points) if (item.residue.ss in ssCounts) ssCounts[item.residue.ss] += 1;
-  els.ramaSummary.textContent = plotted
-    ? `${plotted} residues · colored by secondary structure; triangles Gly, squares Pro. Shaded regions are approximate favored areas. Click a point to select it.`
-    : 'No residues with complete backbone dihedrals.';
+  if (!plotted) {
+    els.ramaSummary.textContent = 'No residues with complete backbone dihedrals.';
+    return;
+  }
+  const counts = { FAVORED: 0, ALLOWED: 0, OUTLIER: 0 };
+  for (const item of result.points) {
+    const label = classOf(item.residue).toUpperCase();
+    if (label in counts) counts[label] += 1;
+  }
+  const source = validation ? 'wwPDB report (MolProbity)' : 'MolProbity Top8000 criteria';
+  els.ramaSummary.textContent = `${plotted} residues · ${counts.FAVORED} favored (${((counts.FAVORED / plotted) * 100).toFixed(1)}%), ${counts.ALLOWED} allowed (yellow), ${counts.OUTLIER} outliers (red) · ${source}; contours: ${contourCategory === 'general' ? 'general case' : RAMA_CATEGORIES.find((item) => item.id === contourCategory)?.label}. Click a point to select it.`;
+}
+
+// Local Ramachandran classes, cached per model.
+function ramaClassesOf(model, tables) {
+  if (!model.ramaClasses) model.ramaClasses = classifyRamachandran(tables, model.residues);
+  return model.ramaClasses;
 }
 
 function onRamaClick(event) {
@@ -4420,6 +4868,25 @@ function profileSeries() {
       }),
       options: { min: -4.5, max: 4.5, bands: [{ from: 0, to: 4.5, color: 'rgba(204,140,13,0.12)' }] },
     };
+  }
+  if (metric === 'missense') {
+    if (!state.missense) return { label: 'AlphaMissense', series: [], options: { emptyText: 'Load AlphaMissense in the Proteomics tab' } };
+    return {
+      label: 'AlphaMissense mean pathogenicity',
+      series: residues.map((residue) => ({ residue, value: state.missense.values.get(residue.key) ?? NaN })),
+      options: { min: 0, max: 1, bands: [{ from: MISSENSE_THRESHOLDS.pathogenic, to: 1, color: 'rgba(207,63,51,0.16)' }, { from: 0, to: MISSENSE_THRESHOLDS.benign, color: 'rgba(58,99,184,0.16)' }] },
+    };
+  }
+  if (metric === 'msa') {
+    if (!state.msa) return { label: 'MSA depth', series: [], options: { emptyText: 'Open a prediction folder that includes its MSA' } };
+    return { label: 'MSA depth (log10 sequences)', series: residues.map((residue) => ({ residue, value: Math.log10(Math.max(1, state.msa.values.get(residue.key) ?? NaN)) })), options: { min: 0, bands: [{ from: 0, to: Math.log10(30), color: 'rgba(198,40,40,0.14)' }] } };
+  }
+  if (metric === 'densityfit') {
+    const fit = validationOf(state.active)?.fit;
+    if (!fit?.values.size) return { label: 'Fit to density', series: [], options: { emptyText: 'Load the validation report above' } };
+    return fit.kind === 'qscore'
+      ? { label: 'Q-score', series: residues.map((residue) => ({ residue, value: fit.values.get(residue.key) ?? NaN })), options: { min: 0, max: 1 } }
+      : { label: 'RSRZ (> 2 is an outlier)', series: residues.map((residue) => ({ residue, value: fit.values.get(residue.key) ?? NaN })), options: { bands: [{ from: 2, to: 99, color: 'rgba(224,71,76,0.16)' }] } };
   }
   const data = state.proteomics.data;
   if (!data) return { label: 'Custom data', series: [], options: { emptyText: 'Load residue data in the Proteomics tab' } };
@@ -4483,6 +4950,10 @@ function loadPAEFromJSON(json, source, entry = state.active) {
     chainBoundaries: chainBoundaries(residues),
     source,
   };
+  // AlphaFold 3 confidence files also carry contact probabilities over the same tokens.
+  const contacts = parseAF3Confidences({ contact_probs: document0.contact_probs }).contactProbs;
+  entry.contacts = contacts?.size === size ? contacts : null;
+  entry.domains = null;
   if (Array.isArray(document0.plddt) && !entry.structure.meta.isPredicted) {
     entry.structure.meta.isPredicted = true;
   }
@@ -4515,17 +4986,34 @@ function chainBoundaries(residues) {
 
 function renderPAE() {
   const pae = state.pae;
+  const contacts = state.active?.contacts;
   els.paeCanvas.hidden = !pae;
   els.paeHint.hidden = Boolean(pae);
+  els.paeView.hidden = !contacts;
+  els.paeDomainsButton.disabled = !pae;
+  els.msaDepth.disabled = !(state.active?.msa || state.active?.msaURL);
+  const view = contacts && state.paeView === 'contacts' ? 'contacts' : 'pae';
+  for (const button of els.paeView.querySelectorAll('[data-pae-view]')) button.classList.toggle('is-active', button.dataset.paeView === view);
   if (!pae) {
     els.paeSummary.textContent = '';
     paeLayout = null;
     return;
   }
+  if (view === 'contacts') {
+    paeLayout = drawPAE(els.paeCanvas, { ...pae, matrix: contacts.matrix, max: 1 }, { selection: state.paeSelection, mode: 'contacts' });
+    let likely = 0;
+    for (let row = 0; row < contacts.size; row += 1) {
+      for (let column = row + 1; column < contacts.size; column += 1) {
+        if (contacts.matrix[row * contacts.size + column] > 0.5 && pae.residues[row]?.chain !== pae.residues[column]?.chain) likely += 1;
+      }
+    }
+    els.paeSummary.textContent = `Probability that two tokens are within 8 Å · ${likely} inter-chain pairs above 0.5 · ${pae.source}. Dark = likely contact.`;
+    return;
+  }
   paeLayout = drawPAE(els.paeCanvas, pae, { selection: state.paeSelection });
   let sum = 0;
   for (const value of pae.matrix) sum += value;
-  els.paeSummary.textContent = `${pae.size} residues · mean PAE ${(sum / pae.matrix.length).toFixed(1)} Å · max ${pae.max.toFixed(1)} Å · ${pae.source}. Dark green = confident relative position.`;
+  els.paeSummary.textContent = `${pae.size} ${pae.residues.some((residue) => residue && residue.kind !== 'protein' && residue.kind !== 'nucleic') ? 'tokens' : 'residues'} · mean PAE ${(sum / pae.matrix.length).toFixed(1)} Å · max ${pae.max.toFixed(1)} Å · ${pae.source}. Dark green = confident relative position.`;
 }
 
 function bindPAEEvents() {
@@ -4567,6 +5055,792 @@ function bindPAEEvents() {
     start = null;
     selectResidues([...keys], {});
   });
+}
+
+/* ---------- Prediction sets ---------- */
+
+// Reads the scores of every model, ranks them, computes interface metrics from each model's PAE
+// and coordinates, and opens the top-ranked model. Other models open on demand.
+async function openPredictionSet(set, options = {}) {
+  if (set.models.some((model) => /\.zst$/i.test(model.files.structure?.name ?? '') || /\.zst$/i.test(model.files.confidences?.name ?? ''))) {
+    throw new Error(`${set.name} was saved with compressed AlphaFold 3 outputs (.zst). Decompress them first, for example with "zstd -d --rm *.zst" in each folder.`);
+  }
+  set.id = `prediction-${state.predictionSets.length + 1}`;
+  showLoading(`Reading ${set.toolLabel} scores for ${set.name}`);
+  for (const model of set.models) {
+    try {
+      model.scores = await readPredictionScores(set, model);
+    } catch (error) {
+      console.warn(error);
+      model.scores = {};
+      model.problem = error.message;
+    }
+  }
+  rankModels(set.models);
+  set.models.sort((a, b) => a.rank - b.rank);
+  if (set.affinity) set.affinityResult = parseBoltzAffinity(JSON.parse(await set.affinity.text()));
+  set.msa = await readPredictionMSA(set);
+  for (const [index, model] of set.models.entries()) {
+    showLoading(`Scoring ${set.name}: model ${index + 1} of ${set.models.length}`);
+    await nextFrame();
+    try {
+      await scorePredictionModel(set, model);
+    } catch (error) {
+      console.warn(error);
+      model.problem = error.message;
+    }
+  }
+  state.predictionSets.push(set);
+  const entry = await loadPredictionModel(set, set.models[0], { add: options.add });
+  hideLoading();
+  const complex = set.models[0].metrics?.pairs.length;
+  showToast(`Opened ${set.toolLabel} prediction ${set.name}: ${set.models.length} model${set.models.length === 1 ? '' : 's'}, ranked by ${rankingScoreLabel(set)}${complex ? '; interface scores in the Structure tab' : ''}.`);
+  return entry;
+}
+
+function rankingScoreLabel(set) {
+  return { af3: 'ranking score', server: 'ranking score', boltz: 'confidence score', chai: 'aggregate score', colabfold: set.models.some((model) => Number.isFinite(model.scores?.iptm)) ? '0.8·ipTM + 0.2·pTM' : 'mean pLDDT' }[set.tool] ?? 'score';
+}
+
+async function readJSONFile(file) {
+  return JSON.parse(await file.text());
+}
+
+async function readPredictionScores(set, model) {
+  const files = model.files;
+  switch (set.tool) {
+    case 'af3':
+    case 'server':
+      return files.summary ? parseAF3Summary(await readJSONFile(files.summary)) : {};
+    case 'boltz':
+      return parseBoltzConfidence(await readJSONFile(files.confidence));
+    case 'chai':
+      return files.scores ? parseChaiScores(await readNpz(await files.scores.read())) : {};
+    case 'colabfold':
+      return files.scores ? parseColabFoldScores(await readJSONFile(files.scores)) : {};
+    default:
+      return {};
+  }
+}
+
+// The PAE of one model as { size, matrix }, plus AlphaFold 3 contact probabilities.
+async function readPredictionPAE(set, model) {
+  const files = model.files;
+  if ((set.tool === 'af3' || set.tool === 'server') && files.confidences) {
+    const parsed = parseAF3Confidences(await readJSONFile(files.confidences));
+    return { pae: parsed.pae, contacts: parsed.contactProbs, atomPlddts: parsed.atomPlddts };
+  }
+  if (set.tool === 'boltz' && files.pae) {
+    const arrays = await readNpz(await files.pae.read());
+    const plddt = files.plddt ? (await readNpz(await files.plddt.read())).get('plddt') : null;
+    return { pae: squareMatrix(arrays.get('pae') ?? [...arrays.values()][0]), tokenPlddt: plddt ? Array.from(plddt.data, (value) => (value <= 1 ? value * 100 : value)) : null };
+  }
+  if (set.tool === 'chai' && files.pae) return { pae: await readPAEArray(files.pae) };
+  if (set.tool === 'colabfold' && files.scores) {
+    const scores = model.scores?.pae ? model.scores : parseColabFoldScores(await readJSONFile(files.scores));
+    return { pae: scores.pae, tokenPlddt: scores.plddt };
+  }
+  return { pae: null };
+}
+
+async function readPAEArray(ref) {
+  const bytes = await ref.read();
+  if (/\.npy$/i.test(ref.name)) return squareMatrix(readNpy(bytes));
+  const arrays = await readNpz(bytes);
+  return squareMatrix(arrays.get('pae') ?? [...arrays.values()].find((array) => squareMatrix(array)) ?? null);
+}
+
+// Parses the model's structure, maps PAE tokens to residues and computes interface scores and
+// the Cα positions used to check cross-links. Large matrices are dropped again afterwards.
+async function scorePredictionModel(set, model) {
+  const text = await structureFileText(model.files.structure);
+  const structure = parseStructure(text, model.files.structure.name.replace(/\.bcif$/i, '.cif'));
+  structure.meta.isPredicted = true;
+  deriveStructure(structure, { secondaryMode: 'file' });
+  const parsed = structure.models[0];
+  // Chain-pair matrices from the predictors follow the chain order of the file, ligands included.
+  model.chains = [...new Set(parsed.atoms.filter((atom) => atom.kind !== 'water').map((atom) => atom.chain))];
+  model.calpha = new Map();
+  for (const residue of parsed.residues) {
+    const atom = residue.backbone?.CA;
+    if (atom) model.calpha.set(`${residue.chain}:${residue.resSeq}`, [atom.x, atom.y, atom.z]);
+  }
+  const plddts = parsed.residues.filter((residue) => residue.kind === 'protein' || residue.kind === 'nucleic').map((residue) => residue.confidence).filter(Number.isFinite);
+  model.meanPlddt = plddts.length ? plddts.reduce((sum, value) => sum + value, 0) / plddts.length : NaN;
+  const { pae, tokenPlddt } = await readPredictionPAE(set, model);
+  if (!pae) return;
+  const tokens = tokensForPAE(parsed, pae.size);
+  if (!tokens) {
+    model.problem = `The PAE matrix (${pae.size} tokens) does not match the structure.`;
+    return;
+  }
+  const scale = parsed.bFactorRange.max <= 1 ? 100 : 1;
+  tokens.forEach((token, index) => {
+    token.plddt = Number.isFinite(tokenPlddt?.[index]) ? tokenPlddt[index] : (token.plddtAtom?.bFactor ?? 0) * scale;
+  });
+  // Dunbrack's examples use a 15 Å PAE cutoff for AlphaFold 2 and 10 Å for AlphaFold 3 and Boltz.
+  model.paeCutoff = set.tool === 'colabfold' ? 15 : 10;
+  model.metrics = interfaceScores(pae, tokens, { paeCutoff: model.paeCutoff });
+  model.tokenKeys = tokens.map((token) => token.residue.key);
+  // ColabFold keeps the PAE in its scores file; it is read again when the model opens.
+  if (model.scores?.pae) delete model.scores.pae;
+}
+
+async function readPredictionMSA(set) {
+  try {
+    if (set.tool === 'af3' && set.data) {
+      const data = await readJSONFile(set.data);
+      const chains = new Map();
+      for (const item of data.sequences ?? []) {
+        const protein = item.protein ?? item.rna ?? item.dna;
+        if (!protein) continue;
+        const ids = Array.isArray(protein.id) ? protein.id : [protein.id];
+        const depth = combineDepth([msaDepth(protein.unpairedMsa ?? ''), msaDepth(protein.pairedMsa ?? '')]);
+        if (depth) for (const id of ids) chains.set(String(id), depth);
+      }
+      return chains.size ? { chains, source: `${set.name}_data.json` } : null;
+    }
+    const files = set.msas ?? [];
+    if (!files.length) return null;
+    const results = [];
+    for (const file of files) {
+      const text = await file.text();
+      results.push({ file, depth: msaDepth(/\.csv$/i.test(file.name) ? csvToA3M(text) : text) });
+    }
+    return { list: results.filter((item) => item.depth), source: files.map((file) => file.name).join(', ') };
+  } catch (error) {
+    console.warn('MSA not read', error);
+    return null;
+  }
+}
+
+// Boltz MSA tables (key,sequence) hold one aligned sequence per row; the first is the query.
+function csvToA3M(text) {
+  return String(text).split(/\r?\n/).slice(1).map((line) => line.split(',').pop()?.trim()).filter(Boolean).map((sequence, index) => `>${index}\n${sequence}`).join('\n');
+}
+
+// Opens a model as an entry (or activates it), attaching its PAE, contacts, scores and MSA depth.
+async function loadPredictionModel(set, model, options = {}) {
+  const existing = model.entryId ? entryById(model.entryId) : null;
+  if (existing) {
+    if (options.showOnly !== false) showOnlyPredictionModel(set, existing);
+    return existing;
+  }
+  showLoading(`Opening ${set.name} ${model.label}`);
+  const text = await structureFileText(model.files.structure);
+  const add = options.add ?? state.entries.length > 0;
+  const entry = await loadStructureFromText(text, `${set.name}_${model.id}.cif`, { source: `${set.toolLabel} · ${model.label}`, add, predicted: true, origin: { type: 'file', name: model.files.structure.name.replace(/\.bcif$/i, '.cif'), text } });
+  entry.name = uniqueName(`${set.name} #${model.rank}`);
+  entry.prediction = { setId: set.id, modelId: model.id };
+  model.entryId = entry.id;
+  if (entry.color.scheme === 'chain' || entry.color.scheme === 'structure') entry.color.scheme = 'plddt';
+  try {
+    const { pae, contacts } = await readPredictionPAE(set, model);
+    if (pae) setEntryPAE(entry, pae, `${set.toolLabel} ${model.label}`, { contacts, silent: true });
+  } catch (error) {
+    console.warn('PAE not read', error);
+  }
+  applyPredictionMSA(set, entry);
+  if (options.showOnly !== false) showOnlyPredictionModel(set, entry);
+  markColorsDirty();
+  hideLoading();
+  return entry;
+}
+
+function uniqueName(base) {
+  const names = new Set(state.entries.map((entry) => entry.name));
+  if (!names.has(base)) return base;
+  let index = 2;
+  while (names.has(`${base} (${index})`)) index += 1;
+  return `${base} (${index})`;
+}
+
+// Shows one model of a set at a time; other entries stay as they were.
+function showOnlyPredictionModel(set, entry) {
+  for (const item of state.entries) {
+    if (item.prediction?.setId === set.id) item.visible = item === entry;
+  }
+  setActiveEntry(entry);
+  renderStructureList();
+  renderPrediction();
+  markSceneDirty();
+}
+
+function applyPredictionMSA(set, entry) {
+  const msa = set.msa;
+  if (!msa) return;
+  const model = activeModelOf(entry);
+  const values = new Map();
+  const polymerByChain = new Map();
+  for (const residue of model.residues) {
+    if (residue.kind !== 'protein' && residue.kind !== 'nucleic') continue;
+    if (!polymerByChain.has(residue.chain)) polymerByChain.set(residue.chain, []);
+    polymerByChain.get(residue.chain).push(residue);
+  }
+  const assign = (residues, depth, offset = 0) => {
+    residues.forEach((residue, index) => {
+      const value = depth.depth[offset + index];
+      if (Number.isFinite(value)) values.set(residue.key, value);
+    });
+  };
+  if (msa.chains) {
+    for (const [chain, depth] of msa.chains) if (polymerByChain.has(chain)) assign(polymerByChain.get(chain), depth);
+  } else {
+    // A single alignment covers either one chain or (ColabFold complexes) all chains in order.
+    const chains = [...polymerByChain.values()];
+    for (const { depth } of msa.list) {
+      if (depth.chainLengths && depth.chainLengths.length === chains.length) {
+        let offset = 0;
+        chains.forEach((residues, index) => {
+          assign(residues, depth, offset);
+          offset += depth.chainLengths[index];
+        });
+      } else {
+        const match = chains.find((residues) => residues.length === depth.query.length && !residues.some((residue) => values.has(residue.key)));
+        if (match) assign(match, depth);
+      }
+    }
+  }
+  if (values.size) entry.msa = { values, source: msa.source, summary: depthSummary([...values.values()]) };
+}
+
+function applyMSA(entry, results, source, options = {}) {
+  applyPredictionMSA({ msa: { list: results.filter(Boolean).map((depth) => ({ depth })), source } }, entry);
+  if (!entry.msa) throw new CommandError(`${source}: the alignment's query does not match a chain of ${entry.name}.`);
+  setColorScheme('msa', [entry]);
+  if (!options.quiet) showToast(`MSA depth from ${source}: median ${formatNumber(entry.msa.summary.median)} sequences.`);
+}
+
+function predictionSetOf(entry = state.active) {
+  return entry?.prediction ? state.predictionSets.find((set) => set.id === entry.prediction.setId) ?? null : null;
+}
+
+function predictionModelOf(entry = state.active) {
+  const set = predictionSetOf(entry);
+  return set?.models.find((model) => model.id === entry.prediction.modelId) ?? null;
+}
+
+function bestPair(model) {
+  return model?.metrics?.pairs.slice().sort((a, b) => b.ipsae - a.ipsae)[0] ?? null;
+}
+
+function scoreText(value, digits = 2) {
+  return Number.isFinite(value) ? value.toFixed(digits) : '–';
+}
+
+function renderPrediction() {
+  const entry = state.active;
+  const set = predictionSetOf(entry);
+  els.predictionGroup.hidden = !set;
+  if (!set) return;
+  const active = predictionModelOf(entry);
+  const complex = set.models.some((model) => model.metrics?.pairs.length || model.scores?.chainPairIptm?.length > 1);
+  const links = state.crosslinkRequest;
+  els.predictionCount.textContent = String(set.models.length);
+  els.predictionTitle.textContent = `${set.toolLabel} · ${set.name} · ranked by ${rankingScoreLabel(set)}${set.affinityResult && Number.isFinite(set.affinityResult.value) ? ` · predicted affinity ${set.affinityResult.value.toFixed(2)} log10(IC50 / µM), binder probability ${scoreText(set.affinityResult.probability)}` : ''}`;
+  const header = `<tr><th>#</th><th>Model</th><th title="${escapeHTML(rankingScoreLabel(set))}">Score</th>${complex ? `<th title="Interface pTM">ipTM</th><th title="Best chain-pair ipSAE (PAE cutoff ${set.tool === 'colabfold' ? 15 : 10} Å)">ipSAE</th>` : '<th>pLDDT</th>'}${links ? '<th title="Cross-links within the distance limit">XL</th>' : ''}</tr>`;
+  const rows = set.models.map((model) => {
+    const pair = bestPair(model);
+    const xl = links ? crosslinkSatisfaction(model, links) : null;
+    const flags = [model.scores?.hasClash ? 'clash' : '', model.problem ? 'problem' : ''].filter(Boolean);
+    return `<tr class="${model === active ? 'is-active' : ''}" data-model="${escapeHTML(model.id)}" title="${escapeHTML([model.problem, model.scores?.hasClash ? 'The predictor flagged steric clashes.' : ''].filter(Boolean).join(' ') || 'Show this model')}">
+      <td>${model.rank}</td><td>${escapeHTML(model.label)}${flags.length ? ` <span class="warn">⚠</span>` : ''}${model.entryId ? ' <span class="loaded" title="Open in the scene">●</span>' : ''}</td><td>${scoreText(model.scores?.rankingScore)}</td>
+      ${complex ? `<td>${scoreText(model.scores?.iptm)}</td><td>${scoreText(pair?.ipsae)}</td>` : `<td>${scoreText(model.meanPlddt, 1)}</td>`}
+      ${xl ? `<td class="${xl.satisfied === xl.total ? 'good' : xl.satisfied / Math.max(1, xl.total) < 0.8 ? 'bad' : ''}">${xl.satisfied}/${xl.total}</td>` : links ? '<td>–</td>' : ''}</tr>`;
+  }).join('');
+  els.predictionModels.innerHTML = `<table class="prediction-table"><thead>${header}</thead><tbody>${rows}</tbody></table>`;
+  for (const row of els.predictionModels.querySelectorAll('[data-model]')) {
+    row.addEventListener('click', () => guardedLoad(() => loadPredictionModel(set, set.models.find((model) => model.id === row.dataset.model))));
+  }
+  renderPredictionPairs(set, active);
+  renderPredictionDetail(set, active);
+  for (const button of document.querySelectorAll('[data-pair-metric]')) button.classList.toggle('is-active', button.dataset.pairMetric === state.pairMetric);
+  document.querySelector('[data-pair-metric]').parentElement.hidden = !complex;
+}
+
+// A heat map of chain-pair scores for the active model.
+function renderPredictionPairs(set, model) {
+  const metrics = model?.metrics;
+  const chains = metrics?.chains ?? model?.chains ?? [];
+  if (chains.length < 2) {
+    els.predictionPairs.replaceChildren();
+    return;
+  }
+  const byPair = new Map((metrics?.pairs ?? []).flatMap((pair) => [[`${pair.chainA}|${pair.chainB}`, pair], [`${pair.chainB}|${pair.chainA}`, pair]]));
+  const reportedChains = model.chains ?? chains;
+  const value = (a, b) => {
+    if (state.pairMetric === 'iptm') {
+      const ia = reportedChains.indexOf(a);
+      const ib = reportedChains.indexOf(b);
+      const reported = model.scores?.chainPairIptm?.[ia]?.[ib];
+      if (Number.isFinite(reported)) return reported;
+      return byPair.get(`${a}|${b}`)?.iptm;
+    }
+    return byPair.get(`${a}|${b}`)?.[state.pairMetric];
+  };
+  const cell = (a, b) => {
+    if (a === b) {
+      const ptm = model.scores?.chainPtm?.[reportedChains.indexOf(a)];
+      return `<td class="diagonal" title="Chain ${escapeHTML(a)} pTM">${scoreText(ptm)}</td>`;
+    }
+    const score = value(a, b);
+    const color = Number.isFinite(score) ? colorToHex(sampleColormap('depth', score)) : 'transparent';
+    return `<td style="background:${color}" data-pair="${escapeHTML(a)}|${escapeHTML(b)}" title="${escapeHTML(`${a}–${b}`)}: click to select the interface">${scoreText(score)}</td>`;
+  };
+  const shown = chains.slice(0, 12);
+  els.predictionPairs.innerHTML = `<table class="pair-matrix"><thead><tr><th></th>${shown.map((chain) => `<th>${escapeHTML(chain)}</th>`).join('')}</tr></thead><tbody>${shown.map((a) => `<tr><th>${escapeHTML(a)}</th>${shown.map((b) => cell(a, b)).join('')}</tr>`).join('')}</tbody></table>${chains.length > 12 ? `<p class="hint">Showing 12 of ${chains.length} chains.</p>` : ''}`;
+  for (const td of els.predictionPairs.querySelectorAll('[data-pair]')) {
+    td.addEventListener('click', () => selectPredictionInterface(model, ...td.dataset.pair.split('|')));
+  }
+}
+
+function renderPredictionDetail(set, model) {
+  if (!model) {
+    els.predictionDetail.replaceChildren();
+    return;
+  }
+  const scores = model.scores ?? {};
+  const facts = [
+    Number.isFinite(scores.ptm) ? `pTM ${scoreText(scores.ptm)}` : '',
+    Number.isFinite(scores.iptm) ? `ipTM ${scoreText(scores.iptm)}` : '',
+    Number.isFinite(model.meanPlddt) ? `mean pLDDT ${model.meanPlddt.toFixed(1)}` : '',
+    Number.isFinite(scores.fractionDisordered) ? `${Math.round(scores.fractionDisordered * 100)}% disordered` : '',
+    scores.hasClash ? '<span class="warn">clashes flagged</span>' : '',
+    Number.isFinite(scores.extra?.ligandIptm) && scores.extra.ligandIptm > 0 ? `ligand ipTM ${scoreText(scores.extra.ligandIptm)}` : '',
+  ].filter(Boolean);
+  const pairs = (model.metrics?.pairs ?? []).slice().sort((a, b) => b.ipsae - a.ipsae);
+  const links = state.crosslinkRequest ? crosslinkSatisfaction(model, state.crosslinkRequest) : null;
+  const msa = state.active?.msa?.summary;
+  els.predictionDetail.innerHTML = `<div><strong>${escapeHTML(model.label)}</strong> · rank ${model.rank}${facts.length ? ` · ${facts.join(' · ')}` : ''}</div>
+    ${pairs.length ? `<table class="interface-table"><thead><tr><th>Chains</th><th title="max(A→B, B→A); PAE cutoff ${model.paeCutoff ?? 10} Å">ipSAE</th><th title="pDockQ2 (Zhu et al. 2023)">pDockQ2</th><th title="Local interaction score (Kim et al. 2024)">LIS</th><th title="Residue pairs with Cβ within 8 Å">Contacts</th></tr></thead><tbody>${pairs.slice(0, 12).map((pair) => `<tr data-pair="${escapeHTML(pair.chainA)}|${escapeHTML(pair.chainB)}" title="A→B ${scoreText(pair.ipsaeAB)} · B→A ${scoreText(pair.ipsaeBA)} · ipTM from PAE ${scoreText(pair.iptm)} · pDockQ ${scoreText(pair.pdockq)}. Click to select the interface."><td>${escapeHTML(pair.chainA)}–${escapeHTML(pair.chainB)}</td><td>${scoreText(pair.ipsae)}</td><td>${scoreText(pair.pdockq2)}</td><td>${scoreText(pair.lis)}</td><td>${pair.contacts}</td></tr>`).join('')}</tbody></table>` : ''}
+    ${links ? `<div>Cross-links: <strong class="${links.satisfied === links.total ? 'good' : ''}">${links.satisfied} of ${links.total}</strong> within ${links.maxDistance} Å Cα–Cα${links.missing ? ` · ${links.missing} not in the model` : ''}</div>` : '<div class="hint">Map cross-links in the Proteomics tab to see how many each model satisfies.</div>'}
+    ${msa ? `<div>MSA depth: median ${formatNumber(msa.median)} sequences${msa.shallow ? ` · <span class="warn">${msa.shallow} residues below ${msa.threshold}</span>` : ''} · <button type="button" class="link" data-color-msa>color by depth</button></div>` : ''}
+    ${model.problem ? `<div class="warn">${escapeHTML(model.problem)}</div>` : ''}`;
+  for (const row of els.predictionDetail.querySelectorAll('[data-pair]')) {
+    row.addEventListener('click', () => selectPredictionInterface(model, ...row.dataset.pair.split('|')));
+  }
+  els.predictionDetail.querySelector('[data-color-msa]')?.addEventListener('click', () => setColorScheme('msa', [state.active]));
+}
+
+// Selects the residues on both sides of a predicted interface (Cβ within 8 Å).
+function selectPredictionInterface(model, chainA, chainB) {
+  const entry = model.entryId ? entryById(model.entryId) : null;
+  const pair = model.metrics?.pairs.find((item) => (item.chainA === chainA && item.chainB === chainB) || (item.chainA === chainB && item.chainB === chainA));
+  if (!entry || !pair) return;
+  const keys = [...new Set(pair.interface.map((index) => model.tokenKeys[index]))];
+  if (entry !== state.active) setActiveEntry(entry);
+  selectResidues(keys, { frame: true });
+  showToast(`Selected ${keys.length} interface residues between chains ${chainA} and ${chainB}.`);
+}
+
+// Cross-links checked against a model's Cα positions; unnamed or unknown proteins try every chain.
+function crosslinkSatisfaction(model, request) {
+  if (!model.calpha) return null;
+  let satisfied = 0;
+  let total = 0;
+  let missing = 0;
+  const chains = model.chains ?? [];
+  const candidates = (protein) => (protein && chains.includes(protein) ? [protein] : chains);
+  for (const link of request.links) {
+    let best = Infinity;
+    for (const a of candidates(link.proteinA)) {
+      for (const b of candidates(link.proteinB ?? link.proteinA)) {
+        const p = model.calpha.get(`${a}:${link.residueA}`);
+        const q = model.calpha.get(`${b}:${link.residueB}`);
+        if (!p || !q || (a === b && link.residueA === link.residueB)) continue;
+        best = Math.min(best, Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]));
+      }
+    }
+    if (!Number.isFinite(best)) {
+      missing += 1;
+      continue;
+    }
+    total += 1;
+    if (best <= request.maxDistance) satisfied += 1;
+  }
+  return { satisfied, total, missing, maxDistance: request.maxDistance };
+}
+
+async function superposePredictionModels() {
+  const set = predictionSetOf();
+  if (!set) return;
+  const entries = [];
+  for (const model of set.models) entries.push(await loadPredictionModel(set, model, { add: true, showOnly: false }));
+  for (const entry of entries) entry.visible = true;
+  setActiveEntry(entries[0]);
+  runSuperposition({ reference: entries[0], mobiles: entries.slice(1) });
+  renderStructureList();
+  renderPrediction();
+}
+
+function exportPredictionCSV() {
+  const set = predictionSetOf();
+  if (!set) return;
+  const header = ['tool', 'job', 'rank', 'model', 'ranking_score', 'ptm', 'iptm', 'mean_plddt', 'chain_a', 'chain_b', 'chain_pair_iptm', 'ipsae', 'ipsae_a_to_b', 'ipsae_b_to_a', 'iptm_from_pae', 'pdockq', 'pdockq2', 'lis', 'contacts', 'xl_satisfied', 'xl_total'];
+  const rows = [header];
+  const format = (value) => (Number.isFinite(value) ? Number(value.toFixed(4)) : '');
+  for (const model of set.models) {
+    const xl = state.crosslinkRequest ? crosslinkSatisfaction(model, state.crosslinkRequest) : null;
+    const base = [set.toolLabel, set.name, model.rank, model.label, format(model.scores?.rankingScore), format(model.scores?.ptm), format(model.scores?.iptm), format(model.meanPlddt)];
+    const pairs = model.metrics?.pairs.length ? model.metrics.pairs : [null];
+    for (const pair of pairs) {
+      const chains = model.chains ?? [];
+      const reported = pair ? model.scores?.chainPairIptm?.[chains.indexOf(pair.chainA)]?.[chains.indexOf(pair.chainB)] : NaN;
+      rows.push([...base, pair?.chainA ?? '', pair?.chainB ?? '', format(reported), format(pair?.ipsae), format(pair?.ipsaeAB), format(pair?.ipsaeBA), format(pair?.iptm), format(pair?.pdockq), format(pair?.pdockq2), format(pair?.lis), pair?.contacts ?? '', xl?.satisfied ?? '', xl?.total ?? '']);
+    }
+  }
+  downloadText(`${set.name}_ranking.csv`, rows.map((row) => row.map((cell) => (/[",\n]/.test(String(cell)) ? `"${String(cell).replace(/"/g, '""')}"` : cell)).join(',')).join('\n'), 'text/csv');
+}
+
+function rankingCommand(rank) {
+  const set = predictionSetOf() ?? state.predictionSets[state.predictionSets.length - 1];
+  if (!set) throw new CommandError('Open a prediction folder or AlphaFold Server .zip first.');
+  if (rank === null) {
+    return {
+      message: set.models.map((model) => `#${model.rank} ${model.label} ${scoreText(model.scores?.rankingScore)}`).join(', '),
+      data: set.models.map((model) => ({
+        rank: model.rank,
+        model: model.label,
+        rankingScore: model.scores?.rankingScore ?? null,
+        ptm: model.scores?.ptm ?? null,
+        iptm: model.scores?.iptm ?? null,
+        meanPlddt: Number.isFinite(model.meanPlddt) ? model.meanPlddt : null,
+        interfaces: (model.metrics?.pairs ?? []).map((pair) => ({ chains: [pair.chainA, pair.chainB], ipsae: pair.ipsae, pdockq: pair.pdockq, pdockq2: pair.pdockq2, lis: pair.lis, contacts: pair.contacts })),
+        crosslinks: state.crosslinkRequest ? crosslinkSatisfaction(model, state.crosslinkRequest) : null,
+      })),
+    };
+  }
+  const model = set.models.find((item) => item.rank === rank);
+  if (!model) throw new CommandError(`${set.name} has ${set.models.length} models.`);
+  return loadPredictionModel(set, model).then((entry) => `Showing ${entry.name} (${model.label}).`);
+}
+
+// Sets an entry's PAE from a matrix, mapping rows to residues by tokenization.
+function setEntryPAE(entry, pae, source, options = {}) {
+  const model = activeModelOf(entry);
+  const tokens = tokensForPAE(model, pae.size);
+  const residues = tokens ? tokens.map((token) => token.residue) : paeResidues(pae.size, {}, entry);
+  let max = 0;
+  for (const value of pae.matrix) if (value > max) max = value;
+  entry.pae = { size: pae.size, matrix: pae.matrix, max: Math.max(31.75, max), residues, chainBoundaries: chainBoundaries(residues), source };
+  entry.contacts = options.contacts?.size === pae.size ? options.contacts : null;
+  entry.domains = null;
+  entry.paeSelection = null;
+  if (entry === state.active && !options.silent) {
+    renderPAE();
+    showToast(`Loaded PAE matrix (${pae.size} × ${pae.size}) from ${source}.`);
+  }
+}
+
+/* ---------- PAE domains ---------- */
+
+// Clusters the PAE matrix into rigid domains and colors the structure by them.
+function findPAEDomains(entry = state.active) {
+  if (!entry?.pae) throw new CommandError('Load a PAE matrix first (fetch an AlphaFold DB entry or open a PAE or prediction file).');
+  const domains = computePAEDomains(entry);
+  setColorScheme('domains', [entry]);
+  if (entry === state.active) renderDomainResult(entry);
+  return `Found ${domains.count} PAE domain${domains.count === 1 ? '' : 's'} (${domains.sizes.join(', ')} residues).`;
+}
+
+function computePAEDomains(entry) {
+  const pae = entry.pae;
+  // Ligand and ion tokens have no place in a domain.
+  const mask = Uint8Array.from(pae.residues, (residue) => (residue && (residue.kind === 'protein' || residue.kind === 'nucleic') ? 1 : 0));
+  const { labels, domains } = paeDomains(pae, { mask });
+  const values = new Map();
+  pae.residues.forEach((residue, index) => {
+    if (residue && labels[index] >= 0 && !values.has(residue.key)) values.set(residue.key, labels[index]);
+  });
+  entry.domains = { values, count: domains.length, sizes: domains.map((domain) => domain.size) };
+  markColorsDirty();
+  return entry.domains;
+}
+
+function renderDomainResult(entry = state.active) {
+  const domains = entry?.domains;
+  els.paeDomainResult.hidden = !domains;
+  if (!domains) return;
+  const ranges = domainRanges(entry);
+  els.paeDomainResult.innerHTML = `<strong>${domains.count}</strong> domain${domains.count === 1 ? '' : 's'} · PAE < 5 Å graph, greedy modularity (resolution 0.5, at least 10 residues)
+    <div class="domain-list">${ranges.map((item) => `<button type="button" class="feature-row detail" data-domain="${item.index}"><span><i class="swatch" style="background:${colorToHex(chainPaletteColor(item.index, entry.color.palette))}"></i>Domain ${item.index + 1}</span><em>${escapeHTML(item.text)}</em></button>`).join('')}</div>`;
+  for (const button of els.paeDomainResult.querySelectorAll('[data-domain]')) {
+    button.addEventListener('click', () => {
+      const index = Number(button.dataset.domain);
+      selectResidues([...entry.domains.values].filter(([, value]) => value === index).map(([key]) => key), { frame: true });
+    });
+  }
+}
+
+// Compact residue ranges per domain, e.g. "A:1-120, A:300-340".
+function domainRanges(entry) {
+  const model = activeModelOf(entry);
+  const byDomain = new Map();
+  for (const residue of model.residues) {
+    const index = entry.domains.values.get(residue.key);
+    if (index === undefined) continue;
+    if (!byDomain.has(index)) byDomain.set(index, []);
+    byDomain.get(index).push(residue);
+  }
+  return [...byDomain].sort((a, b) => a[0] - b[0]).map(([index, residues]) => {
+    const parts = [];
+    let start = residues[0];
+    let previous = residues[0];
+    for (const residue of residues.slice(1).concat([null])) {
+      if (residue && residue.chain === previous.chain && residue.resSeq === previous.resSeq + 1) {
+        previous = residue;
+        continue;
+      }
+      parts.push(start === previous ? `${start.chain}:${start.resSeq}` : `${start.chain}:${start.resSeq}-${previous.resSeq}`);
+      start = residue;
+      previous = residue;
+    }
+    const confidences = residues.map((residue) => residue.confidence).filter(Number.isFinite);
+    const plddt = confidences.length && entry.structure.meta.isPredicted ? confidences.reduce((sum, value) => sum + value, 0) / confidences.length : NaN;
+    const note = Number.isFinite(plddt) ? ` · pLDDT ${plddt.toFixed(0)}${plddt < 50 ? ' (disordered)' : ''}` : '';
+    return { index, text: parts.slice(0, 6).join(', ') + (parts.length > 6 ? ` … (${parts.length} segments)` : '') + note };
+  });
+}
+
+/* ---------- Validation reports ---------- */
+
+// The PDB ID whose validation report describes this entry, if any.
+function validationCode(entry = state.active) {
+  if (!entry || entry.structure.meta.isPredicted) return '';
+  const code = String(entry.fetchId || entry.structure.meta.code || '').trim();
+  return /^[0-9][A-Za-z0-9]{3}$/.test(code) ? code.toUpperCase() : '';
+}
+
+async function responseError(response, fallback) {
+  try {
+    const body = await response.json();
+    if (body.error) return body.error;
+  } catch {
+    // Not JSON.
+  }
+  return `${fallback} (HTTP ${response.status}).`;
+}
+
+async function loadValidation(entry = state.active, options = {}) {
+  const code = validationCode(entry);
+  if (!code) throw new CommandError('Validation reports exist for PDB entries: fetch one by its 4-character ID, such as 1M17.');
+  if (entry === state.active) {
+    els.validationResult.hidden = false;
+    els.validationResult.textContent = `Loading the wwPDB validation report for ${code}…`;
+  }
+  const response = await fetch(`/api/fetch/validation/${code}${options.refresh ? '?refresh=1' : ''}`);
+  if (!response.ok) {
+    const message = await responseError(response, `Could not load the validation report for ${code}`);
+    if (entry === state.active) els.validationResult.innerHTML = `<span class="warn">${escapeHTML(message)}</span>`;
+    throw new CommandError(message);
+  }
+  const report = await response.json();
+  entry.validation = { code, report, byModel: new Map(), showClashes: entry.validation?.showClashes ?? false };
+  const mapped = validationOf(entry);
+  if (entry === state.active) {
+    renderValidation();
+    renderRamachandran();
+  }
+  markColorsDirty();
+  markSceneDirty();
+  return `Loaded the validation report for ${code}: ${mapped.outlierKeys.size} residue${mapped.outlierKeys.size === 1 ? '' : 's'} with outliers, ${mapped.clashes.length} clash${mapped.clashes.length === 1 ? '' : 'es'}.`;
+}
+
+// Maps the report onto the entry's active model (models of an NMR ensemble differ).
+function validationOf(entry = state.active) {
+  const validation = entry?.validation;
+  if (!validation) return null;
+  const model = activeModelOf(entry);
+  let mapped = validation.byModel.get(model);
+  if (!mapped) {
+    mapped = mapValidation(validation.report, model);
+    mapped.levels = new Map([...mapped.residues].map(([key, record]) => [key, validationLevel(record)]));
+    const qscore = new Map();
+    const rsrz = new Map();
+    const rscc = new Map();
+    for (const [key, record] of mapped.residues) {
+      if (Number.isFinite(record.qscore)) qscore.set(key, record.qscore);
+      if (Number.isFinite(record.rsrz)) rsrz.set(key, record.rsrz);
+      if (Number.isFinite(record.rscc)) rscc.set(key, record.rscc);
+    }
+    mapped.values = { rsrz, rscc, qscore };
+    mapped.fit = qscore.size >= rsrz.size && qscore.size ? { kind: 'qscore', values: qscore } : { kind: 'rsrz', values: rsrz };
+    validation.byModel.set(model, mapped);
+  }
+  return mapped;
+}
+
+function renderValidation() {
+  const entry = state.active;
+  const code = entry ? validationCode(entry) : '';
+  const mapped = validationOf(entry);
+  els.validationLoad.disabled = !code;
+  els.validationLoad.textContent = mapped ? 'Reload report' : 'Load report';
+  els.validationColor.disabled = !mapped;
+  els.validationFit.disabled = !mapped?.fit.values.size;
+  els.validationClashes.disabled = !mapped;
+  els.validationClashes.checked = Boolean(entry?.validation?.showClashes);
+  if (!mapped) {
+    if (!els.validationResult.textContent.startsWith('Loading')) {
+      els.validationResult.hidden = !entry || Boolean(code);
+      els.validationResult.innerHTML = entry && !code ? '<span class="hint">Validation reports are available for experimental PDB entries opened by ID or as bundled examples.</span>' : '';
+    }
+    return;
+  }
+  const { summary } = mapped;
+  const percentile = (value) => (Number.isFinite(value) ? `<span class="percentile" title="Percentile rank among PDB entries (higher is better)"><i style="width:${Math.max(2, Math.min(100, value))}%;background:${percentileColor(value)}"></i></span><small>${Math.round(value)}th</small>` : '');
+  const rows = summary.metrics.map((metric) => `<tr><td>${escapeHTML(metric.label)}</td><td>${formatNumberShort(metric.value)}${metric.unit}</td><td>${percentile(metric.absolute)}</td></tr>`).join('');
+  const worst = [...mapped.residues]
+    .filter(([, record]) => record.criteria.length)
+    .map(([key, record]) => ({ key, record, residue: activeModelOf(entry).residueMap.get(key) }))
+    .filter((item) => item.residue)
+    .sort((a, b) => b.record.criteria.length - a.record.criteria.length || (b.record.rsrz || 0) - (a.record.rsrz || 0));
+  const ligands = [...mapped.residues]
+    .map(([key, record]) => ({ key, record, residue: activeModelOf(entry).residueMap.get(key) }))
+    .filter((item) => item.residue && item.residue.kind === 'ligand');
+  els.validationResult.hidden = false;
+  els.validationResult.innerHTML = `<div><strong>${escapeHTML(entry.validation.code)}</strong>${Number.isFinite(summary.resolution) ? ` · ${summary.resolution.toFixed(2)} Å` : ''} · wwPDB validation report</div>
+    ${rows ? `<table class="validation-table"><thead><tr><th>Metric</th><th>Value</th><th>Percentile</th></tr></thead><tbody>${rows}</tbody></table>` : ''}
+    <div>${mapped.outlierKeys.size} residue${mapped.outlierKeys.size === 1 ? '' : 's'} with outliers · ${mapped.clashes.length} clash${mapped.clashes.length === 1 ? '' : 'es'}${mapped.unmatched ? ` · ${mapped.unmatched} report residues not in this model` : ''}</div>
+    ${ligands.length ? `<h4>Ligands</h4><div class="feature-list">${ligands.slice(0, 20).map((item) => `<button type="button" class="feature-row detail" data-residue="${escapeHTML(item.key)}"><span>${escapeHTML(shortResidueLabel(item.residue))}</span><em>${escapeHTML([Number.isFinite(item.record.rscc) ? `RSCC ${item.record.rscc.toFixed(2)}` : '', Number.isFinite(item.record.rsrz) ? `RSRZ ${item.record.rsrz.toFixed(1)}` : '', Number.isFinite(item.record.qscore) ? `Q ${item.record.qscore.toFixed(2)}` : '', ...item.record.criteria.filter((text) => !text.startsWith('RSRZ'))].filter(Boolean).join(' · ') || 'no outliers')}</em></button>`).join('')}</div>` : ''}
+    ${worst.length ? `<h4>Worst residues</h4><div class="feature-list">${worst.slice(0, 25).map((item) => `<button type="button" class="feature-row detail" data-residue="${escapeHTML(item.key)}"><span>${escapeHTML(shortResidueLabel(item.residue))}</span><em>${escapeHTML(item.record.criteria.join(', '))}</em></button>`).join('')}</div>${worst.length > 25 ? `<p class="hint">…and ${worst.length - 25} more; select them all with <code>select outliers</code>.</p>` : ''}` : ''}`;
+  for (const button of els.validationResult.querySelectorAll('[data-residue]')) {
+    button.addEventListener('click', () => focusResidues([button.dataset.residue]));
+  }
+}
+
+function percentileColor(value) {
+  const t = Math.min(1, Math.max(0, value / 100));
+  return colorToHex(sampleColormap('bwr', 1 - t));
+}
+
+function setShowClashes(show, entry = state.active) {
+  if (!entry?.validation) return;
+  entry.validation.showClashes = show;
+  els.validationClashes.checked = show;
+  markSceneDirty();
+}
+
+/* ---------- AlphaMissense ---------- */
+
+// UniProt accessions of the entry's protein chains: from SIFTS/DBREF cross-references, or the
+// accession of an AlphaFold DB model.
+function chainAccessions(entry = state.active) {
+  const result = new Map();
+  for (const [chain, info] of entry.structure.sequences) {
+    if (info.kind !== 'protein') continue;
+    const segment = info.uniprot?.find((item) => item.accession);
+    if (segment) {
+      result.set(chain, { accession: segment.accession.toUpperCase(), mapped: true });
+      continue;
+    }
+    const match = String(entry.structure.meta.code || entry.structure.label || entry.fetchId || '').match(/AF-([A-Z0-9]+(?:-\d+)?)-F1/i)
+      ?? (entry.origin?.type === 'fetch' && !/^[0-9][A-Z0-9]{3}$/i.test(entry.fetchId ?? '') ? [null, entry.fetchId] : null);
+    if (match) result.set(chain, { accession: match[1].toUpperCase(), mapped: false });
+  }
+  return result;
+}
+
+async function loadMissense(entry = state.active, options = {}) {
+  const chains = chainAccessions(entry);
+  if (options.accession) {
+    for (const [chain, info] of entry.structure.sequences) if (info.kind === 'protein' && !chains.has(chain)) chains.set(chain, { accession: options.accession.toUpperCase(), mapped: false });
+  }
+  const accessions = [...new Set([...chains.values()].map((item) => item.accession))];
+  if (!accessions.length) throw new CommandError('No UniProt accession is known for these chains. For a local model, name one: missense P04637.');
+  if (entry === state.active) {
+    els.missenseResult.hidden = false;
+    els.missenseResult.textContent = `Loading AlphaMissense for ${accessions.join(', ')}…`;
+  }
+  const tables = new Map();
+  const problems = [];
+  await Promise.all(accessions.map(async (accession) => {
+    const response = await fetch(`/api/fetch/afdb/${encodeURIComponent(accession)}/missense`);
+    if (!response.ok) {
+      problems.push(await responseError(response, `No AlphaMissense data for ${accession}`));
+      return;
+    }
+    const parsed = parseAlphaMissense(await response.text());
+    if (parsed) tables.set(accession, parsed);
+    else problems.push(`${accession}: the AlphaMissense file was not understood`);
+  }));
+  if (!tables.size) {
+    const message = problems.join(' ') || 'No AlphaMissense data was found.';
+    if (entry === state.active) els.missenseResult.innerHTML = `<span class="warn">${escapeHTML(message)}</span>`;
+    throw new CommandError(message);
+  }
+  const values = new Map();
+  const positions = new Map();
+  let mismatched = 0;
+  const model = activeModelOf(entry);
+  for (const residue of model.residues) {
+    if (residue.kind !== 'protein') continue;
+    const reference = chains.get(residue.chain);
+    const table = reference && tables.get(reference.accession);
+    if (!table) continue;
+    const info = entry.structure.sequences.get(residue.chain);
+    const position = reference.mapped ? uniprotPositionForResidue(info, residue)?.position : (residue.iCode ? null : residue.resSeq);
+    const item = position ? table.positions.get(position) : null;
+    if (!item) continue;
+    // A wild-type mismatch means the numbering does not follow UniProt here.
+    if (item.wt !== residue.code) {
+      mismatched += 1;
+      continue;
+    }
+    values.set(residue.key, item.mean);
+    positions.set(residue.key, { accession: reference.accession, position, item });
+  }
+  entry.missense = { accessions: [...tables.keys()], values, positions, mismatched };
+  if (!values.size) throw new CommandError(`AlphaMissense data loaded, but no residue matched the UniProt sequence${mismatched ? ` (${mismatched} wild-type mismatches)` : ''}.`);
+  if (options.color !== false) setColorScheme('missense', [entry]);
+  else markColorsDirty();
+  if (entry === state.active) {
+    renderMissense(problems);
+    renderSelectionPanel();
+    renderProfile();
+  }
+  return `AlphaMissense: ${values.size} residues colored by mean pathogenicity (${[...tables.keys()].join(', ')}).`;
+}
+
+function renderMissense(problems = []) {
+  const entry = state.active;
+  const missense = entry?.missense;
+  if (!missense) {
+    els.missenseResult.hidden = true;
+    return;
+  }
+  const model = activeModelOf(entry);
+  const ranked = [...missense.values].sort((a, b) => b[1] - a[1]);
+  const pathogenic = ranked.filter(([, value]) => value > MISSENSE_THRESHOLDS.pathogenic).length;
+  const benign = ranked.filter(([, value]) => value < MISSENSE_THRESHOLDS.benign).length;
+  // Identical chains share one row per UniProt position.
+  const positions = new Map();
+  for (const [key, value] of ranked) {
+    const { accession, position } = missense.positions.get(key);
+    const id = `${accession}:${position}`;
+    if (!positions.has(id)) positions.set(id, { key, value, chains: [] });
+    positions.get(id).chains.push(model.residueMap.get(key)?.chain);
+  }
+  els.missenseResult.hidden = false;
+  els.missenseResult.innerHTML = `<div><strong>${missense.values.size}</strong> residues · ${escapeHTML(missense.accessions.join(', '))} · <span class="bad">${pathogenic} likely pathogenic</span> · <span class="good">${benign} likely benign</span> on average${missense.mismatched ? ` · <span class="warn">${missense.mismatched} numbering mismatches</span>` : ''}</div>
+    <div class="hint">Mean AlphaMissense score over the 19 substitutions at each position (Cheng et al., Science 2023; CC BY 4.0, via AlphaFold DB). Predictions for research, not for clinical use. Try <code>select am &gt; 0.564 and rsa &lt; 0.2</code> for buried sensitive positions (after SASA).</div>
+    ${problems.length ? `<div class="warn">${escapeHTML(problems.join(' '))}</div>` : ''}
+    <h4>Most sensitive positions</h4><div class="feature-list">${[...positions.values()].slice(0, 15).map(({ key, value, chains }) => {
+      const residue = model.residueMap.get(key);
+      const top = rankedSubstitutions(missense.positions.get(key)?.item, 3).map((item) => `${item.aa} ${item.score.toFixed(2)}`).join(', ');
+      const label = chains.length > 1 ? `${residue?.resName}${residue?.resSeq} (${chains.join(', ')})` : residue ? shortResidueLabel(residue) : '';
+      return residue ? `<button type="button" class="feature-row detail" data-residue="${escapeHTML(key)}"><span>${escapeHTML(label)} · ${value.toFixed(2)}</span><em>${escapeHTML(top)}</em></button>` : '';
+    }).join('')}</div>`;
+  for (const button of els.missenseResult.querySelectorAll('[data-residue]')) {
+    button.addEventListener('click', () => focusResidues([button.dataset.residue]));
+  }
+}
+
+// The AlphaMissense score of one substitution at a residue, if loaded.
+function missenseScore(entry, residue, mutant) {
+  const item = entry?.missense?.positions.get(residue.key)?.item;
+  const score = item?.scores.get(mutant);
+  return Number.isFinite(score) ? score : null;
 }
 
 /* ---------- Proteomics ---------- */
@@ -4846,12 +6120,17 @@ async function mapSitesFromInput() {
       continue;
     }
     if (site.wt && match.residue.code !== site.wt) problems.push(`${site.label}: structure has ${match.residue.resName}${match.residue.resSeq} (${match.numbering})`);
-    found.push({ residue: match.residue, label: site.label, value: site.value, mismatch: site.wt && match.residue.code !== site.wt });
+    found.push({ residue: match.residue, label: site.label, value: site.value, mismatch: site.wt && match.residue.code !== site.wt, mutant: site.mutant });
   }
   setSites(found);
+  // Substitutions get their AlphaMissense score when it is loaded.
+  const scored = found
+    .map((item) => ({ ...item, score: item.mutant && item.mutant.length === 1 ? missenseScore(state.active, item.residue, item.mutant) : null }))
+    .filter((item) => item.score !== null);
   els.siteResult.hidden = false;
   els.siteResult.innerHTML = `<strong>${found.length}</strong> of ${parsed.length} sites located${found.length ? ` (${found.filter((item) => !item.mismatch).length} with matching wild-type residue)` : ''}.
     ${problems.length ? `<ul>${problems.slice(0, 12).map((text) => `<li class="warn">${escapeHTML(text)}</li>`).join('')}</ul>` : ''}
+    ${scored.length ? `<table><thead><tr><th>Variant</th><th>AlphaMissense</th></tr></thead><tbody>${scored.map((item) => `<tr><td>${escapeHTML(item.label)}</td><td class="${item.score > MISSENSE_THRESHOLDS.pathogenic ? 'bad' : item.score < MISSENSE_THRESHOLDS.benign ? 'good' : 'warn'}">${item.score.toFixed(3)} · ${escapeHTML(missenseClass(item.score))}</td></tr>`).join('')}</tbody></table>` : ''}
     ${structureHasUniprot() ? '' : '<div class="hint">No UniProt mapping in this file, so positions use the structure numbering.</div>'}`;
   if (found.length) {
     focusResidues(found.map((item) => item.residue.key));
@@ -4943,6 +6222,9 @@ async function mapCrosslinksFromInput() {
     mapped.push({ ...link, ...best, satisfied: best.distance <= maxDistance });
   }
   state.proteomics.crosslinks = mapped;
+  // Kept for ranking the models of an opened prediction by cross-link satisfaction.
+  state.crosslinkRequest = { links, maxDistance };
+  renderPrediction();
   const satisfied = mapped.filter((link) => link.satisfied).length;
   els.xlResult.hidden = false;
   els.xlResult.innerHTML = `<strong>${mapped.length}</strong> of ${links.length} cross-links mapped · <span class="good">${satisfied} within ${maxDistance} Å</span> · <span class="bad">${mapped.length - satisfied} violated</span>${missing ? ` · <span class="warn">${missing} not in structure</span>` : ''}${parsed.skipped ? ` · ${parsed.skipped} monolinks skipped` : ''}

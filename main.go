@@ -48,6 +48,7 @@ type config struct {
 	offline     bool
 	noCache     bool
 	cacheDir    string
+	cacheMaxAge time.Duration
 	dev         bool
 	showVersion bool
 	remote      bool
@@ -128,11 +129,12 @@ func parseConfig(args []string) (config, error) {
 	flags.BoolVar(&cfg.offline, "offline", false, "disable remote structure fetching (cached downloads are still served)")
 	flags.StringVar(&cfg.cacheDir, "cache-dir", "", "directory for cached downloads (default: <user cache dir>/proteoscope)")
 	flags.BoolVar(&cfg.noCache, "no-cache", false, "do not cache downloads on disk")
+	flags.DurationVar(&cfg.cacheMaxAge, "cache-max-age", defaultCacheMaxAge, "refetch cached downloads older than this (0 keeps them forever)")
 	flags.BoolVar(&cfg.dev, "dev", false, "serve web/ and data/ from the working directory instead of the embedded copies")
 	flags.BoolVar(&cfg.showVersion, "version", false, "print the version and exit")
 	flags.BoolVar(&cfg.remote, "remote-control", false, "accept commands from scripts on this computer at /api/remote/command (for example Jupyter)")
 	flags.Usage = func() {
-		fmt.Fprintln(flags.Output(), "Usage: proteoscope [flags] [structure files...]")
+		fmt.Fprintln(flags.Output(), "Usage: proteoscope [flags] [structure files or prediction folders...]")
 		flags.PrintDefaults()
 	}
 	files, err := parseArgs(flags, args)
@@ -164,7 +166,7 @@ func newApp(cfg config) (*app, error) {
 		dev:     cfg.dev,
 		assets:  content,
 		files:   loadLocalFiles(cfg.files),
-		cache:   openCache(cfg.cacheDir, cfg.noCache),
+		cache:   openCache(cfg.cacheDir, cfg.noCache, cfg.cacheMaxAge),
 		remote:  defaultUpstream(),
 	}
 	if cfg.remote {
@@ -193,7 +195,9 @@ func (a *app) printBanner(url string) {
 	if a.offline {
 		fmt.Println("Offline mode: remote fetching is disabled.")
 	}
-	if a.cache != nil {
+	if a.cache != nil && a.cache.maxAge > 0 {
+		fmt.Printf("Download cache: %s (refreshed after %s)\n", a.cache.dir, formatAge(a.cache.maxAge))
+	} else if a.cache != nil {
 		fmt.Printf("Download cache: %s\n", a.cache.dir)
 	} else {
 		fmt.Println("Download cache: disabled")
@@ -201,8 +205,21 @@ func (a *app) printBanner(url string) {
 	if a.control != nil {
 		fmt.Printf("Remote control: POST {\"command\": ...} to %s/api/remote/command\n", url)
 	}
+	folders := map[string]int{}
+	var order []string
 	for _, file := range a.files {
-		fmt.Printf("Local file %s: %s\n", file.URL, file.path)
+		if file.Path == "" {
+			fmt.Printf("Local file %s: %s\n", file.URL, file.path)
+			continue
+		}
+		folder := strings.SplitN(file.Path, "/", 2)[0]
+		if folders[folder] == 0 {
+			order = append(order, folder)
+		}
+		folders[folder]++
+	}
+	for _, folder := range order {
+		fmt.Printf("Local folder %s: %d files\n", folder, folders[folder])
 	}
 	fmt.Println("Press Ctrl+C to stop.")
 }
@@ -252,7 +269,10 @@ func (a *app) registerAPI(mux *http.ServeMux, samples func() ([]sample, error)) 
 	mux.HandleFunc("GET /api/fetch/pdb/{id}", a.fetchPDB)
 	mux.HandleFunc("GET /api/fetch/afdb/{accession}", a.fetchAlphaFold)
 	mux.HandleFunc("GET /api/fetch/afdb/{accession}/pae", a.fetchAlphaFoldPAE)
+	mux.HandleFunc("GET /api/fetch/afdb/{accession}/missense", a.fetchAlphaMissense)
+	mux.HandleFunc("GET /api/fetch/afdb/{accession}/msa", a.fetchAlphaFoldMSA)
 	mux.HandleFunc("GET /api/fetch/uniprot/{accession}", a.fetchUniProt)
+	mux.HandleFunc("GET /api/fetch/validation/{id}", a.fetchValidation)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Unknown API endpoint.")
 	})

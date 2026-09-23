@@ -46,7 +46,7 @@ graph TB
     Embed[(Embedded web + data)]
     Cache[(Fetch cache)]
     Remote[RCSB / AlphaFold DB / UniProt]
-    Local[Local files and CLI arguments]
+    Local[Local files, prediction folders and CLI arguments]
 
     User -->|runs| Binary
     Binary -->|serves localhost| Browser
@@ -77,6 +77,10 @@ graph LR
     Compare[compare.js<br/>align.js + superpose.js]
     Select[select.js + commands.js]
     Share[mvs.js + zip.js + codec.js]
+    Predict[predictions.js<br/>interface-scores.js<br/>pae-domains.js + msa.js + npy.js]
+    Validate[validation.js<br/>ramachandran.js + rama-top8000.js]
+    Variants[missense.js]
+    Formats[bcif.js]
     Views[sequence-view.js<br/>plots.js]
 
     App --> Parse --> Structure --> DSSP
@@ -91,13 +95,17 @@ graph LR
     App --> Compare
     App --> Select
     App --> Share
+    App --> Predict
+    App --> Validate
+    App --> Variants
+    App --> Formats
     App --> Views
 ```
 
 Modules in `web/lib/` are pure (no DOM access) except `renderer*.js`,
 `sequence-view.js` and `plots.js`. Pure modules run in the browser, in Web
-Workers and in Node tests. Interactions, proteomics and electrostatics load
-lazily on first use.
+Workers and in Node tests. Interactions, proteomics, electrostatics and the
+Top8000 Ramachandran tables load lazily on first use.
 
 ## Host Application Design
 
@@ -113,17 +121,22 @@ not embedded. `--dev` serves `web/` and `data/` from disk instead.
 | --- | --- |
 | `/` and static assets | Embedded application |
 | `/api/health`, `/api/samples` | Health check and bundled-structure manifest |
-| `/api/startup` | Version, offline flag and files given on the command line |
-| `/api/local/{index}` | A file named on the command line (gzip decoded) |
+| `/api/startup` | Version, offline flag and files given on the command line (with folder-relative paths) |
+| `/api/local/{index}` | A file named on the command line, or found in a folder named there (gzip decoded) |
 | `/api/fetch/pdb/{id}` | RCSB PDBx/mmCIF by PDB ID, including extended `pdb_` IDs |
 | `/api/fetch/afdb/{accession}` | AlphaFold DB model; the file URL comes from the prediction API |
 | `/api/fetch/afdb/{accession}/pae` | AlphaFold DB PAE JSON |
+| `/api/fetch/afdb/{accession}/msa` | AlphaFold DB alignment (A3M) for the model |
+| `/api/fetch/afdb/{accession}/missense` | AlphaMissense substitutions (CSV), human proteins |
 | `/api/fetch/uniprot/{accession}` | UniProtKB entry with feature annotations |
+| `/api/fetch/validation/{id}` | wwPDB validation report, reduced from XML to per-residue JSON |
 | `/data/*` | Bundled structure files |
 
 Fetch responses carry `X-Proteoscope-Filename`, `-Source`, `-Cache` and, for
-AlphaFold DB, `-Pae` and `-Meta-B64` headers. Payloads are cached on disk with
-atomic writes. The cache has no expiry.
+AlphaFold DB, `-Pae`, `-Msa`, `-Missense` and `-Meta-B64` headers. Payloads are
+cached on disk with atomic writes and refetched after `--cache-max-age`
+(30 days). If the refetch fails, the stale copy is served (`-Cache: stale`),
+and `?refresh=1` bypasses the cache.
 
 ### Security
 
@@ -327,8 +340,9 @@ ambient occlusion or outlines.
   Boolean logic with implicit AND) and evaluate to one atom mask per
   structure. Predicates compile once per structure; `within`/`around` use a
   spatial hash over the reference atoms of every structure; per-residue values
-  (deviation, lDDT, RMSF, relative SASA) and sets (selection, focus, sites)
-  come from a context the app supplies, so the module stays pure.
+  (deviation, lDDT, RMSF, relative SASA, AlphaMissense, MSA depth, RSRZ, RSCC,
+  Q-score) and sets (selection, focus, sites, validation outliers) come from a
+  context the app supplies, so the module stays pure.
 - **Commands** (`commands.js`) only parse; `runCommand` in the app executes
   them and returns `{ ok, message, data }`, which serves the search box, the
   console API and the remote-control API alike. Plain selections run as
@@ -349,6 +363,32 @@ ambient occlusion or outlines.
 - **Remote control** (`remote.go`) relays commands from
   `POST /api/remote/command` to the newest page over Server-Sent Events and
   returns the page's posted result, with a timeout.
+
+## Predictions, Validation and Variants
+
+- **Prediction sets** (`predictions.js`) are recognized from file names
+  alone. Folders arrive as dropped directory entries, `webkitdirectory`
+  inputs, ZIP members, or files the server found in a command-line folder, all
+  behind one `{ name, path, read(), text() }` interface. Each tool's
+  confidence files parse into one score shape.
+- **Scoring.** For each model, the app parses the structure, tokenizes it the
+  AlphaFold 3 way (standard residues; heavy atoms of ligands and modified
+  residues) to match the PAE rows, and computes interface scores
+  (`interface-scores.js`). It keeps only small results: scores, chain order,
+  Cα positions for cross-links, and interface token lists. PAE and contact
+  matrices are read again when a model is opened.
+- **Entries.** Opened models are ordinary entries tagged with their set and
+  model, so superposition, sessions and every panel work unchanged.
+- **Validation reports** are reduced on the server (streaming XML) and mapped
+  on the page per model (NMR ensembles differ). Criteria, levels, fit values
+  and clash atoms are computed once per model and cached. Clash hydrogens map
+  to heavy atoms by naming rules.
+- **Ramachandran** classification uses the six Top8000 density tables,
+  bilinearly interpolated, with ramalyze's category order and cutoffs. Classes
+  are cached on each model.
+- **AlphaMissense** tables are keyed by UniProt position. Residues map through
+  the chain's UniProt segments, or directly for AlphaFold DB models, after
+  checking the wild type.
 
 ## Interaction Design
 
@@ -397,10 +437,12 @@ The canvas fills the window, and panels float over it.
 
 ## Known Limitations
 
-See `roadmap.md` §7. In particular:
+See `roadmap.md` §10. In particular:
 
 - Superposition needs sequence (or UniProt) correspondence; there is no
   structure-only alignment yet.
 - Electrostatics are qualitative (formal charges, ε = 4r).
 - Ligand chemistry is inferred from geometry.
-- The Ramachandran regions are approximate.
+- Rotamer outliers and clashscore come only from validation reports.
+- Prediction folders were checked against documented layouts and synthetic
+  files; real outputs of each tool remain to be checked.

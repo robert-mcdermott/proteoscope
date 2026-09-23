@@ -3,6 +3,7 @@
 //   chain A and resi 40-80            resn STI+ATP        name CA and not hetatm
 //   within 5 of resn STI              byres (around 4.5 of ligand)
 //   /A:315@OG1   #2/B:10-20   :HEM   b > 60   plddt < 70   deviation > 2
+//   outliers and within 5 of ligand   am > 0.564 and rsa < 0.2   rsrz > 2
 //
 // parseSelection() turns text into an AST; evaluateSelection() applies it to one or more targets
 // (one model per structure) and returns a per-target atom mask. The module is pure.
@@ -33,6 +34,7 @@ const CLASS_KEYWORDS = {
   helix: 'helix', helices: 'helix', sheet: 'sheet', strand: 'sheet', strands: 'sheet', coil: 'coil', loop: 'coil', loops: 'coil', turn: 'turn',
   sele: 'selected', selected: 'selected', selection: 'selected',
   focus: 'focus', sites: 'sites', site: 'sites', covered: 'covered', aligned: 'aligned',
+  outliers: 'outliers', outlier: 'outliers',
 };
 
 const LIST_KEYWORDS = {
@@ -57,6 +59,9 @@ const NUMERIC_KEYWORDS = {
   lddt: 'lddt',
   rmsf: 'rmsf',
   rsa: 'rsa', exposure: 'rsa',
+  rsrz: 'rsrz', rscc: 'rscc', qscore: 'qscore',
+  am: 'am', missense: 'am', alphamissense: 'am',
+  msa: 'msa', depth: 'msa',
 };
 
 const DISTANCE_KEYWORDS = { within: 'within', around: 'around', beyond: 'beyond' };
@@ -286,8 +291,8 @@ function parseSpec(token) {
 /* ---------- Evaluation ---------- */
 
 // targets: [{ id, index (1-based), name, model, structure, context }] where context may hold
-//   selected, focus, sites, covered, aligned: Set of residue keys
-//   values: { deviation, lddt, rmsf, rsa }: Map of residue key → number
+//   selected, focus, sites, covered, aligned, outliers: Set of residue keys
+//   values: { deviation, lddt, rmsf, rsa, rsrz, rscc, qscore, am, msa }: Map of residue key → number
 //   uniprot(residue): UniProt position or null
 // Returns Map(target id → Uint8Array atom mask over target.model.atoms).
 export function evaluateSelection(ast, targets) {

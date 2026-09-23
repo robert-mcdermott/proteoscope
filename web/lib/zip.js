@@ -1,5 +1,6 @@
-// Minimal ZIP writer for MolViewSpec .mvsx archives. Entries are stored or deflated, and sizes
-// are written into the local headers (no data descriptors, no ZIP64), which Mol*'s reader needs.
+// Minimal ZIP writer for MolViewSpec .mvsx archives, and a reader for the archives researchers
+// bring (AlphaFold Server downloads, NumPy .npz files). The writer stores or deflates entries and
+// writes sizes into the local headers (no data descriptors, no ZIP64), which Mol*'s reader needs.
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -96,28 +97,98 @@ export async function createZip(files, options = {}) {
   return archive;
 }
 
-// Reads a ZIP written by createZip (used by tests and to check exports).
-export async function readZip(archive) {
+// Lists the entries of any ZIP archive (AlphaFold Server downloads, NumPy .npz files, .mvsx) from
+// its central directory, so archives written with data descriptors or ZIP64 records work too.
+export function listZip(archive) {
   const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
-  const decoder = new TextDecoder();
-  const files = new Map();
-  let offset = 0;
-  while (offset + 30 <= archive.length && view.getUint32(offset, true) === 0x04034b50) {
-    const method = view.getUint16(offset + 8, true);
-    const crc = view.getUint32(offset + 14, true);
-    const compressed = view.getUint32(offset + 18, true);
-    const nameLength = view.getUint16(offset + 26, true);
-    const extraLength = view.getUint16(offset + 28, true);
-    const name = decoder.decode(archive.subarray(offset + 30, offset + 30 + nameLength));
-    const start = offset + 30 + nameLength + extraLength;
-    let data = archive.subarray(start, start + compressed);
-    if (method === 8) {
-      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-      data = new Uint8Array(await new Response(stream).arrayBuffer());
+  const end = findEndOfCentralDirectory(view);
+  if (end < 0) throw new Error('Not a ZIP archive (no end-of-central-directory record).');
+  let count = view.getUint16(end + 10, true);
+  let offset = view.getUint32(end + 16, true);
+  // ZIP64: the locator sits just before the classic record and points at the 64-bit one.
+  const locator = end - 20;
+  if ((count === 0xffff || offset === 0xffffffff) && locator >= 0 && view.getUint32(locator, true) === 0x07064b50) {
+    const record = Number(view.getBigUint64(locator + 8, true));
+    if (record + 56 <= view.byteLength && view.getUint32(record, true) === 0x06064b50) {
+      count = Number(view.getBigUint64(record + 32, true));
+      offset = Number(view.getBigUint64(record + 48, true));
     }
-    if (crc32(data) !== crc) throw new Error(`CRC mismatch for ${name}`);
-    files.set(name, data);
-    offset = start + compressed;
   }
+  const decoder = new TextDecoder();
+  const entries = [];
+  for (let index = 0; index < count; index += 1) {
+    if (offset + 46 > view.byteLength || view.getUint32(offset, true) !== 0x02014b50) throw new Error('The ZIP central directory is damaged.');
+    const flags = view.getUint16(offset + 8, true);
+    const method = view.getUint16(offset + 10, true);
+    const crc = view.getUint32(offset + 16, true);
+    let compressedSize = view.getUint32(offset + 20, true);
+    let size = view.getUint32(offset + 24, true);
+    const nameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    let localOffset = view.getUint32(offset + 42, true);
+    const name = decoder.decode(archive.subarray(offset + 46, offset + 46 + nameLength));
+    const zip64 = zip64Fields(view, offset + 46 + nameLength, extraLength, { size, compressedSize, localOffset });
+    ({ size, compressedSize, localOffset } = zip64);
+    offset += 46 + nameLength + extraLength + commentLength;
+    if (name.endsWith('/')) continue;
+    entries.push({ name, method, crc, size, compressedSize, localOffset, encrypted: Boolean(flags & 1) });
+  }
+  return entries;
+}
+
+function findEndOfCentralDirectory(view) {
+  const last = view.byteLength - 22;
+  const first = Math.max(0, last - 0xffff);
+  for (let offset = last; offset >= first; offset -= 1) {
+    if (view.getUint32(offset, true) === 0x06054b50) return offset;
+  }
+  return -1;
+}
+
+function zip64Fields(view, start, length, values) {
+  const result = { ...values };
+  let cursor = start;
+  while (cursor + 4 <= start + length) {
+    const id = view.getUint16(cursor, true);
+    const size = view.getUint16(cursor + 2, true);
+    if (id === 0x0001) {
+      let field = cursor + 4;
+      for (const key of ['size', 'compressedSize', 'localOffset']) {
+        if (result[key] !== 0xffffffff || field + 8 > cursor + 4 + size) continue;
+        result[key] = Number(view.getBigUint64(field, true));
+        field += 8;
+      }
+    }
+    cursor += 4 + size;
+  }
+  return result;
+}
+
+// Returns the uncompressed bytes of one entry from listZip().
+export async function readZipEntry(archive, entry) {
+  if (entry.encrypted) throw new Error(`${entry.name} is encrypted.`);
+  const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
+  if (view.getUint32(entry.localOffset, true) !== 0x04034b50) throw new Error(`The ZIP entry ${entry.name} is damaged.`);
+  const start = entry.localOffset + 30 + view.getUint16(entry.localOffset + 26, true) + view.getUint16(entry.localOffset + 28, true);
+  let data = archive.subarray(start, start + entry.compressedSize);
+  if (entry.method === 8) {
+    const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    data = new Uint8Array(await new Response(stream).arrayBuffer());
+  } else if (entry.method !== 0) {
+    throw new Error(`${entry.name} uses an unsupported ZIP compression method (${entry.method}).`);
+  }
+  if (crc32(data) !== entry.crc) throw new Error(`CRC mismatch for ${entry.name}`);
+  return data;
+}
+
+// Reads every file of a ZIP archive into a Map of name → bytes.
+export async function readZip(archive) {
+  const files = new Map();
+  for (const entry of listZip(archive)) files.set(entry.name, await readZipEntry(archive, entry));
   return files;
+}
+
+export function isZip(bytes) {
+  return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && (bytes[2] === 3 || bytes[2] === 5) && (bytes[3] === 4 || bytes[3] === 6);
 }

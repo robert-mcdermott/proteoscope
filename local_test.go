@@ -120,3 +120,33 @@ func jsonEqual(a, b any) bool {
 	right, errB := json.Marshal(b)
 	return errA == nil && errB == nil && string(left) == string(right)
 }
+
+func TestLoadLocalFolders(t *testing.T) {
+	dir := t.TempDir()
+	job := filepath.Join(dir, "job")
+	writeTestFile(t, job, "job_model.cif", []byte("data_job\n"))
+	writeTestFile(t, job, "job_summary_confidences.json", []byte("{}"))
+	writeTestFile(t, filepath.Join(job, "seed-1_sample-0"), "model.cif.gz", gzipBytes(t, "data_s\n"))
+	writeTestFile(t, filepath.Join(job, ".cache"), "hidden.cif", []byte("data_h\n"))
+	writeTestFile(t, job, "notes.txt", []byte("skip"))
+	single := writeTestFile(t, dir, "fold_x.zip", []byte("PK"))
+
+	files := loadLocalFiles([]string{job, single})
+	var paths []string
+	for _, file := range files {
+		paths = append(paths, file.Path+"|"+file.Name+"|"+file.URL)
+	}
+	want := []string{
+		"job/job_model.cif|job_model.cif|/api/local/0",
+		"job/job_summary_confidences.json|job_summary_confidences.json|/api/local/1",
+		"job/seed-1_sample-0/model.cif|model.cif|/api/local/2",
+		"|fold_x.zip|/api/local/3",
+	}
+	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("files:\n%s\nwant:\n%s", strings.Join(paths, "\n"), strings.Join(want, "\n"))
+	}
+	h := testHandler(t, &app{files: files})
+	if rec := get(h, "/api/local/2"); rec.Code != http.StatusOK || rec.Body.String() != "data_s\n" {
+		t.Fatalf("gzipped folder member: status %d body %q", rec.Code, rec.Body)
+	}
+}

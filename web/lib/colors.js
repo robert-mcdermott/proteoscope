@@ -45,6 +45,13 @@ export const COLORMAPS = {
   hydrophobicity: { label: 'Hydrophilic → hydrophobic', stops: [[0.0, 0.55, 0.62], [0.95, 0.95, 0.95], [0.8, 0.55, 0.05]] },
   electrostatic: { label: 'Negative → positive', stops: [[0.86, 0.16, 0.16], [0.97, 0.97, 0.97], [0.16, 0.32, 0.92]] },
   heat: { label: 'Heat', stops: [[1.0, 0.95, 0.65], [1.0, 0.62, 0.2], [0.86, 0.16, 0.1]] },
+  depth: { label: 'Shallow → deep', stops: hexColors(['#c62828', '#ef6c00', '#f9d648', '#7cc46a', '#2e9e6a', '#2b6cb0']) },
+  // Stops every 0.1: blue below the AlphaMissense benign cutoff (0.34), gray in the ambiguous band,
+  // red above the pathogenic cutoff (0.564).
+  alphamissense: {
+    label: 'AlphaMissense (benign → pathogenic)',
+    stops: hexColors(['#2a4a9c', '#3a63b8', '#5b83cc', '#8fa9d9', '#b4b8c2', '#a9a9a9', '#e79a8f', '#dd6a5b', '#cf3f33', '#b3211b', '#8c0d0d']),
+  },
 };
 
 export const PLDDT_BANDS = [

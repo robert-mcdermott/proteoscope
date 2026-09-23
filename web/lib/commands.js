@@ -26,6 +26,12 @@ export const COMMANDS = [
   { name: 'superpose', aliases: ['super', 'align', 'matchmaker', 'mm'], syntax: 'superpose <moving|all> [onto <reference>] [fit <selection>]', summary: 'Superpose structures and report RMSD, TM-score and lDDT' },
   { name: 'alphafold', aliases: ['af'], syntax: 'alphafold', summary: 'Compare the active structure with its AlphaFold DB model' },
   { name: 'overlay', aliases: [], syntax: 'overlay [on|off]', summary: 'Overlay all models of an ensemble' },
+  { name: 'ranking', aliases: ['models', 'predictions'], syntax: 'ranking [<rank>]', summary: 'List the models of an opened prediction, or show the one at a rank' },
+  { name: 'domains', aliases: ['paedomains'], syntax: 'domains', summary: 'Find rigid domains in the PAE matrix and color by them' },
+  { name: 'msa', aliases: [], syntax: 'msa', summary: 'Color by MSA depth (AlphaFold DB models, prediction folders, dropped .a3m files)' },
+  { name: 'validate', aliases: ['validation', 'report'], syntax: 'validate [clashes|fit|refresh|off]', summary: 'Load the wwPDB validation report and color outliers, show clashes or density fit' },
+  { name: 'missense', aliases: ['alphamissense', 'am'], syntax: 'missense [<UniProt accession>]', summary: 'Color by AlphaMissense pathogenicity (human proteins)' },
+  { name: 'refresh', aliases: ['reload'], syntax: 'refresh', summary: 'Download the active structure again, bypassing the cache' },
   { name: 'preset', aliases: ['style', 'rep'], syntax: 'preset <cartoon|ball-stick|sticks|spacefill|trace|surface>', summary: 'Apply a representation preset' },
   { name: 'lighting', aliases: ['light'], syntax: 'lighting <standard|soft|illustrative|glossy|neon|flat>', summary: 'Apply a lighting preset' },
   { name: 'bg', aliases: ['background'], syntax: 'bg <dark|black|gray|white>', summary: 'Set the background' },
@@ -148,6 +154,20 @@ export function parseCommand(text, options = {}) {
       if (!mobile) throw new CommandError(`Usage: ${command.syntax}`);
       return { ...parsed, mobile, reference: reference || null, fit };
     }
+    case 'ranking': {
+      if (!words.length) return { ...parsed, rank: null };
+      const rank = Number(words[0].replace(/^#/, ''));
+      if (!Number.isInteger(rank) || rank < 1 || words.length > 1) throw new CommandError(`Usage: ${command.syntax}`);
+      return { ...parsed, rank };
+    }
+    case 'validate': {
+      const mode = words[0]?.toLowerCase() ?? 'load';
+      if (!['load', 'clashes', 'fit', 'refresh', 'off'].includes(mode) || words.length > 1) throw new CommandError(`Usage: ${command.syntax}`);
+      return { ...parsed, mode };
+    }
+    case 'missense':
+      if (words.length > 1 || (words[0] && !/^[A-Z0-9]{6,10}(-\d+)?$/i.test(words[0]))) throw new CommandError(`Usage: ${command.syntax}`);
+      return { ...parsed, accession: words[0]?.toUpperCase() ?? null };
     case 'overlay':
     case 'spin': {
       const state = words[0]?.toLowerCase();

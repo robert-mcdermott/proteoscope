@@ -13,6 +13,7 @@ import {
 } from './colors.js';
 import { elementInfo } from './elements.js';
 import { HYDROPHOBIC, KYTE_DOOLITTLE, NEGATIVE, POLAR, POSITIVE } from './residues.js';
+import { VALIDATION_LEVELS } from './validation.js';
 
 export const COLOR_SCHEMES = [
   { id: 'chain', label: 'Chain', group: 'Structure' },
@@ -26,6 +27,11 @@ export const COLOR_SCHEMES = [
   { id: 'nucleotide', label: 'Nucleotide', group: 'Chemistry' },
   { id: 'bfactor', label: 'B-factor', group: 'Quality' },
   { id: 'plddt', label: 'AlphaFold confidence (pLDDT)', group: 'Quality' },
+  { id: 'domains', label: 'PAE domains', group: 'Quality' },
+  { id: 'msa', label: 'MSA depth', group: 'Quality' },
+  { id: 'validation', label: 'Validation outliers (wwPDB)', group: 'Quality' },
+  { id: 'densityfit', label: 'Fit to density (RSRZ / Q-score)', group: 'Quality' },
+  { id: 'missense', label: 'AlphaMissense pathogenicity', group: 'Variants' },
   { id: 'exposure', label: 'Solvent exposure (relative SASA)', group: 'Analysis' },
   { id: 'coverage', label: 'Peptide coverage', group: 'Proteomics' },
   { id: 'data', label: 'Custom residue data', group: 'Proteomics' },
@@ -42,6 +48,7 @@ const COMPARISON_SCHEMES = new Set(['deviation', 'lddt', 'rmsf']);
 export const DEFAULT_DEVIATION_RANGE = { min: 0, max: 4 };
 const NEUTRAL = [0.5, 0.53, 0.57];
 const LIGAND_CARBON = [0.36, 0.86, 0.5];
+const VALIDATION_COLORS = VALIDATION_LEVELS.map((level) => hexColor(level.color));
 
 export function computeAtomColors(model, structure, settings, extras = {}) {
   const atoms = model.atoms;
@@ -79,6 +86,7 @@ export function computeAtomColors(model, structure, settings, extras = {}) {
         model,
         uniform,
         structureColor,
+        fitKind: extras.fitKind,
       });
       if (heteroByElement && STRUCTURAL_SCHEMES.has(scheme) && atom.element !== 'C' && polymer && !isBackboneForCartoon(atom)) {
         color = [...elementInfo(atom.element).color];
@@ -128,8 +136,35 @@ function schemeColor(scheme, atom, residue, context) {
     case 'bfactor':
       return sampleColormap(context.colormap || 'bwr', normalize(atom.bFactor, context.range));
     case 'plddt': {
-      const value = Number.isFinite(residue?.confidence) ? residue.confidence : atom.bFactor;
+      // Ligands and modified residues in AlphaFold 3, Boltz and Chai-1 models carry per-atom pLDDT.
+      const perAtom = atom.kind !== 'protein' && atom.kind !== 'nucleic';
+      const value = !perAtom && Number.isFinite(residue?.confidence) ? residue.confidence : confidenceScale(atom.bFactor, context.model);
       return plddtColor(value);
+    }
+    case 'validation': {
+      const level = context.residueValues?.get(residue?.key);
+      return Number.isFinite(level) && level >= 0 ? [...VALIDATION_COLORS[level]] : [...NEUTRAL];
+    }
+    case 'densityfit': {
+      const value = context.residueValues?.get(residue?.key);
+      if (!Number.isFinite(value)) return [...NEUTRAL];
+      // RSRZ: lower is better, > 2 is an outlier. Q-score: higher is better.
+      const t = context.fitKind === 'qscore' ? (0.8 - value) / 0.6 : (value + 1) / 4;
+      return sampleColormap('bwr', Math.min(1, Math.max(0, t)));
+    }
+    case 'missense': {
+      const value = context.residueValues?.get(residue?.key);
+      return Number.isFinite(value) ? sampleColormap('alphamissense', value) : [...NEUTRAL];
+    }
+    case 'domains': {
+      const index = context.residueValues?.get(residue?.key);
+      return Number.isFinite(index) && index >= 0 ? chainPaletteColor(index, context.palette) : [...NEUTRAL];
+    }
+    case 'msa': {
+      const value = context.residueValues?.get(residue?.key);
+      if (!Number.isFinite(value)) return [...NEUTRAL];
+      // Log scale: 1 sequence → red, about 30 → yellow, ≥ 1000 → blue.
+      return sampleColormap('depth', Math.min(1, Math.log10(Math.max(1, value)) / 3));
     }
     case 'exposure':
     case 'coverage':
@@ -156,6 +191,12 @@ function schemeColor(scheme, atom, residue, context) {
     default:
       return chainPaletteColor(context.chainIndex.get(atom.chain) ?? 0, context.palette);
   }
+}
+
+// Some predictors write pLDDT on a 0–1 scale; the model's B-factor range tells them apart.
+function confidenceScale(value, model) {
+  const max = model?.bFactorRange?.max;
+  return Number.isFinite(max) && max <= 1.0001 ? value * 100 : value;
 }
 
 function residueClassColor(atom, residue) {
@@ -293,6 +334,27 @@ function buildLegend(scheme, structure, settings, extras, range) {
       return { type: 'gradient', title: 'B-factor (Å²)', colormap: settings.colormap || 'bwr', minLabel: range.min.toFixed(1), maxLabel: range.max.toFixed(1) };
     case 'plddt':
       return { type: 'categorical', title: 'pLDDT', items: PLDDT_BANDS.map((band) => ({ label: band.label, color: band.color })) };
+    case 'validation':
+      return extras.residueValues
+        ? { type: 'categorical', title: 'Validation outliers', items: VALIDATION_LEVELS.map((level, index) => ({ label: level.label, color: VALIDATION_COLORS[index] })), note: 'wwPDB report · gray: not assessed' }
+        : { type: 'note', title: 'Validation', text: 'Load the validation report in the Analysis tab.' };
+    case 'densityfit':
+      if (!extras.residueValues) return { type: 'note', title: 'Fit to density', text: 'Load the validation report in the Analysis tab.' };
+      return extras.fitKind === 'qscore'
+        ? { type: 'gradient', title: 'Q-score (map fit)', colormap: 'bwr', minLabel: '≥ 0.8 good', maxLabel: '≤ 0.2 poor', note: 'Cryo-EM · gray: not assessed' }
+        : { type: 'gradient', title: 'RSRZ (density fit)', colormap: 'bwr', minLabel: '≤ −1 good', maxLabel: '≥ 3 poor', note: 'RSRZ > 2 is an outlier · gray: not assessed' };
+    case 'missense':
+      return extras.residueValues
+        ? { type: 'gradient', title: 'AlphaMissense (mean)', colormap: 'alphamissense', minLabel: '0 benign', maxLabel: '1 pathogenic', note: '< 0.34 likely benign · > 0.564 likely pathogenic' }
+        : { type: 'note', title: 'AlphaMissense', text: 'Load AlphaMissense in the Proteomics tab (human proteins).' };
+    case 'domains':
+      return extras.domainCount
+        ? { type: 'categorical', title: 'PAE domains', items: Array.from({ length: Math.min(extras.domainCount, 16) }, (_, index) => ({ label: `Domain ${index + 1}`, color: chainPaletteColor(index, palette) })), note: 'Gray: not in a domain' }
+        : { type: 'note', title: 'PAE domains', text: 'Find domains under Predicted aligned error in the Analysis tab.' };
+    case 'msa':
+      return extras.residueValues
+        ? { type: 'gradient', title: 'MSA depth (sequences)', colormap: 'depth', minLabel: '1', maxLabel: '≥ 1000', note: 'Log scale · gray: no alignment' }
+        : { type: 'note', title: 'MSA depth', text: 'Open a prediction folder that includes its MSA.' };
     case 'exposure':
       return { type: 'gradient', title: 'Relative SASA', colormap: settings.colormap || 'viridis', minLabel: 'Buried', maxLabel: 'Exposed' };
     case 'coverage':

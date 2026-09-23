@@ -328,3 +328,28 @@ the completed v0.1 application.
 - [x] 48. Documentation: README sections for selections, commands, sessions and scripting; design, requirements, roadmap
   - _Requirements: 15, 25, 26, 27_
 
+## Wave 4: predicted complexes, validation and variants
+
+- [x] 49. Prediction folders: AlphaFold 3, AlphaFold Server, Boltz, Chai-1 and ColabFold detection and parsing; ZIP (central directory) and NumPy readers; folder drops, folder picker and command-line folders
+  - _Requirements: 28_
+
+- [x] 50. Interface scores (ipSAE, ipTM from PAE, pDockQ, pDockQ2, LIS) with AlphaFold 3 tokenization; ranking table, chain-pair matrix, interface selection, superpose all, CSV export, `ranking` command
+  - _Requirements: 28_
+
+- [x] 51. Contact probabilities, per-atom ligand pLDDT, PAE domains (ChimeraX algorithm), MSA depth (prediction folders, AlphaFold DB, dropped alignments), cross-link satisfaction per model
+  - _Requirements: 28_
+
+- [x] 52. wwPDB validation reports: Go XML reducer and route, outlier and density-fit coloring, clashes, ligand and worst-residue lists, selection keywords, `validate` command
+  - _Requirements: 29_
+
+- [x] 53. MolProbity Top8000 Ramachandran contours and classification for any structure
+  - _Requirements: 29_
+
+- [x] 54. AlphaMissense: route, mapping, coloring, per-variant scores, `missense` command
+  - _Requirements: 30_
+
+- [x] 55. BinaryCIF, cache expiry and refresh, session completeness, AlphaFold DB field renames
+  - _Requirements: 31_
+
+- [x] 56. Documentation: README sections and screenshots, design, requirements, roadmap (wave 4, examples review, keyless databases)
+  - _Requirements: 15, 28, 29, 30, 31_
