@@ -206,6 +206,10 @@ export function createCanvasRenderer(canvas) {
     setCylinders,
     setMesh() {},
     setMeshOpacity() {},
+    setMeshAtomOffset() {},
+    meshIds() {
+      return [];
+    },
     setCanvasShapes,
     render,
     pick,

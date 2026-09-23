@@ -7,6 +7,8 @@ export const REPRESENTATIONS = ['cartoon', 'trace', 'ball-stick', 'sticks', 'spa
 const SIDECHAIN_EXCLUDED = new Set(['N', 'C', 'O', 'OXT', 'H', 'HA', 'H1', 'H2', 'H3']);
 const NUCLEIC_BACKBONE = new Set(['P', 'OP1', 'OP2', 'OP3', 'O1P', 'O2P', 'O3P', "O5'", "C5'", "O3'"]);
 
+// Builds sphere and cylinder instances for one model. `context.atomOffset` shifts every atom
+// index so that several structures can share the renderer's atom color and flag buffers.
 export function buildScene(model, structure, display, context = {}) {
   const atoms = model.atoms;
   const count = atoms.length;
@@ -14,12 +16,14 @@ export function buildScene(model, structure, display, context = {}) {
   const visible = new Uint8Array(count);
   const focus = context.focusResidues ?? new Set();
   const emphasis = context.emphasisResidues ?? new Set();
+  const offset = context.atomOffset ?? 0;
   const chainVisible = (chain) => !display.visibleChains || display.visibleChains.has(chain);
+  const residueVisible = (residue) => chainVisible(residue.chain) && (!display.residueFilter || display.residueFilter.has(residue.key));
 
   let cartoon = null;
   if (display.polymer === 'cartoon') {
     cartoon = context.cartoon ?? buildCartoon(model, {
-      include: (residue) => chainVisible(residue.chain),
+      include: residueVisible,
       widthScale: display.cartoonWidth,
       quality: display.cartoonQuality,
     });
@@ -30,6 +34,7 @@ export function buildScene(model, structure, display, context = {}) {
     if (!chainVisible(atom.chain)) continue;
     if (atom.isHydrogen && !display.showHydrogen) continue;
     const residue = model.residues[model.atomResidue[index]];
+    if (display.residueFilter && !display.residueFilter.has(residue.key) && (residue.kind === 'protein' || residue.kind === 'nucleic')) continue;
     styles[index] = atomStyle(atom, residue, display, cartoon, focus.has(residue.key) || emphasis.has(residue.key));
     if (styles[index]) visible[index] = 1;
   }
@@ -48,7 +53,7 @@ export function buildScene(model, structure, display, context = {}) {
     if (!style) continue;
     const radius = atomRadius(atoms[index], style, display);
     if (radius <= 0) continue;
-    writeSphere(spheres, atoms[index], radius, index);
+    writeSphere(spheres, atoms[index], radius, index + offset);
   }
 
   const cylinders = createInstanceWriter(CYLINDER_STRIDE, Math.max(64, model.bonds.length));
@@ -61,25 +66,25 @@ export function buildScene(model, structure, display, context = {}) {
     const a = atoms[bond.a];
     const b = atoms[bond.b];
     if (bond.kind === 'metal') {
-      writeCylinder(cylinders, [a.x, a.y, a.z], [b.x, b.y, b.z], Math.min(radius, 0.07), bond.a, bond.b, CYLINDER_STYLE.dashed);
+      writeCylinder(cylinders, [a.x, a.y, a.z], [b.x, b.y, b.z], Math.min(radius, 0.07), bond.a + offset, bond.b + offset, CYLINDER_STYLE.dashed);
     } else {
-      writeCylinder(cylinders, [a.x, a.y, a.z], [b.x, b.y, b.z], radius, bond.a, bond.b, 0);
+      writeCylinder(cylinders, [a.x, a.y, a.z], [b.x, b.y, b.z], radius, bond.a + offset, bond.b + offset, 0);
     }
   }
-  if (display.polymer === 'trace') writeTrace(cylinders, model, display, chainVisible);
+  if (display.polymer === 'trace') writeTrace(cylinders, model, display, residueVisible, offset);
   if (cartoon) {
     for (const connector of cartoon.cylinders) {
-      writeCylinder(cylinders, connector.a, connector.b, connector.radius, connector.atomA, connector.atomB, CYLINDER_STYLE.roundCaps);
+      writeCylinder(cylinders, connector.a, connector.b, connector.radius, connector.atomA + offset, connector.atomB + offset, CYLINDER_STYLE.roundCaps);
     }
   }
   for (const line of context.lines ?? []) {
     let style = CYLINDER_STYLE.colorOverride | CYLINDER_STYLE.noPick;
     if (line.dashed !== false) style |= CYLINDER_STYLE.dashed;
     if (line.caps) style |= CYLINDER_STYLE.roundCaps;
-    writeCylinder(cylinders, line.from, line.to, line.radius ?? 0.07, line.atomA ?? 0, line.atomB ?? 0, style, line.color);
+    writeCylinder(cylinders, line.from, line.to, line.radius ?? 0.07, (line.atomA ?? 0) + offset, (line.atomB ?? 0) + offset, style, line.color);
   }
   for (const marker of context.markers ?? []) {
-    writeSphere(spheres, { x: marker.position[0], y: marker.position[1], z: marker.position[2] }, marker.radius, marker.atom);
+    writeSphere(spheres, { x: marker.position[0], y: marker.position[1], z: marker.position[2] }, marker.radius, (marker.atom ?? 0) + offset);
   }
 
   return {
@@ -89,6 +94,18 @@ export function buildScene(model, structure, display, context = {}) {
     styles,
     visible,
   };
+}
+
+// Cylinder instances for free-standing lines (measurements that may join two structures).
+export function buildLines(lines) {
+  const cylinders = createInstanceWriter(CYLINDER_STRIDE, Math.max(8, lines.length));
+  for (const line of lines) {
+    let style = CYLINDER_STYLE.colorOverride | CYLINDER_STYLE.noPick;
+    if (line.dashed !== false) style |= CYLINDER_STYLE.dashed;
+    if (line.caps) style |= CYLINDER_STYLE.roundCaps;
+    writeCylinder(cylinders, line.from, line.to, line.radius ?? 0.07, 0, 0, style, line.color);
+  }
+  return { data: cylinders.finish(), count: cylinders.count };
 }
 
 const STYLE = {
@@ -166,19 +183,19 @@ function bondRadius(styleA, styleB, display) {
   return 0;
 }
 
-function writeTrace(cylinders, model, display, chainVisible) {
+function writeTrace(cylinders, model, display, residueVisible, offset = 0) {
   const radius = 0.4 * (display.bondScale ?? 1);
   let previous = null;
   for (const residue of model.residues) {
     const usable = (residue.kind === 'protein' && residue.backbone.CA) || (residue.kind === 'nucleic' && residue.representative);
-    if (!usable || !chainVisible(residue.chain)) {
+    if (!usable || !residueVisible(residue)) {
       previous = null;
       continue;
     }
     if (previous && residue.linkedToPrevious && previous.chain === residue.chain) {
       const a = previous.representative;
       const b = residue.representative;
-      writeCylinder(cylinders, [a.x, a.y, a.z], [b.x, b.y, b.z], radius, a.id, b.id, 0);
+      writeCylinder(cylinders, [a.x, a.y, a.z], [b.x, b.y, b.z], radius, a.id + offset, b.id + offset, 0);
     }
     previous = residue;
   }

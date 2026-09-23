@@ -74,6 +74,7 @@ graph LR
     Interactions[interactions.js]
     Surface[surface-worker.js<br/>surface.js + electrostatics.js]
     Proteomics[proteomics.js]
+    Compare[compare.js<br/>align.js + superpose.js]
     Views[sequence-view.js<br/>plots.js]
 
     App --> Parse --> Structure --> DSSP
@@ -85,6 +86,7 @@ graph LR
     App -. lazy .-> Interactions
     App -. worker .-> Surface
     App -. lazy .-> Proteomics
+    App --> Compare
     App --> Views
 ```
 
@@ -132,6 +134,15 @@ atomic writes. The cache has no expiry.
   followed only within the same host.
 
 ## Data Model
+
+The application state holds a list of **entries**, one per loaded structure,
+and the active entry. An entry holds the structure plus everything that
+belongs to it: display and color settings, surface, selection, focus, labels,
+interactions, SASA, proteomics overlays, PAE, visibility, its cumulative rigid
+transform, and the last superposition in which it moved (pairs, per-residue
+deviation and lDDT, statistics). The per-structure fields on the state object
+(`state.structure`, `state.display`, `state.selection`, …) are accessors for
+the active entry, so single-structure code paths are unchanged.
 
 A **structure** holds:
 
@@ -232,7 +243,11 @@ graph LR
   normals. The per-vertex atom index looks up the atom's color and
   selection flags, so recoloring and selection never rebuild geometry.
 - **Per-atom buffers.** Color and flags (selected, hovered, dimmed) are
-  storage buffers indexed by atom ID.
+  storage buffers indexed by atom ID. Several structures share them: every
+  rendered model (the active model of each entry, or all models of an
+  overlaid ensemble) gets a contiguous slice. Sphere and cylinder instances
+  carry global indices; cartoon and surface meshes keep local indices and a
+  per-mesh atom-offset uniform, so moving a slice never re-uploads a mesh.
 - **Depth.** Reversed-Z on `depth32float`.
 - **Clipping.** Front and back view-depth planes are applied in the shaders.
 - **Transparency.** Transparent surfaces use a depth pre-pass followed by a
@@ -267,6 +282,40 @@ ambient occlusion or outlines.
   - Arrowheads use a step face.
   - Nucleic acids get a phosphate-trace tube, base-ring slabs and
     glycosidic connectors.
+
+## Comparison Design
+
+- **Residue pairing** (`align.js`, `compare.js`).
+  - Gotoh global alignment with affine gaps and free end gaps. Protein scores
+    blend BLOSUM62 with a secondary-structure matrix (30% weight; helix and
+    strand gap opening 18, otherwise 6; extension 1), as in ChimeraX
+    matchmaker. Nucleic acids use identity scoring with T equal to U.
+  - Chains are paired by alignment score. Several near-top chain pairs seed
+    candidate pairings; each extends to the other chains by nearest centroid
+    after the seed fit, and the pairing whose fit keeps the most residues
+    wins, with matching chain IDs as the tie-breaker.
+  - Alternatives: UniProt numbering (SIFTS/DBREF segments against AlphaFold DB
+    numbering) and shared residue keys (models of one ensemble).
+- **Fitting** (`superpose.js`).
+  - Horn's closed-form quaternion solution on Cα (protein) or C4′ (nucleic
+    acid) atoms; the quaternion form cannot produce a reflection.
+  - Iterative pruning as in ChimeraX: each cycle removes the lesser of 10% of
+    the remaining pairs and half of those beyond 2 Å, until none are beyond.
+  - Candidate fits on all chains and on each chain pair are scored by how
+    many pairs they bring within 2 Å.
+- **Scores.** RMSD (core and all pairs); TM-score maximized with the TM-score
+  program's search (fragment seeds of decreasing length, refit on pairs
+  closer than d0_search), normalized by the reference length; lDDT over
+  paired principal atoms (15 Å inclusion radius, thresholds 0.5, 1, 2 and
+  4 Å); per-chain RMSD and TM-score; RMSF about the mean for ensembles.
+- **Moving structures.** Superposition rewrites the moving entry's atom
+  coordinates and composes its cumulative transform, so every downstream
+  feature (cartoon, surfaces, labels, measurements, picking) needs no special
+  case. **Reset positions** applies the inverse. Assembly operators are defined
+  in the deposited frame, so changing an assembly first undoes the transform.
+- **Correspondence.** Residue-key maps between entries (direct, or through a
+  shared reference) drive mirrored selection, hover and focus, deviation and
+  lDDT coloring of both structures, and the aligned sequence row.
 
 ## Interaction Design
 
@@ -315,9 +364,10 @@ The canvas fills the window, and panels float over it.
 
 ## Known Limitations
 
-See `roadmap.md` §5. In particular:
+See `roadmap.md` §6. In particular:
 
-- One structure at a time.
+- Superposition needs sequence (or UniProt) correspondence; there is no
+  structure-only alignment yet.
 - Electrostatics are qualitative (formal charges, ε = 4r).
 - Ligand chemistry is inferred from geometry.
 - The Ramachandran regions are approximate.

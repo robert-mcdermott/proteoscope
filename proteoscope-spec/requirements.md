@@ -322,3 +322,17 @@ selection, distance measurement, and PNG export.
 3. WHEN `_struct_conn` records are read, THE System SHALL create bonds only for covalent, disulfide and metal-coordination records
 4. WHEN geometry indicates inter-chain disulfides or metal coordination, THE System SHALL add those bonds
 5. WHEN legacy PDB files define REMARK 350 assemblies, THE System SHALL offer them like mmCIF assemblies
+
+### Requirement 24: Structure Comparison
+
+**User Story:** As a structural biologist, I want to superpose structures and see where they differ, so that I can compare predictions with experiments, apo with holo forms, mutants with wild type, and the models of an ensemble.
+
+#### Acceptance Criteria
+
+1. WHEN the user opens a structure with *Add to the scene* ticked, drops several files, passes several command-line files or follows a `#fetch=ID,ID` link, THE System SHALL show all structures together, each with its own style, and let the user activate, hide or remove each one
+2. WHEN structures are superposed, THE System SHALL pair residues by sequence alignment (or UniProt numbering), fit principal atoms with iterative pruning of pairs beyond 2 Å, and report RMSD, TM-score, lDDT, identity and per-chain statistics
+3. WHEN the user fits on selected residues, THE System SHALL use only those pairs for the fit and report deviations for all pairs
+4. WHEN a comparison exists, THE System SHALL color either structure by Cα deviation or lDDT, show the deviation of a hovered residue, mirror selection, hover and focus onto aligned residues, and show the aligned sequence with substitutions marked
+5. WHEN the user compares an experimental entry with AlphaFold, THE System SHALL fetch the AlphaFold DB model for each UniProt accession, superpose it by UniProt numbering and trim it to the aligned span
+6. WHEN a multi-model entry is overlaid, THE System SHALL superpose all models on their shared core, display them together and report per-residue RMSF
+7. WHEN positions are reset or an assembly is changed, THE System SHALL restore the deposited coordinates

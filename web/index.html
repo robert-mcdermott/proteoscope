@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#050708" />
     <title>Proteoscope</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=wave1" />
+    <link rel="stylesheet" href="/styles.css?v=wave2" />
   </head>
   <body>
     <main id="app" class="left-open right-open sequence-open">
@@ -54,6 +54,9 @@
                 <input id="fetch-input" type="text" autocomplete="off" spellcheck="false" placeholder="PDB ID or UniProt accession" aria-label="PDB ID or UniProt accession" />
                 <button type="submit" class="primary">Fetch</button>
               </form>
+              <label class="check add-toggle" title="Keep the structures already open and add the next one to the scene, for example to superpose them">
+                <input id="add-mode" type="checkbox" /> Add to the scene instead of replacing
+              </label>
               <p class="hint">RCSB PDB (e.g. <button type="button" class="link" data-fetch="4HHB">4HHB</button>, <button type="button" class="link" data-fetch="6OIM">6OIM</button>) or AlphaFold DB (e.g. <button type="button" class="link" data-fetch="P04637">P04637</button>).</p>
               <label class="field">
                 <span>Bundled examples</span>
@@ -64,9 +67,15 @@
                 <span class="upload-icon" aria-hidden="true">+</span>
                 <span>
                   <strong>Open local file</strong>
-                  <small>.pdb, .cif, .mmcif (optionally .gz) or AlphaFold PAE .json. You can also drop files anywhere. Files stay on this computer.</small>
+                  <small>.pdb, .cif, .mmcif (optionally .gz) or AlphaFold PAE .json. Drop several files to compare them. Files stay on this computer.</small>
                 </span>
               </label>
+            </div>
+
+            <div class="group" id="structures-group" hidden>
+              <h3>Structures in scene <span id="structure-count" class="count-badge"></span></h3>
+              <div id="structure-list" class="structure-list"></div>
+              <p class="hint">Click a structure to make it active: the panels and the sequence follow it. Superpose structures in the Analysis tab.</p>
             </div>
 
             <div class="group">
@@ -111,6 +120,13 @@
           </section>
 
           <section data-panel="style" class="panel-section" hidden>
+            <div id="style-scope" class="group style-scope" hidden>
+              <h3>Apply style to</h3>
+              <div class="segmented two" role="group" aria-label="Apply style changes to">
+                <button type="button" data-style-scope="all" class="is-active">All structures</button>
+                <button type="button" data-style-scope="active">Only active</button>
+              </div>
+            </div>
             <div class="group">
               <h3>Representation</h3>
               <div class="segmented three" role="group" aria-label="Representation preset">
@@ -244,6 +260,27 @@
           </section>
 
           <section data-panel="analysis" class="panel-section" hidden>
+            <div class="group" id="compare-group">
+              <h3>Compare structures</h3>
+              <p id="compare-hint" class="hint">Tick <em>Add to the scene</em> in the Structure tab and open a second structure to superpose it, or compare an experimental structure with its AlphaFold model.</p>
+              <div id="compare-controls" class="field-grid" hidden>
+                <label class="field"><span>Reference (fixed)</span><select id="compare-reference"></select></label>
+                <label class="field"><span>Moving</span><select id="compare-mobile"></select></label>
+                <label class="field"><span>Reference chain</span><select id="compare-ref-chain"></select></label>
+                <label class="field"><span>Moving chain</span><select id="compare-mob-chain"></select></label>
+              </div>
+              <div class="toggles" hidden>
+                <label title="Fit only on the residues selected in the reference, for example one domain or a binding site, so a hinge motion elsewhere shows up as deviation"><input id="compare-fit-selection" type="checkbox" /> Fit on selected residues</label>
+              </div>
+              <div class="button-row">
+                <button id="compare-run" type="button" class="primary" hidden>Superpose</button>
+                <button id="compare-reset" type="button" hidden>Reset positions</button>
+                <button id="compare-alphafold" type="button" disabled>Compare with AlphaFold</button>
+                <button id="compare-models" type="button" disabled>Overlay models</button>
+              </div>
+              <div id="compare-result" class="result-box" hidden></div>
+            </div>
+
             <div class="group">
               <h3>Interactions</h3>
               <p class="hint">Double-click a ligand or residue (or select it and press <kbd>F</kbd>) to focus it. Non-covalent contacts to its surroundings are detected and drawn.</p>
@@ -377,7 +414,7 @@
       <aside id="right-panel" class="sidebar right" aria-label="Chains, selection and measurements">
         <section class="card" id="chains-card">
           <header>
-            <span>Chains</span>
+            <span id="chains-title">Chains</span>
             <div class="card-actions">
               <button id="chains-all" type="button" title="Show all chains">All</button>
               <button id="chains-invert" type="button" title="Invert chain visibility">Invert</button>
@@ -469,6 +506,7 @@
         <header>
           <button id="sequence-toggle" type="button" class="sequence-toggle" aria-expanded="true">Sequence</button>
           <select id="sequence-chain" aria-label="Sequence chain"></select>
+          <select id="sequence-partner" aria-label="Show the aligned sequence of another structure" title="Show the aligned residues of a superposed structure under this sequence" hidden></select>
           <span id="sequence-info" class="sequence-info"></span>
         </header>
         <div id="sequence-track" class="sequence-track"></div>
@@ -527,6 +565,7 @@
                 <div><dt>Click</dt><dd>Select residue</dd></div>
                 <div><dt>Shift-click</dt><dd>Add to selection</dd></div>
                 <div><dt>Double-click</dt><dd>Focus residue or ligand</dd></div>
+                <div><dt>Click another structure</dt><dd>Make it the active structure</dd></div>
               </dl>
             </div>
             <div>
@@ -550,6 +589,6 @@
         </form>
       </dialog>
     </main>
-    <script type="module" src="/app.js?v=wave1"></script>
+    <script type="module" src="/app.js?v=wave2"></script>
   </body>
 </html>

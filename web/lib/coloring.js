@@ -29,10 +29,17 @@ export const COLOR_SCHEMES = [
   { id: 'exposure', label: 'Solvent exposure (relative SASA)', group: 'Analysis' },
   { id: 'coverage', label: 'Peptide coverage', group: 'Proteomics' },
   { id: 'data', label: 'Custom residue data', group: 'Proteomics' },
+  { id: 'structure', label: 'Structure (one color each)', group: 'Comparison' },
+  { id: 'deviation', label: 'Deviation after superposition', group: 'Comparison' },
+  { id: 'lddt', label: 'Local agreement (lDDT)', group: 'Comparison' },
+  { id: 'rmsf', label: 'Ensemble flexibility (RMSF)', group: 'Comparison' },
   { id: 'uniform', label: 'Uniform', group: 'Other' },
 ];
 
-const STRUCTURAL_SCHEMES = new Set(['chain', 'entity', 'rainbow', 'secondary', 'moltype', 'residue', 'hydrophobicity', 'nucleotide', 'uniform']);
+const STRUCTURAL_SCHEMES = new Set(['chain', 'entity', 'rainbow', 'secondary', 'moltype', 'residue', 'hydrophobicity', 'nucleotide', 'uniform', 'structure']);
+// Per-residue comparison schemes leave ligands in element colors rather than graying them out.
+const COMPARISON_SCHEMES = new Set(['deviation', 'lddt', 'rmsf']);
+export const DEFAULT_DEVIATION_RANGE = { min: 0, max: 4 };
 const NEUTRAL = [0.5, 0.53, 0.57];
 const LIGAND_CARBON = [0.36, 0.86, 0.5];
 
@@ -49,13 +56,16 @@ export function computeAtomColors(model, structure, settings, extras = {}) {
   const range = resolveRange(scheme, model, settings, extras);
   const rainbowPositions = scheme === 'rainbow' ? rainbowFractions(model) : null;
   const uniform = settings.uniformColor ? hexColor(settings.uniformColor) : [0.72, 0.76, 0.8];
+  const structureColor = extras.structureColor ?? chainPaletteColor(0, palette);
 
   for (let index = 0; index < atoms.length; index += 1) {
     const atom = atoms[index];
     const residue = model.residues[model.atomResidue[index]];
     let color;
     const polymer = atom.kind === 'protein' || atom.kind === 'nucleic';
-    if (!polymer && STRUCTURAL_SCHEMES.has(scheme)) {
+    if (!polymer && scheme === 'structure') {
+      color = atom.element === 'C' || !heteroByElement ? [...structureColor] : [...elementInfo(atom.element).color];
+    } else if (!polymer && (STRUCTURAL_SCHEMES.has(scheme) || COMPARISON_SCHEMES.has(scheme))) {
       color = atom.kind === 'ligand' && atom.element === 'C' ? [...LIGAND_CARBON] : [...elementInfo(atom.element).color];
     } else {
       color = schemeColor(scheme, atom, residue, {
@@ -68,6 +78,7 @@ export function computeAtomColors(model, structure, settings, extras = {}) {
         colormap: settings.colormap,
         model,
         uniform,
+        structureColor,
       });
       if (heteroByElement && STRUCTURAL_SCHEMES.has(scheme) && atom.element !== 'C' && polymer && !isBackboneForCartoon(atom)) {
         color = [...elementInfo(atom.element).color];
@@ -128,6 +139,18 @@ function schemeColor(scheme, atom, residue, context) {
       if (scheme === 'coverage' && value <= 0) return [...NEUTRAL];
       return sampleColormap(context.colormap || (scheme === 'coverage' ? 'heat' : 'viridis'), normalize(value, context.range));
     }
+    case 'structure':
+      return [...context.structureColor];
+    case 'deviation':
+    case 'rmsf': {
+      const value = context.residueValues?.get(residue?.key);
+      if (!Number.isFinite(value)) return [...NEUTRAL];
+      return sampleColormap(context.colormap || 'bwr', normalize(value, context.range));
+    }
+    case 'lddt': {
+      const value = context.residueValues?.get(residue?.key);
+      return Number.isFinite(value) ? plddtColor(value * 100) : [...NEUTRAL];
+    }
     case 'uniform':
       return [...context.uniform];
     default:
@@ -169,6 +192,13 @@ function resolveRange(scheme, model, settings, extras) {
     return { min: range.min, max: range.max };
   }
   if (scheme === 'exposure') return settings.range ?? { min: 0, max: 1 };
+  if (scheme === 'deviation') return settings.range ?? extras.range ?? DEFAULT_DEVIATION_RANGE;
+  if (scheme === 'rmsf') {
+    if (settings.range ?? extras.range) return settings.range ?? extras.range;
+    const values = [...(extras.residueValues?.values() ?? [])].filter(Number.isFinite).sort((a, b) => a - b);
+    const high = values.length ? values[Math.floor((values.length - 1) * 0.95)] : 1;
+    return { min: 0, max: Math.max(1, Math.ceil(high * 2) / 2) };
+  }
   if ((scheme === 'coverage' || scheme === 'data') && extras.residueValues) {
     if (settings.range) return settings.range;
     let min = Infinity;
@@ -273,6 +303,27 @@ function buildLegend(scheme, structure, settings, extras, range) {
       return extras.residueValues
         ? { type: 'gradient', title: extras.dataLabel || 'Custom data', colormap: settings.colormap || 'viridis', minLabel: formatValue(range.min), maxLabel: formatValue(range.max), note: 'Gray: no value' }
         : { type: 'note', title: 'Custom data', text: 'Load residue values in the Proteomics tab.' };
+    case 'deviation':
+      return extras.residueValues
+        ? { type: 'gradient', title: 'Cα deviation (Å)', colormap: settings.colormap || 'bwr', minLabel: formatValue(range.min), maxLabel: `≥ ${formatValue(range.max)}`, note: extras.comparisonNote || 'After superposition · gray: not aligned' }
+        : { type: 'note', title: 'Deviation', text: 'Superpose two structures in the Analysis tab.' };
+    case 'lddt':
+      return extras.residueValues
+        ? {
+          type: 'categorical',
+          title: 'lDDT vs reference',
+          items: [
+            { label: 'Very high (> 0.9)', color: PLDDT_BANDS[0].color },
+            { label: 'High (0.7–0.9)', color: PLDDT_BANDS[1].color },
+            { label: 'Low (0.5–0.7)', color: PLDDT_BANDS[2].color },
+            { label: 'Very low (< 0.5)', color: PLDDT_BANDS[3].color },
+          ],
+        }
+        : { type: 'note', title: 'lDDT', text: 'Superpose two structures in the Analysis tab.' };
+    case 'rmsf':
+      return extras.residueValues
+        ? { type: 'gradient', title: 'RMSF across models (Å)', colormap: settings.colormap || 'bwr', minLabel: '0', maxLabel: `≥ ${formatValue(range.max)}`, note: 'Cα, after core superposition' }
+        : { type: 'note', title: 'RMSF', text: 'Overlay the models of an ensemble in the Analysis tab.' };
     default:
       return null;
   }

@@ -284,3 +284,23 @@ the completed v0.1 application.
 
 - [x] 35. Documentation: README, design, requirements, review and roadmap
   - _Requirements: 15_
+
+## Wave 2, first slice: structure comparison
+
+- [x] 36. Multiple structures per scene: entries with per-structure state, add-to-scene loading, structures list, style scope, shared atom buffers with per-mesh offsets, cross-structure picking and measurements
+  - _Requirements: 24_
+
+- [x] 37. Sequence alignment (BLOSUM62 + secondary structure, affine and free end gaps) and chain pairing for complexes and homo-oligomers
+  - _Requirements: 24_
+
+- [x] 38. Least-squares superposition with pruning, TM-score search, lDDT, RMSF, per-chain statistics, and tests on synthetic and real structures
+  - _Requirements: 24_
+
+- [x] 39. Comparison views: deviation, lDDT, structure and RMSF color schemes; mirrored selection, hover and focus; aligned sequence row; trimming to the aligned span
+  - _Requirements: 24_
+
+- [x] 40. Compare with AlphaFold (UniProt numbering) and ensemble overlay
+  - _Requirements: 21, 24_
+
+- [x] 41. Documentation: README comparison section, design, roadmap, screenshots
+  - _Requirements: 15, 24_

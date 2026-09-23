@@ -42,14 +42,19 @@ export function createSequenceView(container, callbacks = {}) {
     return keys.slice(Math.min(a, b), Math.max(a, b) + 1);
   }
 
-  function render(info, colorForResidue) {
+  // `options.partner` ({ name, lookup(key) → { code, label } | null }) adds a second row with the
+  // aligned residue of another structure under each residue; substitutions and gaps are marked.
+  function render(info, colorForResidue, options = {}) {
     sequence = info;
     spans = new Map();
     container.replaceChildren();
+    container.classList.toggle('has-partner', Boolean(options.partner));
     if (!info) return;
+    const partner = options.partner ?? null;
     const fragment = document.createDocumentFragment();
     let block = null;
     let residuesInBlock = null;
+    let partnerInBlock = null;
     let position = 0;
     for (const item of info.items) {
       if (item.gap) {
@@ -70,6 +75,11 @@ export function createSequenceView(container, callbacks = {}) {
         residuesInBlock = document.createElement('span');
         residuesInBlock.className = 'residues';
         block.appendChild(residuesInBlock);
+        if (partner) {
+          partnerInBlock = document.createElement('span');
+          partnerInBlock.className = 'residues partner-row';
+          block.appendChild(partnerInBlock);
+        }
         fragment.appendChild(block);
       }
       const span = document.createElement('span');
@@ -86,6 +96,7 @@ export function createSequenceView(container, callbacks = {}) {
         span.title = `${item.resName || item.code}: not modeled in the structure`;
       }
       residuesInBlock.appendChild(span);
+      if (partner) partnerInBlock.appendChild(partnerSpan(item, partner));
       position += 1;
     }
     container.appendChild(fragment);
@@ -121,6 +132,26 @@ export function createSequenceView(container, callbacks = {}) {
   }
 
   return { render, recolor, setSelection: applySelection, setHover, scrollTo };
+}
+
+function partnerSpan(item, partner) {
+  const span = document.createElement('span');
+  span.className = 'seq-partner';
+  const match = item.residue ? partner.lookup(item.residue.key) : null;
+  if (!item.residue) {
+    span.textContent = ' ';
+  } else if (!match) {
+    span.textContent = '–';
+    span.classList.add('is-gap');
+    span.title = `${partner.name}: no aligned residue`;
+  } else {
+    span.textContent = match.code;
+    const substituted = match.code !== item.code;
+    span.classList.toggle('is-mismatch', substituted);
+    span.title = `${partner.name}: ${match.label}${substituted ? ` (${item.code}→${match.code})` : ''}`;
+    if (item.residue) span.dataset.key = item.residue.key;
+  }
+  return span;
 }
 
 function ssColor(ss) {

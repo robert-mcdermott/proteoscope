@@ -5,13 +5,16 @@ import {
   MAX_ASSEMBLY_ATOMS,
   assignSecondary,
   buildSearchItems,
+  computeBounds,
   deriveStructure,
   materializeAssemblyModels,
   prepareAssemblyEstimates,
   residueForUniprotPosition,
   uniprotPositionForResidue,
 } from './lib/structure.js';
-import { buildScene, focusNeighborhood } from './lib/scene.js';
+import { buildLines, buildScene, focusNeighborhood } from './lib/scene.js';
+import { compareStructures, polymerChainResidues, superposeEnsemble } from './lib/compare.js';
+import { composeTransforms, invertTransform, isIdentityTransform, transformPoint } from './lib/superpose.js';
 import { buildCartoon } from './lib/cartoon.js';
 import { COLOR_SCHEMES, computeAtomColors, titleCase } from './lib/coloring.js';
 import {
@@ -63,6 +66,24 @@ const els = {
   fetchInput: document.querySelector('#fetch-input'),
   sampleSelect: document.querySelector('#sample-select'),
   fileInput: document.querySelector('#file-input'),
+  addMode: document.querySelector('#add-mode'),
+  structuresGroup: document.querySelector('#structures-group'),
+  structureList: document.querySelector('#structure-list'),
+  structureCount: document.querySelector('#structure-count'),
+  styleScope: document.querySelector('#style-scope'),
+  compareHint: document.querySelector('#compare-hint'),
+  compareControls: document.querySelector('#compare-controls'),
+  compareReference: document.querySelector('#compare-reference'),
+  compareMobile: document.querySelector('#compare-mobile'),
+  compareRefChain: document.querySelector('#compare-ref-chain'),
+  compareMobChain: document.querySelector('#compare-mob-chain'),
+  compareFitSelection: document.querySelector('#compare-fit-selection'),
+  compareRun: document.querySelector('#compare-run'),
+  compareReset: document.querySelector('#compare-reset'),
+  compareAlphaFold: document.querySelector('#compare-alphafold'),
+  compareModels: document.querySelector('#compare-models'),
+  compareResult: document.querySelector('#compare-result'),
+  chainsTitle: document.querySelector('#chains-title'),
   metaMethod: document.querySelector('#meta-method'),
   metaResolution: document.querySelector('#meta-resolution'),
   metaRFree: document.querySelector('#meta-rfree'),
@@ -169,6 +190,7 @@ const els = {
   sequencePanel: document.querySelector('#sequence-panel'),
   sequenceToggle: document.querySelector('#sequence-toggle'),
   sequenceChain: document.querySelector('#sequence-chain'),
+  sequencePartner: document.querySelector('#sequence-partner'),
   sequenceInfo: document.querySelector('#sequence-info'),
   sequenceTrack: document.querySelector('#sequence-track'),
   tooltip: document.querySelector('#tooltip'),
@@ -224,26 +246,62 @@ const INTERACTION_FALLBACK_TYPES = [
   { id: 'water-bridge', label: 'Water bridge', color: '#7ec8ff' },
 ];
 
+const DEFAULT_DISPLAY = {
+  polymer: 'cartoon',
+  ligand: 'ball-stick',
+  sidechains: 'focus',
+  showWater: false,
+  showHydrogen: false,
+  atomScale: 1,
+  bondScale: 1,
+  cartoonWidth: 1,
+  cartoonQuality: 6,
+  visibleChains: null,
+  residueFilter: null,
+  residueFilterKey: '',
+};
+
+// Colors that tell structures apart in the "Structure" scheme and the structures list.
+const STRUCTURE_COLORS = ['#5aa9f0', '#f39c3d', '#5fd08e', '#e8659c', '#a78bfa', '#e8d44d', '#4fd1d9', '#c98b5c'].map(hexColor);
+const MAX_OVERLAY_MODELS = 60;
+const COMPARISON_SCHEMES = new Set(['deviation', 'lddt', 'rmsf']);
+const DATA_SCHEMES = new Set(['coverage', 'data', 'exposure', 'deviation', 'lddt', 'rmsf']);
+
+// Everything that belongs to one loaded structure. `state.structure`, `state.display`,
+// `state.selection` and the other per-structure fields below read and write the active entry.
+function emptyProteomics() {
+  return { coverage: null, data: null, dataLabel: '', sites: [], siteOverrides: null, crosslinks: [] };
+}
+
+function entryDefaults() {
+  return {
+    structure: null,
+    sourceLabel: '',
+    activeModel: 0,
+    display: { ...DEFAULT_DISPLAY },
+    color: { scheme: 'chain', palette: 'vivid', colormap: '', uniformColor: '#b8c4d0', heteroByElement: true },
+    surface: { kind: 'off', color: 'scheme', opacity: 1, key: '', pending: 0, data: null },
+    selection: new Set(),
+    selectedAtom: null,
+    focus: null,
+    labels: new Set(),
+    sasa: null,
+    proteomics: emptyProteomics(),
+    pae: null,
+    paeSelection: null,
+  };
+}
+
+const ENTRY_FIELDS = Object.keys(entryDefaults());
+
 const state = {
   samples: [],
   startup: null,
-  structure: null,
-  sourceLabel: '',
-  activeModel: 0,
-  display: {
-    polymer: 'cartoon',
-    ligand: 'ball-stick',
-    sidechains: 'focus',
-    showWater: false,
-    showHydrogen: false,
-    atomScale: 1,
-    bondScale: 1,
-    cartoonWidth: 1,
-    cartoonQuality: 6,
-    visibleChains: null,
-  },
-  color: { scheme: 'chain', palette: 'vivid', colormap: '', uniformColor: '#b8c4d0', heteroByElement: true },
-  surface: { kind: 'off', color: 'scheme', opacity: 1, key: '', pending: 0, data: null },
+  entries: [],
+  active: null,
+  nextEntryId: 1,
+  defaults: entryDefaults(),
+  styleScope: 'all',
   lighting: { preset: 'standard', ...LIGHTING_PRESETS.standard },
   background: 'dark',
   clip: { near: 0, far: 1 },
@@ -251,25 +309,20 @@ const state = {
   camera: createCamera(),
   cameraAnimation: null,
   spin: false,
-  selection: new Set(),
-  selectedAtom: null,
-  hover: { atom: -1, residueKey: null },
-  focus: null,
+  hover: { atom: -1, residueKey: null, entry: null },
   measureMode: null,
   measurePending: [],
   measurements: [],
-  labels: new Set(),
-  interactions: { list: [], title: '', enabled: new Set(INTERACTION_FALLBACK_TYPES.map((type) => type.id)) },
+  interactionEnabled: new Set(INTERACTION_FALLBACK_TYPES.map((type) => type.id)),
   interactionTypes: INTERACTION_FALLBACK_TYPES,
-  sasa: null,
-  proteomics: { coverage: null, data: null, dataLabel: '', sites: [], siteOverrides: null, crosslinks: [] },
-  pae: null,
-  paeSelection: null,
-  legend: null,
   atomColors: null,
   atomFlags: null,
-  sceneResult: null,
-  cartoonKey: '',
+  parts: [],
+  partByModel: new Map(),
+  atomTotal: 0,
+  sceneBounds: null,
+  meshSources: new Map(),
+  correspondences: new Map(),
   dirty: { scene: true, colors: true, flags: true, render: true, surface: false, panels: true },
   pointers: new Map(),
   drag: null,
@@ -279,6 +332,31 @@ const state = {
   renderer: null,
   workers: null,
 };
+
+for (const field of ENTRY_FIELDS) {
+  Object.defineProperty(state, field, {
+    enumerable: true,
+    get() {
+      return (state.active ?? state.defaults)[field];
+    },
+    set(value) {
+      (state.active ?? state.defaults)[field] = value;
+    },
+  });
+}
+
+// Interaction lists belong to the active structure; the enabled types are shared.
+Object.defineProperty(state, 'interactions', {
+  enumerable: true,
+  get() {
+    const entry = state.active;
+    return { list: entry?.interactions.list ?? [], title: entry?.interactions.title ?? '', enabled: state.interactionEnabled };
+  },
+  set(value) {
+    if (value.enabled) state.interactionEnabled = value.enabled;
+    if (state.active) state.active.interactions = { list: value.list ?? [], title: value.title ?? '' };
+  },
+});
 
 let sequenceView = null;
 let ramaPoints = null;
@@ -319,9 +397,20 @@ async function init() {
   const hashRequest = new URLSearchParams(location.hash.slice(1));
   const fetchRequest = hashRequest.get('fetch') || hashRequest.get('pdb') || hashRequest.get('af') || hashRequest.get('uniprot');
   if (startup?.files?.length) {
-    await loadStructureFromURL(startup.files[0].url, startup.files[0].name);
+    await guardedLoad(async () => {
+      await loadStructureFromURL(startup.files[0].url, startup.files[0].name);
+      for (const file of startup.files.slice(1)) await loadStructureFromURL(file.url, file.name, { add: true });
+      if (startup.files.length > 1) setActiveEntry(state.entries[0]);
+    });
   } else if (fetchRequest) {
-    await fetchStructure(fetchRequest);
+    // #fetch=4AKE,1AKE loads several entries; adding &superpose fits the others onto the first.
+    const ids = fetchRequest.split(',').map((id) => id.trim()).filter(Boolean);
+    await fetchStructure(ids[0]);
+    for (const id of ids.slice(1)) await fetchStructure(id, { add: true });
+    if (state.entries.length > 1) {
+      setActiveEntry(state.entries[0]);
+      if (hashRequest.has('superpose')) runSuperposition({ reference: state.entries[0], mobiles: state.entries.slice(1) });
+    }
   } else {
     const preferred = state.samples.find((sample) => sample.id.startsWith('1m17')) ?? state.samples[0];
     if (!preferred) throw new Error('No embedded structure files were found.');
@@ -406,7 +495,7 @@ function bindEvents() {
     const sample = state.samples.find((item) => item.id === els.sampleSelect.value);
     if (!sample) return;
     history.replaceState(null, '', location.pathname + location.search);
-    await guardedLoad(() => loadStructureFromURL(sample.url, sample.name));
+    await guardedLoad(() => loadStructureFromURL(sample.url, sample.name, { add: els.addMode.checked }));
   });
   els.fileInput.addEventListener('change', async () => {
     const files = [...(els.fileInput.files ?? [])];
@@ -443,36 +532,47 @@ function bindEvents() {
   }
 
   els.surfaceKind.addEventListener('change', () => {
-    state.surface.kind = els.surfaceKind.value;
+    for (const entry of styleTargets()) entry.surface.kind = els.surfaceKind.value;
     refreshSurface();
   });
   els.surfaceColor.addEventListener('change', () => {
-    state.surface.color = els.surfaceColor.value;
-    applySurfaceColors();
+    for (const entry of styleTargets()) {
+      entry.surface.color = els.surfaceColor.value;
+      if (entry.id) applySurfaceColors(entry);
+    }
   });
   els.surfaceOpacity.addEventListener('input', () => {
-    state.surface.opacity = Number(els.surfaceOpacity.value);
-    els.surfaceOpacityValue.textContent = `${Math.round(state.surface.opacity * 100)}%`;
-    state.renderer.setMeshOpacity('surface', state.surface.opacity);
+    const opacity = Number(els.surfaceOpacity.value);
+    els.surfaceOpacityValue.textContent = `${Math.round(opacity * 100)}%`;
+    for (const entry of styleTargets()) {
+      entry.surface.opacity = opacity;
+      if (entry.id) state.renderer.setMeshOpacity(`surface:${entry.id}`, opacity);
+    }
     requestRender();
+  });
+  document.querySelectorAll('[data-style-scope]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.styleScope = button.dataset.styleScope;
+      renderStyleScope();
+    });
   });
 
   els.colorScheme.addEventListener('change', () => setColorScheme(els.colorScheme.value));
   els.chainPalette.addEventListener('change', () => {
-    state.color.palette = els.chainPalette.value;
+    for (const entry of styleTargets()) entry.color.palette = els.chainPalette.value;
     markColorsDirty();
     renderChains();
   });
   els.colormap.addEventListener('change', () => {
-    state.color.colormap = els.colormap.value;
+    for (const entry of styleTargets()) entry.color.colormap = els.colormap.value;
     markColorsDirty();
   });
   els.uniformColor.addEventListener('input', () => {
-    state.color.uniformColor = els.uniformColor.value;
+    for (const entry of styleTargets()) entry.color.uniformColor = els.uniformColor.value;
     markColorsDirty();
   });
   els.heteroElement.addEventListener('change', () => {
-    state.color.heteroByElement = els.heteroElement.checked;
+    for (const entry of styleTargets()) entry.color.heteroByElement = els.heteroElement.checked;
     markColorsDirty();
   });
 
@@ -550,6 +650,21 @@ function bindEvents() {
   els.modelSlider.addEventListener('input', () => setActiveModel(Number(els.modelSlider.value) - 1));
   els.modelPlay.addEventListener('click', toggleModelPlayback);
   els.sequenceChain.addEventListener('change', renderSequence);
+  els.sequencePartner.addEventListener('change', () => {
+    state.sequencePartnerChoice = els.sequencePartner.value;
+    renderSequence();
+  });
+
+  els.compareReference.addEventListener('change', () => populateCompareChains());
+  els.compareMobile.addEventListener('change', () => populateCompareChains());
+  els.compareRun.addEventListener('click', () => runSuperposition());
+  els.compareReset.addEventListener('click', resetComparedPositions);
+  els.compareAlphaFold.addEventListener('click', compareWithAlphaFold);
+  els.compareModels.addEventListener('click', toggleModelOverlay);
+  els.compareResult.addEventListener('click', (event) => {
+    const action = event.target.closest('[data-compare-action]')?.dataset.compareAction;
+    if (action) runCompareAction(action);
+  });
 
   els.interfaceRun.addEventListener('click', runInterfaceAnalysis);
   els.interactionsClear.addEventListener('click', () => {
@@ -559,7 +674,7 @@ function bindEvents() {
   });
   els.interactionsExport.addEventListener('click', exportInteractionsCSV);
   els.sasaRun.addEventListener('click', runSASA);
-  els.sasaColor.addEventListener('click', () => setColorScheme('exposure'));
+  els.sasaColor.addEventListener('click', () => setColorScheme('exposure', [state.active]));
   els.ramaChain.addEventListener('change', renderRamachandran);
   els.ramaCanvas.addEventListener('click', onRamaClick);
   els.profileChain.addEventListener('change', renderProfile);
@@ -625,12 +740,13 @@ async function guardedLoad(task) {
   }
 }
 
-async function fetchStructure(query) {
+async function fetchStructure(query, options = {}) {
   const request = normalizeFetchQuery(query);
   if (!request) {
     showToast(`"${query}" is not a PDB ID (e.g. 4HHB) or UniProt accession (e.g. P69905).`, true);
-    return;
+    return null;
   }
+  let entry = null;
   await guardedLoad(async () => {
     showLoading(`Fetching ${request.label}`);
     const response = await fetch(request.url);
@@ -646,27 +762,42 @@ async function fetchStructure(query) {
     }
     const text = await response.text();
     const filename = response.headers.get('X-Proteoscope-Filename') || request.filename;
-    await loadStructureFromText(text, filename, { source: request.label });
-    applyRemoteMetadata(response.headers.get('X-Proteoscope-Meta-B64'));
+    const add = options.add ?? els.addMode.checked;
+    entry = await loadStructureFromText(text, filename, { source: request.label, add, activate: options.activate });
+    entry.fetchId = request.id;
+    applyRemoteMetadata(response.headers.get('X-Proteoscope-Meta-B64'), entry);
     els.sampleSelect.value = '';
-    history.replaceState(null, '', `#fetch=${encodeURIComponent(request.id)}`);
+    updateLocationHash();
     const paeURL = response.headers.get('X-Proteoscope-Pae');
-    if (paeURL) loadPAEFromURL(paeURL);
+    if (paeURL) loadPAEFromURL(paeURL, entry);
   });
+  return entry;
 }
 
-function applyRemoteMetadata(encoded) {
-  if (!encoded || !state.structure) return;
+// Keeps a shareable #fetch=ID,ID[&superpose] link while every structure came from a fetch.
+function updateLocationHash() {
+  const ids = state.entries.map((entry) => entry.fetchId);
+  if (!ids.length || ids.some((id) => !id)) {
+    if (location.hash.includes('fetch=')) history.replaceState(null, '', location.pathname + location.search);
+    return;
+  }
+  const superposed = state.entries.some((entry) => entry.comparison && entry.comparison.referenceId === state.entries[0].id);
+  history.replaceState(null, '', `#fetch=${ids.map(encodeURIComponent).join(',')}${superposed ? '&superpose' : ''}`);
+}
+
+function applyRemoteMetadata(encoded, entry = state.active) {
+  if (!encoded || !entry) return;
   try {
     const bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
     const meta = JSON.parse(new TextDecoder().decode(bytes));
-    const structureMeta = state.structure.meta;
+    const structureMeta = entry.structure.meta;
     if (meta.uniprotDescription) {
       structureMeta.title = `${meta.entryId || structureMeta.code}: ${meta.uniprotDescription}${meta.gene ? ` (${meta.gene})` : ''}`;
     }
     if (meta.organismScientificName) structureMeta.organism = meta.organismScientificName;
     if (!structureMeta.method) structureMeta.method = `AlphaFold DB v${meta.latestVersion ?? ''} prediction`.replace(' v prediction', ' prediction');
-    updateStructureUI();
+    if (entry === state.active) updateStructureUI();
+    else renderStructureList();
   } catch (error) {
     console.warn('Could not decode remote metadata', error);
   }
@@ -694,14 +825,20 @@ async function openFiles(files) {
   const structures = files.filter((file) => !/\.json$/i.test(file.name));
   const jsonFiles = files.filter((file) => /\.json$/i.test(file.name));
   await guardedLoad(async () => {
-    if (structures.length) {
-      const file = structures[0];
+    let first = null;
+    for (const [index, file] of structures.entries()) {
       showLoading(`Reading ${file.name}`);
       const text = await readFileText(file);
-      await loadStructureFromText(text, file.name.replace(/\.gz$/i, ''), { source: 'Local file' });
+      const entry = await loadStructureFromText(text, file.name.replace(/\.gz$/i, ''), { source: 'Local file', add: index > 0 || els.addMode.checked });
+      first ??= entry;
+    }
+    if (structures.length) {
       els.sampleSelect.value = '';
       history.replaceState(null, '', location.pathname);
-      if (structures.length > 1) showToast(`Opened ${file.name}. Proteoscope shows one structure at a time; the other ${structures.length - 1} file(s) were skipped.`);
+      if (structures.length > 1) {
+        setActiveEntry(first);
+        showToast(`Opened ${structures.length} structures. Superpose them in the Analysis tab.`);
+      }
     }
     for (const file of jsonFiles) {
       const text = await readFileText(file);
@@ -719,15 +856,16 @@ async function readFileText(file) {
   return file.text();
 }
 
-async function loadStructureFromURL(url, label) {
+async function loadStructureFromURL(url, label, options = {}) {
   showLoading(`Loading ${label}`);
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Could not load ${label} (HTTP ${response.status}).`);
   const text = await response.text();
   const filename = response.headers.get('X-Proteoscope-Filename') || url.split('/').pop() || label;
-  await loadStructureFromText(text, filename, { source: label });
+  return loadStructureFromText(text, filename, { source: label, ...options });
 }
 
+// Parses and derives a structure, then either replaces the scene or adds it as another entry.
 async function loadStructureFromText(text, label, options = {}) {
   showLoading(`Parsing ${label}`);
   await nextFrame();
@@ -737,69 +875,197 @@ async function loadStructureFromText(text, label, options = {}) {
   showLoading('Deriving residues, bonds and secondary structure');
   await nextFrame();
   deriveStructure(structure, { secondaryMode: state.secondaryMode });
-  resetStructureState();
-  state.structure = structure;
-  state.sourceLabel = options.source || '';
-  state.legendCollapsed = structure.chains.filter((chain) => chain.polymerKind).length > 8;
-  if (structure.meta.isPredicted && state.color.scheme === 'chain') {
-    state.color.scheme = 'plddt';
-    els.colorScheme.value = 'plddt';
-  } else if (!structure.meta.isPredicted && state.color.scheme === 'plddt') {
-    state.color.scheme = 'chain';
-    els.colorScheme.value = 'chain';
+  const add = Boolean(options.add) && state.entries.length > 0;
+  // A new structure inherits the current style, including when it replaces the scene.
+  const template = state.active ?? state.defaults;
+  if (!add) removeAllEntries();
+  const entry = createEntry(structure, options.source || '', template);
+  state.entries.push(entry);
+  if (add && entry.color.scheme === 'chain') {
+    // Chain colors repeat between entries, so a multi-structure scene starts colored by structure.
+    for (const item of state.entries) if (item.color.scheme === 'chain') item.color.scheme = 'structure';
+  }
+  const activate = options.activate ?? true;
+  if (activate || !state.active) {
+    setActiveEntry(entry, { silent: true });
+    state.legendCollapsed = structure.chains.filter((chain) => chain.polymerKind).length > 8;
+    resetPanels();
   }
   updateStructureUI();
-  fitView(false, true);
+  fitView(add, !add);
   markSceneDirty();
-  refreshSurface();
+  refreshSurface(entry);
   hideLoading();
+  return entry;
 }
 
-function resetStructureState() {
-  state.activeModel = 0;
-  state.selection = new Set();
-  state.selectedAtom = null;
-  state.hover = { atom: -1, residueKey: null };
-  state.focus = null;
+function createEntry(structure, sourceLabel, template = state.active ?? state.defaults) {
+  const color = { ...template.color };
+  const first = !state.entries.length;
+  if (DATA_SCHEMES.has(color.scheme) || (color.scheme === 'uniform' && !first)) color.scheme = 'chain';
+  if (color.scheme === 'structure' && first) color.scheme = 'chain';
+  if (structure.meta.isPredicted && color.scheme === 'chain') color.scheme = 'plddt';
+  else if (!structure.meta.isPredicted && color.scheme === 'plddt') color.scheme = first ? 'chain' : 'structure';
+  const used = new Set(state.entries.map((entry) => entry.colorIndex));
+  let colorIndex = 0;
+  while (used.has(colorIndex)) colorIndex += 1;
+  return {
+    ...entryDefaults(),
+    id: state.nextEntryId++,
+    name: uniqueEntryName(structure),
+    structure,
+    sourceLabel,
+    visible: true,
+    display: { ...template.display, visibleChains: null, residueFilter: null, residueFilterKey: '' },
+    color,
+    surface: { kind: template.surface.kind, color: template.surface.color, opacity: template.surface.opacity, key: '', pending: 0, data: null },
+    interactions: { list: [], title: '' },
+    transform: null,
+    transformVersion: 0,
+    comparison: null,
+    overlay: false,
+    rmsf: null,
+    colorIndex,
+    legend: null,
+    surfaceLegend: null,
+  };
+}
+
+function uniqueEntryName(structure) {
+  const base = structure.meta.code || String(structure.label || 'structure').replace(/\.(cif|mmcif|pdb|ent)$/i, '');
+  const names = new Set(state.entries.map((entry) => entry.name));
+  if (!names.has(base)) return base;
+  let index = 2;
+  while (names.has(`${base} (${index})`)) index += 1;
+  return `${base} (${index})`;
+}
+
+function entryColor(entry) {
+  return STRUCTURE_COLORS[entry.colorIndex % STRUCTURE_COLORS.length];
+}
+
+function entryById(id) {
+  return state.entries.find((entry) => String(entry.id) === String(id)) ?? null;
+}
+
+function setActiveEntry(entry, options = {}) {
+  if (!entry || state.active === entry) return;
+  stopModelPlayback();
+  state.active = entry;
+  state.hover = { atom: -1, residueKey: null, entry: null };
+  syncStyleControls();
+  if (options.silent) return;
+  resetPanels();
+  updateStructureUI();
+  // Aligned residues of the other structures mirror the new active structure's focus.
+  markSceneDirty();
+}
+
+function removeEntry(entry) {
+  if (!entry || state.entries.length < 2) return;
+  state.entries = state.entries.filter((item) => item !== entry);
+  releaseEntryMeshes(entry);
+  const described = [els.compareResult.dataset.reference, ...(els.compareResult.dataset.mobiles ?? '').split(',')];
+  if (described.includes(String(entry.id))) els.compareResult.hidden = true;
+  for (const other of state.entries) {
+    if (other.comparison?.referenceId === entry.id) other.comparison = null;
+  }
+  state.correspondences.clear();
+  state.measurements = state.measurements.filter((measurement) => measurement.atoms.every((item) => item.entry !== entry));
+  state.measurePending = state.measurePending.filter((item) => item.entry !== entry);
+  if (state.active === entry) {
+    state.active = null;
+    setActiveEntry(state.entries[0]);
+  } else {
+    updateStructureUI();
+  }
+  updateLocationHash();
+  markSceneDirty();
+}
+
+function removeAllEntries() {
+  for (const entry of state.entries) releaseEntryMeshes(entry);
+  state.entries = [];
+  state.active = null;
+  state.parts = [];
+  state.partByModel = new Map();
+  state.correspondences.clear();
   state.measurePending = [];
   state.measurements = [];
-  state.labels = new Set();
-  state.display.visibleChains = null;
-  state.interactions = { ...state.interactions, list: [], title: '' };
-  state.sasa = null;
-  state.proteomics = { coverage: null, data: null, dataLabel: '', sites: [], siteOverrides: null, crosslinks: [] };
-  state.pae = null;
-  state.paeSelection = null;
-  state.surface.data = null;
-  state.surface.key = '';
-  state.renderer?.setMesh('surface', null);
+  state.hover = { atom: -1, residueKey: null, entry: null };
   stopModelPlayback();
-  if (['coverage', 'data', 'exposure'].includes(state.color.scheme)) {
-    state.color.scheme = 'chain';
-    els.colorScheme.value = 'chain';
+}
+
+function releaseEntryMeshes(entry) {
+  for (const id of [...state.meshSources.keys()]) {
+    if (id.startsWith(`cartoon:${entry.id}:`)) {
+      state.renderer?.setMesh(id, null);
+      state.meshSources.delete(id);
+    }
   }
-  for (const box of [els.interfaceResult, els.sasaResult, els.peptideResult, els.siteResult, els.xlResult, els.dataResult]) {
+  state.renderer?.setMesh(`surface:${entry.id}`, null);
+}
+
+// Clears result panels that describe the previous active structure.
+function resetPanels() {
+  for (const box of [els.interfaceResult, els.sasaResult, els.peptideResult, els.siteResult, els.xlResult, els.dataResult, els.uniprotResult]) {
     box.hidden = true;
     box.replaceChildren();
   }
-  els.sasaColor.disabled = true;
+  els.sasaColor.disabled = !state.sasa;
+  els.surfaceStatus.textContent = '';
+}
+
+function resetEntryAnalysis(entry) {
+  entry.activeModel = 0;
+  entry.selection = new Set();
+  entry.selectedAtom = null;
+  entry.focus = null;
+  entry.labels = new Set();
+  entry.display.visibleChains = null;
+  entry.display.residueFilter = null;
+  entry.display.residueFilterKey = '';
+  entry.interactions = { list: [], title: '' };
+  entry.sasa = null;
+  entry.proteomics = emptyProteomics();
+  entry.pae = null;
+  entry.paeSelection = null;
+  entry.surface.data = null;
+  entry.surface.key = '';
+  entry.overlay = false;
+  entry.rmsf = null;
+  state.renderer?.setMesh(`surface:${entry.id}`, null);
+  state.measurements = state.measurements.filter((measurement) => measurement.atoms.every((item) => item.entry !== entry));
+  state.measurePending = [];
+  if (DATA_SCHEMES.has(entry.color.scheme)) entry.color.scheme = entry.structure.meta.isPredicted ? 'plddt' : 'chain';
+  stopModelPlayback();
 }
 
 async function activateAssembly(assemblyID) {
-  const structure = state.structure;
+  const entry = state.active;
+  const structure = entry?.structure;
   if (!structure || structure.activeAssemblyId === assemblyID) return;
   const previous = { id: structure.activeAssemblyId, models: structure.models };
   showLoading(assemblyID === ASYMMETRIC_UNIT_ID ? 'Restoring asymmetric unit' : `Building assembly ${assemblyID}`);
   await nextFrame();
   try {
+    // Assembly operators are defined in the deposited frame, so any superposition is undone first;
+    // comparisons made with the old chains no longer apply.
+    const moved = entry.transform && !isIdentityTransform(entry.transform);
+    if (moved) resetEntryPosition(entry);
+    entry.comparison = null;
+    for (const other of state.entries) if (other.comparison?.referenceId === entry.id) other.comparison = null;
+    state.correspondences.clear();
     structure.activeAssemblyId = assemblyID;
     structure.models = materializeAssemblyModels(structure, assemblyID);
     deriveStructure(structure, { secondaryMode: state.secondaryMode });
-    resetStructureState();
+    resetEntryAnalysis(entry);
+    resetPanels();
     updateStructureUI();
-    fitView(false, true);
+    fitView(false, state.entries.length < 2);
     markSceneDirty();
-    refreshSurface();
+    refreshSurface(entry);
+    if (moved) showToast('The superposition was reset because the assembly changed. Superpose again to compare.');
   } catch (error) {
     structure.activeAssemblyId = previous.id;
     structure.models = previous.models;
@@ -810,13 +1076,13 @@ async function activateAssembly(assemblyID) {
 }
 
 function reassignSecondary() {
-  const structure = state.structure;
-  if (!structure) return;
-  for (const model of structure.models) {
-    assignSecondary(model, structure, state.secondaryMode);
-    model.cartoonCache = new Map();
+  if (!state.entries.length) return;
+  for (const entry of state.entries) {
+    for (const model of entry.structure.models) {
+      assignSecondary(model, entry.structure, state.secondaryMode);
+      model.cartoonCache = new Map();
+    }
   }
-  state.cartoonKey = '';
   updateSecondarySummary();
   markSceneDirty();
   markColorsDirty();
@@ -827,7 +1093,24 @@ function reassignSecondary() {
 /* ---------- Scene ---------- */
 
 function activeModel() {
-  return state.structure.models[state.activeModel] ?? state.structure.models[0];
+  return activeModelOf(state.active);
+}
+
+function activeModelOf(entry) {
+  const models = entry.structure.models;
+  return models[entry.activeModel] ?? models[0];
+}
+
+function renderedModels(entry) {
+  const models = entry.structure.models;
+  if (entry.overlay && models.length > 1) return models.slice(0, MAX_OVERLAY_MODELS);
+  return [activeModelOf(entry)];
+}
+
+// Style changes apply to every structure unless the Style tab is scoped to the active one.
+function styleTargets() {
+  if (!state.entries.length) return [state.defaults];
+  return state.styleScope === 'active' && state.active ? [state.active] : state.entries;
 }
 
 function markSceneDirty() {
@@ -852,85 +1135,158 @@ function requestRender() {
 }
 
 function updateDisplay(patch) {
-  Object.assign(state.display, patch);
-  if ('polymer' in patch || 'ligand' in patch) {
-    const preset = Object.entries(REPRESENTATION_PRESETS).find(([, value]) => value.polymer === state.display.polymer && value.ligand === state.display.ligand && (value.surface === 'off') === (state.surface.kind === 'off'));
-    document.querySelectorAll('[data-preset]').forEach((button) => button.classList.toggle('is-active', preset?.[0] === button.dataset.preset));
-  }
+  for (const entry of styleTargets()) Object.assign(entry.display, patch);
+  if ('polymer' in patch || 'ligand' in patch) syncPresetButtons();
   markSceneDirty();
+}
+
+function syncPresetButtons() {
+  const display = state.display;
+  const preset = Object.entries(REPRESENTATION_PRESETS).find(([, value]) => value.polymer === display.polymer && value.ligand === display.ligand && (value.surface === 'off') === (state.surface.kind === 'off'));
+  document.querySelectorAll('[data-preset]').forEach((button) => button.classList.toggle('is-active', preset?.[0] === button.dataset.preset));
 }
 
 function applyRepresentationPreset(name) {
   const preset = REPRESENTATION_PRESETS[name];
   if (!preset) return;
   setActiveButton('[data-preset]', document.querySelector(`[data-preset="${name}"]`));
-  state.display.polymer = preset.polymer;
-  state.display.ligand = preset.ligand;
+  for (const entry of styleTargets()) {
+    entry.display.polymer = preset.polymer;
+    entry.display.ligand = preset.ligand;
+    entry.surface.kind = preset.surface;
+  }
   els.polymerRep.value = preset.polymer;
   els.ligandRep.value = preset.ligand;
-  if (preset.surface !== state.surface.kind) {
-    state.surface.kind = preset.surface;
-    els.surfaceKind.value = preset.surface;
-    refreshSurface();
-  }
+  els.surfaceKind.value = preset.surface;
+  refreshSurface();
   markSceneDirty();
 }
 
-function cartoonFor(model) {
-  const chains = state.display.visibleChains ? [...state.display.visibleChains].sort().join(',') : '*';
-  const key = [model.number, chains, state.display.cartoonWidth.toFixed(2), state.display.cartoonQuality, state.secondaryMode].join('|');
+function cartoonFor(entry, model) {
+  const display = entry.display;
+  const chains = display.visibleChains ? [...display.visibleChains].sort().join(',') : '*';
+  const key = [model.number, chains, display.residueFilterKey || '*', display.cartoonWidth.toFixed(2), display.cartoonQuality, state.secondaryMode].join('|');
   const cached = model.cartoonCache.get(key);
   if (cached) return cached;
   const cartoon = buildCartoon(model, {
-    include: (residue) => !state.display.visibleChains || state.display.visibleChains.has(residue.chain),
-    widthScale: state.display.cartoonWidth,
-    quality: state.display.cartoonQuality,
+    include: (residue) => (!display.visibleChains || display.visibleChains.has(residue.chain)) && (!display.residueFilter || display.residueFilter.has(residue.key)),
+    widthScale: display.cartoonWidth,
+    quality: display.cartoonQuality,
   });
   if (model.cartoonCache.size > 6) model.cartoonCache.clear();
   model.cartoonCache.set(key, cartoon);
   return cartoon;
 }
 
-function rebuildScene() {
-  if (!state.structure) return;
-  const model = activeModel();
-  const cartoon = state.display.polymer === 'cartoon' ? cartoonFor(model) : null;
-  const scene = buildScene(model, state.structure, state.display, {
-    cartoon,
-    focusResidues: state.focus?.neighborhood,
-    emphasisResidues: siteResidueKeys(),
-    lines: sceneLines(model),
-  });
-  state.sceneResult = scene;
-  state.renderer.setSpheres(scene.spheres.data, scene.spheres.count);
-  state.renderer.setCylinders(scene.cylinders.data, scene.cylinders.count);
-  if (cartoon) {
-    state.renderer.setMesh('cartoon', { vertices: cartoon.vertices, indices: cartoon.indices, opacity: 1 });
-  } else {
-    state.renderer.setMesh('cartoon', null);
+// Gives every rendered model a contiguous slice of the renderer's shared atom color and flag
+// buffers. Hidden structures keep their slice so toggling visibility does not shift the others.
+function layoutParts() {
+  const parts = [];
+  let offset = 0;
+  for (const entry of state.entries) {
+    for (const model of renderedModels(entry)) {
+      parts.push({ entry, model, offset, count: model.atoms.length });
+      offset += model.atoms.length;
+    }
   }
-  state.renderer.setCanvasShapes?.(cartoon?.canvasShapes ?? []);
+  state.parts = parts;
+  state.partByModel = new Map(parts.map((part) => [part.model, part]));
+  state.atomTotal = offset;
+  const liveModels = new Set(parts.map((part) => part.model));
+  state.measurements = state.measurements.filter((measurement) => measurement.atoms.every((item) => liveModels.has(item.model)));
+  state.measurePending = state.measurePending.filter((item) => liveModels.has(item.model));
+}
+
+function rebuildScene() {
+  if (!state.entries.length) return;
+  layoutParts();
+  const sphereChunks = [];
+  const cylinderChunks = [];
+  const shapes = [];
+  const cartoons = new Map();
+  let bounds = null;
+  for (const part of state.parts) {
+    const { entry, model, offset } = part;
+    if (!entry.visible) continue;
+    const cartoon = entry.display.polymer === 'cartoon' ? cartoonFor(entry, model) : null;
+    const scene = buildScene(model, entry.structure, entry.display, {
+      cartoon,
+      atomOffset: offset,
+      focusResidues: entry.focus?.neighborhood ?? mirroredFocus(entry),
+      emphasisResidues: siteResidueKeys(entry),
+      lines: model === activeModelOf(entry) ? sceneLines(entry) : [],
+    });
+    sphereChunks.push(scene.spheres);
+    cylinderChunks.push(scene.cylinders);
+    if (cartoon) {
+      cartoons.set(`cartoon:${entry.id}:${model.number}`, { cartoon, offset });
+      for (const shape of cartoon.canvasShapes ?? []) shapes.push({ ...shape, atom: shape.atom + offset });
+    }
+    bounds = unionBounds(bounds, model.bounds);
+  }
+  cylinderChunks.push(buildLines(measurementLines()));
+  const spheres = concatInstances(sphereChunks);
+  const cylinders = concatInstances(cylinderChunks);
+  state.renderer.setSpheres(spheres.data, spheres.count);
+  state.renderer.setCylinders(cylinders.data, cylinders.count);
+  for (const [id, { cartoon, offset }] of cartoons) {
+    const source = state.meshSources.get(id);
+    if (source === cartoon) {
+      state.renderer.setMeshAtomOffset(id, offset);
+    } else {
+      state.renderer.setMesh(id, { vertices: cartoon.vertices, indices: cartoon.indices, opacity: 1, atomOffset: offset });
+      state.meshSources.set(id, cartoon);
+    }
+  }
+  for (const id of [...state.meshSources.keys()]) {
+    if (!cartoons.has(id)) {
+      state.renderer.setMesh(id, null);
+      state.meshSources.delete(id);
+    }
+  }
+  for (const entry of state.entries) {
+    const part = state.partByModel.get(activeModelOf(entry));
+    if (part) state.renderer.setMeshAtomOffset(`surface:${entry.id}`, part.offset);
+  }
+  state.renderer.setCanvasShapes?.(shapes);
+  state.sceneBounds = bounds ?? sceneBoundsFromEntries();
   state.dirty.scene = false;
 }
 
-function sceneLines(model) {
+function concatInstances(chunks) {
+  const bytes = chunks.reduce((sum, chunk) => sum + chunk.data.byteLength, 0);
+  const count = chunks.reduce((sum, chunk) => sum + chunk.count, 0);
+  if (chunks.length === 1) return chunks[0];
+  const data = new Uint8Array(bytes);
+  let cursor = 0;
+  for (const chunk of chunks) {
+    data.set(new Uint8Array(chunk.data), cursor);
+    cursor += chunk.data.byteLength;
+  }
+  return { data: data.buffer, count };
+}
+
+function unionBounds(a, b) {
+  if (!b) return a;
+  if (!a) return { min: [...b.min], max: [...b.max], center: [...b.center], radius: b.radius };
+  const min = a.min.map((value, axis) => Math.min(value, b.min[axis]));
+  const max = a.max.map((value, axis) => Math.max(value, b.max[axis]));
+  const center = min.map((value, axis) => (value + max[axis]) / 2);
+  const reach = (bounds) => Math.hypot(bounds.center[0] - center[0], bounds.center[1] - center[1], bounds.center[2] - center[2]) + bounds.radius;
+  return { min, max, center, radius: Math.max(reach(a), reach(b)) };
+}
+
+function sceneBoundsFromEntries() {
+  let bounds = null;
+  for (const entry of state.entries) if (entry.visible) bounds = unionBounds(bounds, activeModelOf(entry).bounds);
+  return bounds ?? { min: [0, 0, 0], max: [0, 0, 0], center: [0, 0, 0], radius: 10 };
+}
+
+function sceneLines(entry) {
   const lines = [];
-  for (const measurement of state.measurements) {
-    const atoms = measurement.atoms.map((id) => model.atoms[id]).filter(Boolean);
-    for (let index = 0; index + 1 < atoms.length; index += 1) {
-      lines.push({ from: point(atoms[index]), to: point(atoms[index + 1]), color: [1, 0.84, 0.3], radius: 0.07, atomA: atoms[index].id, atomB: atoms[index + 1].id });
-    }
-  }
-  for (const pending of state.measurePending.length > 1 ? [state.measurePending] : []) {
-    for (let index = 0; index + 1 < pending.length; index += 1) {
-      const a = model.atoms[pending[index]];
-      const b = model.atoms[pending[index + 1]];
-      if (a && b) lines.push({ from: point(a), to: point(b), color: [1, 0.84, 0.3], radius: 0.06 });
-    }
-  }
   const typeColors = new Map(state.interactionTypes.map((type) => [type.id, hexColor(type.color)]));
-  for (const interaction of state.interactions.list) {
-    if (!state.interactions.enabled.has(interaction.type)) continue;
+  for (const interaction of entry.interactions.list) {
+    if (!state.interactionEnabled.has(interaction.type)) continue;
     lines.push({
       from: interaction.pointA,
       to: interaction.pointB,
@@ -938,7 +1294,7 @@ function sceneLines(model) {
       radius: interaction.type === 'hydrophobic' ? 0.07 : 0.11,
     });
   }
-  for (const link of state.proteomics.crosslinks) {
+  for (const link of entry.proteomics.crosslinks) {
     if (!link.atomA || !link.atomB) continue;
     lines.push({
       from: point(link.atomA),
@@ -952,59 +1308,99 @@ function sceneLines(model) {
   return lines;
 }
 
+// Measurement rulers may join atoms of different structures, so they are drawn on their own.
+function measurementLines() {
+  const lines = [];
+  for (const measurement of state.measurements) {
+    const atoms = measurement.atoms.map((item) => item.atom);
+    for (let index = 0; index + 1 < atoms.length; index += 1) {
+      lines.push({ from: point(atoms[index]), to: point(atoms[index + 1]), color: [1, 0.84, 0.3], radius: 0.07 });
+    }
+  }
+  const pending = state.measurePending.map((item) => item.atom);
+  for (let index = 0; index + 1 < pending.length; index += 1) {
+    lines.push({ from: point(pending[index]), to: point(pending[index + 1]), color: [1, 0.84, 0.3], radius: 0.06 });
+  }
+  return lines;
+}
+
 function updateColors() {
-  if (!state.structure) return;
-  const model = activeModel();
-  const extras = colorExtras();
-  const { colors, legend } = computeAtomColors(model, state.structure, state.color, extras);
+  if (!state.entries.length) return;
+  if (!state.parts.length) layoutParts();
+  const total = Math.max(1, state.atomTotal);
+  const colors = new Float32Array(total * 4);
+  for (const part of state.parts) {
+    const { entry, model } = part;
+    const { colors: partColors, legend } = computeAtomColors(model, entry.structure, entry.color, colorExtras(entry));
+    colors.set(partColors.subarray(0, model.atoms.length * 4), part.offset * 4);
+    if (model === activeModelOf(entry)) entry.legend = legend;
+  }
   state.atomColors = colors;
-  state.legend = legend;
-  if (!state.atomFlags || state.atomFlags.length !== model.atoms.length) state.atomFlags = new Uint32Array(model.atoms.length);
+  if (!state.atomFlags || state.atomFlags.length !== total) state.atomFlags = new Uint32Array(total);
   state.renderer.setAtomData(colors, state.atomFlags);
   state.dirty.colors = false;
   state.dirty.flags = true;
-  applySurfaceColors(false);
+  for (const entry of state.entries) applySurfaceColors(entry, false);
   renderLegend();
   renderChains();
   sequenceView?.recolor(residueColor);
 }
 
-function colorExtras() {
-  const scheme = state.color.scheme;
-  const extras = { overrides: state.proteomics.siteOverrides };
-  if (scheme === 'coverage' && state.proteomics.coverage) extras.residueValues = state.proteomics.coverage;
-  if (scheme === 'data' && state.proteomics.data) {
-    extras.residueValues = state.proteomics.data;
-    extras.dataLabel = state.proteomics.dataLabel;
+function colorExtras(entry = state.active) {
+  const scheme = entry.color.scheme;
+  const extras = { overrides: entry.proteomics.siteOverrides, structureColor: entryColor(entry) };
+  if (scheme === 'coverage' && entry.proteomics.coverage) extras.residueValues = entry.proteomics.coverage;
+  if (scheme === 'data' && entry.proteomics.data) {
+    extras.residueValues = entry.proteomics.data;
+    extras.dataLabel = entry.proteomics.dataLabel;
     extras.symmetric = els.dataSymmetric.checked;
   }
-  if (scheme === 'exposure' && state.sasa?.relative) extras.residueValues = state.sasa.relative;
+  if (scheme === 'exposure' && entry.sasa?.relative) extras.residueValues = entry.sasa.relative;
+  if (scheme === 'deviation' || scheme === 'lddt') {
+    const comparison = comparisonFor(entry);
+    if (comparison) {
+      extras.residueValues = comparison.values(scheme);
+      extras.comparisonNote = state.entries.length > 2 ? `vs ${comparison.partnerName} · gray: not aligned` : 'After superposition · gray: not aligned';
+    }
+  }
+  if (scheme === 'rmsf' && entry.rmsf) extras.residueValues = entry.rmsf;
   return extras;
 }
 
 function residueColor(key) {
   if (!state.atomColors || !state.structure) return null;
-  const residue = activeModel().residueMap.get(key);
-  const atom = residue?.representative;
-  if (!atom) return null;
-  const offset = atom.id * 4;
+  const model = activeModel();
+  const part = state.partByModel.get(model);
+  const atom = model.residueMap.get(key)?.representative;
+  if (!atom || !part) return null;
+  const offset = (part.offset + atom.id) * 4;
   return [state.atomColors[offset], state.atomColors[offset + 1], state.atomColors[offset + 2]];
 }
 
 function updateFlags() {
-  if (!state.structure || !state.atomFlags) return;
-  const model = activeModel();
+  if (!state.atomFlags || !state.entries.length) return;
   const flags = state.atomFlags;
   flags.fill(0);
-  for (const key of state.selection) {
-    const residue = model.residueMap.get(key);
-    if (residue) for (const atom of residue.atoms) flags[atom.id] |= 1;
+  const source = state.active;
+  const hoverEntry = state.hover.entry;
+  for (const part of state.parts) {
+    const { entry, model, offset } = part;
+    const mark = (keys, bit) => {
+      for (const key of keys) {
+        const residue = model.residueMap.get(key);
+        if (residue) for (const atom of residue.atoms) flags[offset + atom.id] |= bit;
+      }
+    };
+    // The selection and hover of one structure light up the aligned residues of the others.
+    mark(entry === source ? entry.selection : mapKeys(source, entry, source?.selection), 1);
+    if (state.hover.residueKey && hoverEntry) {
+      mark(entry === hoverEntry ? [state.hover.residueKey] : mapKeys(hoverEntry, entry, [state.hover.residueKey]), 2);
+    }
   }
-  if (state.hover.residueKey) {
-    const residue = model.residueMap.get(state.hover.residueKey);
-    if (residue) for (const atom of residue.atoms) flags[atom.id] |= 2;
+  for (const item of state.measurePending) {
+    const part = state.partByModel.get(item.model);
+    if (part) flags[part.offset + item.atom.id] |= 1;
   }
-  for (const id of state.measurePending) flags[id] |= 1;
   state.renderer.updateAtomFlags(flags);
   state.dirty.flags = false;
 }
@@ -1057,8 +1453,7 @@ function currentView() {
 
 function renderSettings(overrides = {}) {
   const lighting = state.lighting;
-  const model = activeModel();
-  const radius = Math.max(4, model.bounds.radius);
+  const radius = Math.max(4, (state.sceneBounds ?? sceneBoundsFromEntries()).radius);
   const basis = cameraBasis(state.camera);
   const centerDepth = state.camera.distance;
   const depthOf = (fraction) => centerDepth - radius + 2 * radius * fraction;
@@ -1121,18 +1516,34 @@ function viewportRegion() {
 function fitView(animate = true, principal = true, atoms = null) {
   if (!state.structure) return;
   updateViewOffset();
-  const model = activeModel();
-  const source = atoms ?? model.atoms.filter((atom) => atom.kind !== 'water' && (!state.display.visibleChains || state.display.visibleChains.has(atom.chain)));
+  const source = atoms ?? visibleSceneAtoms();
+  if (!source.length) return;
   const points = new Float32Array(source.length * 3);
   source.forEach((atom, index) => {
     points[index * 3] = atom.x;
     points[index * 3 + 1] = atom.y;
     points[index * 3 + 2] = atom.z;
   });
+  const radius = sceneBoundsFromEntries().radius;
   const target = cloneCamera(state.camera);
-  target.sceneRadius = model.bounds.radius;
-  fitCameraToPoints(target, points, viewportRegion(), { keepRotation: !principal, padding: atoms ? 4 : 2, sceneRadius: model.bounds.radius });
+  target.sceneRadius = radius;
+  fitCameraToPoints(target, points, viewportRegion(), { keepRotation: !principal, padding: atoms ? 4 : 2, sceneRadius: radius });
   animateCamera(target, animate ? 450 : 0);
+}
+
+function visibleSceneAtoms() {
+  const atoms = [];
+  for (const entry of state.entries) {
+    if (!entry.visible) continue;
+    const model = activeModelOf(entry);
+    const { visibleChains, residueFilter } = entry.display;
+    for (const atom of model.atoms) {
+      if (atom.kind === 'water' || (visibleChains && !visibleChains.has(atom.chain))) continue;
+      if (residueFilter && (atom.kind === 'protein' || atom.kind === 'nucleic') && !residueFilter.has(atom.residueKey)) continue;
+      atoms.push(atom);
+    }
+  }
+  return atoms;
 }
 
 function animateCamera(target, duration = 400) {
@@ -1231,25 +1642,49 @@ function onPointerUp(event) {
 }
 
 async function handleClick(event) {
-  const atomIndex = await pickAt(event);
-  const model = activeModel();
-  const atom = atomIndex >= 0 ? model.atoms[atomIndex] : null;
+  const hit = resolvePick(await pickAt(event));
   if (state.measureMode) {
-    if (atom) addMeasureAtom(atom);
+    if (hit) addMeasureAtom(hit);
     return;
   }
-  if (!atom) {
+  if (!hit) {
     if (!event.shiftKey) clearSelection(false);
     return;
   }
-  state.selectedAtom = atom;
-  selectResidues([atom.residueKey], { additive: event.shiftKey || event.metaKey || event.ctrlKey, toggle: true });
+  // Clicking another structure makes it the active one.
+  const additive = (event.shiftKey || event.metaKey || event.ctrlKey) && hit.entry === state.active;
+  setActiveEntry(hit.entry);
+  state.selectedAtom = hit.atom;
+  selectResidues([hit.atom.residueKey], { additive, toggle: true });
 }
 
 async function onDoubleClick(event) {
-  const atomIndex = await pickAt(event);
-  const atom = atomIndex >= 0 ? activeModel().atoms[atomIndex] : null;
-  if (atom && !state.measureMode) focusResidues([atom.residueKey]);
+  const hit = resolvePick(await pickAt(event));
+  if (!hit || state.measureMode) return;
+  setActiveEntry(hit.entry);
+  focusResidues([hit.atom.residueKey]);
+}
+
+// Maps an index in the shared atom buffers back to its structure, model and atom.
+function resolvePick(index) {
+  if (!Number.isInteger(index) || index < 0) return null;
+  let low = 0;
+  let high = state.parts.length - 1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    const part = state.parts[middle];
+    if (index < part.offset) high = middle - 1;
+    else if (index >= part.offset + part.count) low = middle + 1;
+    else {
+      const atom = part.model.atoms[index - part.offset];
+      return atom ? { entry: part.entry, model: part.model, atom, part } : null;
+    }
+  }
+  return null;
+}
+
+function residueIn(model, atom) {
+  return model.residues[model.atomResidue[atom.id]] ?? null;
 }
 
 function onWheel(event) {
@@ -1283,11 +1718,10 @@ function scheduleHoverPick(event) {
 
 function setHoverAtom(atomIndex, clientX = 0, clientY = 0) {
   if (!state.structure) return;
-  const model = activeModel();
-  const atom = atomIndex >= 0 ? model.atoms[atomIndex] : null;
-  const residueKey = atom?.residueKey ?? null;
-  if (atom) {
-    els.tooltip.innerHTML = tooltipHTML(atom);
+  const hit = resolvePick(atomIndex);
+  const residueKey = hit?.atom.residueKey ?? null;
+  if (hit) {
+    els.tooltip.innerHTML = tooltipHTML(hit);
     const x = Math.min(window.innerWidth - 300, clientX + 14);
     els.tooltip.style.transform = `translate(${x}px, ${clientY + 14}px)`;
     els.tooltip.classList.add('is-visible');
@@ -1295,48 +1729,58 @@ function setHoverAtom(atomIndex, clientX = 0, clientY = 0) {
     els.tooltip.classList.remove('is-visible');
   }
   state.hover.atom = atomIndex;
-  if (state.hover.residueKey !== residueKey) {
+  if (state.hover.residueKey !== residueKey || state.hover.entry !== (hit?.entry ?? null)) {
     state.hover.residueKey = residueKey;
-    sequenceView?.setHover(residueKey);
+    state.hover.entry = hit?.entry ?? null;
+    sequenceView?.setHover(hit?.entry === state.active ? residueKey : null);
     markFlagsDirty();
   }
 }
 
 function setHoverResidue(key) {
-  if (state.hover.residueKey === key) return;
+  if (state.hover.residueKey === key && state.hover.entry === state.active) return;
   state.hover.residueKey = key;
+  state.hover.entry = key ? state.active : null;
   sequenceView?.setHover(key);
   markFlagsDirty();
 }
 
-function componentNameOf(residue) {
+function componentNameOf(residue, entry = state.active) {
   if (!residue || (residue.kind !== 'ligand' && residue.kind !== 'ion')) return '';
-  const name = state.structure.componentNames?.get(residue.resName);
+  const name = entry.structure.componentNames?.get(residue.resName);
   return name ? titleCase(name) : '';
 }
 
-function tooltipHTML(atom) {
-  const residue = residueOf(atom);
+function tooltipHTML(hit) {
+  const { entry, model, atom } = hit;
+  const residue = residueIn(model, atom);
   const parts = [`${atom.name} · ${atom.element}`];
-  const componentName = componentNameOf(residue);
+  const componentName = componentNameOf(residue, entry);
   if (componentName) parts.unshift(componentName);
   if (residue?.kind === 'protein') parts.push(secondaryText(residue));
-  if (Number.isFinite(residue?.confidence) && state.structure.meta.isPredicted) parts.push(`pLDDT ${residue.confidence.toFixed(1)}`);
+  if (Number.isFinite(residue?.confidence) && entry.structure.meta.isPredicted) parts.push(`pLDDT ${residue.confidence.toFixed(1)}`);
   else parts.push(`B ${atom.bFactor.toFixed(1)}`);
-  const extra = residueDataText(residue);
+  const extra = residueDataText(residue, entry);
   if (extra) parts.push(extra);
-  return `<strong>${escapeHTML(residueLabel(residue ?? atom))}</strong><span>${escapeHTML(parts.join(' · '))}</span>`;
+  const prefix = state.entries.length > 1 ? `${entry.name} · ` : '';
+  const modelNote = entry.overlay ? ` · model ${model.number}` : '';
+  return `<strong>${escapeHTML(prefix + residueLabel(residue ?? atom) + modelNote)}</strong><span>${escapeHTML(parts.join(' · '))}</span>`;
 }
 
-function residueDataText(residue) {
+function residueDataText(residue, entry = state.active) {
   if (!residue) return '';
   const parts = [];
-  const coverage = state.proteomics.coverage?.get(residue.key);
+  const coverage = entry.proteomics.coverage?.get(residue.key);
   if (coverage) parts.push(`${coverage} peptide${coverage === 1 ? '' : 's'}`);
-  const data = state.proteomics.data?.get(residue.key);
-  if (Number.isFinite(data)) parts.push(`${state.proteomics.dataLabel || 'value'} ${formatNumberShort(data)}`);
-  const relative = state.sasa?.relative?.get(residue.key);
+  const data = entry.proteomics.data?.get(residue.key);
+  if (Number.isFinite(data)) parts.push(`${entry.proteomics.dataLabel || 'value'} ${formatNumberShort(data)}`);
+  const relative = entry.sasa?.relative?.get(residue.key);
   if (Number.isFinite(relative)) parts.push(`RSA ${(relative * 100).toFixed(0)}%`);
+  const comparison = comparisonFor(entry);
+  const deviation = comparison?.lookup(residue.key);
+  if (deviation) parts.push(`${formatNumberShort(deviation.distance)} Å from ${comparison.partnerName}${Number.isFinite(deviation.lddt) ? ` · lDDT ${deviation.lddt.toFixed(2)}` : ''}`);
+  const fluctuation = entry.rmsf?.get(residue.key);
+  if (Number.isFinite(fluctuation)) parts.push(`RMSF ${fluctuation.toFixed(1)} Å`);
   return parts.join(' · ');
 }
 
@@ -1499,18 +1943,23 @@ function setMeasureMode(mode) {
   markSceneDirty();
 }
 
-function addMeasureAtom(atom) {
+// Measurement atoms are { entry, model, atom } so a ruler can span two structures.
+function addMeasureAtom(hit) {
   const needed = { distance: 2, angle: 3, dihedral: 4 }[state.measureMode];
-  if (state.measurePending.at(-1) === atom.id) return;
-  state.measurePending.push(atom.id);
+  if (state.measurePending.at(-1)?.atom === hit.atom) return;
+  state.measurePending.push({ entry: hit.entry, model: hit.model, atom: hit.atom });
   if (state.measurePending.length >= needed) {
-    const model = activeModel();
-    const atoms = state.measurePending.map((id) => model.atoms[id]);
-    state.measurements.push({ type: state.measureMode, atoms: [...state.measurePending], value: measureValue(state.measureMode, atoms) });
+    const atoms = [...state.measurePending];
+    state.measurements.push({ type: state.measureMode, atoms, value: measureValue(state.measureMode, atoms.map((item) => item.atom)) });
     state.measurePending = [];
     renderMeasurements();
   }
   markSceneDirty();
+}
+
+function updateMeasurementValues() {
+  for (const measurement of state.measurements) measurement.value = measureValue(measurement.type, measurement.atoms.map((item) => item.atom));
+  renderMeasurements();
 }
 
 function measureValue(type, atoms) {
@@ -1532,13 +1981,14 @@ function clearMeasurements() {
 }
 
 function renderMeasurements() {
-  const model = state.structure ? activeModel() : null;
   const fragment = document.createDocumentFragment();
+  const multiple = state.entries.length > 1;
   state.measurements.forEach((measurement, index) => {
     const row = document.createElement('div');
     row.className = 'list-row';
-    const atoms = measurement.atoms.map((id) => model?.atoms[id]).filter(Boolean);
-    row.innerHTML = `<i style="background:#ffd166"></i><span>${escapeHTML(atoms.map(shortAtomLabel).join(' – '))}</span><strong>${formatMeasurement(measurement)}</strong><button type="button" title="Remove">×</button>`;
+    const atoms = measurement.atoms.map((item) => item.atom);
+    const labels = measurement.atoms.map((item) => `${multiple ? `${item.entry.name} ` : ''}${shortAtomLabel(item.atom)}`);
+    row.innerHTML = `<i style="background:#ffd166"></i><span>${escapeHTML(labels.join(' – '))}</span><strong>${formatMeasurement(measurement)}</strong><button type="button" title="Remove">×</button>`;
     row.querySelector('button').addEventListener('click', (event) => {
       event.stopPropagation();
       state.measurements.splice(index, 1);
@@ -1555,11 +2005,10 @@ function renderMeasurements() {
 
 function updateLabels() {
   if (!state.structure) return;
-  const model = activeModel();
   const view = currentView();
   const width = els.canvas.clientWidth;
   const height = els.canvas.clientHeight;
-  const labels = collectLabels(model);
+  const labels = collectLabels();
   const pool = els.labelLayer.children;
   let used = 0;
   for (const label of labels.slice(0, 400)) {
@@ -1575,17 +2024,22 @@ function updateLabels() {
   while (pool.length > used) pool[pool.length - 1].remove();
 }
 
-function collectLabels(model) {
+function collectLabels() {
   const labels = [];
-  for (const key of state.labels) {
-    const residue = model.residueMap.get(key);
-    if (residue?.representative) labels.push({ position: point(residue.representative), text: residueLabel(residue), kind: 'residue' });
-  }
-  for (const site of state.proteomics.sites) {
-    if (site.residue?.representative) labels.push({ position: point(site.residue.representative), text: site.label, kind: 'site' });
+  for (const entry of state.entries) {
+    if (!entry.visible) continue;
+    const model = activeModelOf(entry);
+    const prefix = entry !== state.active && state.entries.length > 1 ? `${entry.name} · ` : '';
+    for (const key of entry.labels) {
+      const residue = model.residueMap.get(key);
+      if (residue?.representative) labels.push({ position: point(residue.representative), text: prefix + residueLabel(residue), kind: 'residue' });
+    }
+    for (const site of entry.proteomics.sites) {
+      if (site.residue?.representative) labels.push({ position: point(site.residue.representative), text: prefix + site.label, kind: 'site' });
+    }
   }
   for (const measurement of state.measurements) {
-    const atoms = measurement.atoms.map((id) => model.atoms[id]).filter(Boolean);
+    const atoms = measurement.atoms.map((item) => item.atom);
     if (atoms.length < 2) continue;
     let position;
     if (measurement.type === 'distance') position = scale(add(point(atoms[0]), point(atoms[1])), 0.5);
@@ -1596,6 +2050,527 @@ function collectLabels(model) {
   return labels;
 }
 
+/* ---------- Structures and comparison ---------- */
+
+const EYE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z" /><circle cx="12" cy="12" r="2.8" /></svg>';
+const EYE_OFF_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z" /><path d="M4 4l16 16" /></svg>';
+
+function renderStructureList() {
+  const count = state.entries.length;
+  els.structuresGroup.hidden = count < 2;
+  if (count < 2) {
+    els.structureList.replaceChildren();
+    return;
+  }
+  els.structureCount.textContent = String(count);
+  const fragment = document.createDocumentFragment();
+  for (const entry of state.entries) {
+    const row = document.createElement('div');
+    row.className = `structure-row${entry === state.active ? ' is-active' : ''}${entry.visible ? '' : ' is-hidden'}`;
+    const chains = entry.structure.chains.filter((chain) => chain.polymerKind).length;
+    const reference = entry.comparison ? entryById(entry.comparison.referenceId) : null;
+    const detail = [
+      entry.structure.meta.isPredicted ? 'Predicted' : titleCase(entry.structure.meta.method || ''),
+      `${chains} chain${chains === 1 ? '' : 's'}`,
+      entry.overlay ? `${Math.min(entry.structure.models.length, MAX_OVERLAY_MODELS)} models overlaid` : '',
+      reference ? `on ${reference.name}, ${entry.comparison.stats.rmsd.toFixed(2)} Å` : entry.transform ? 'moved' : '',
+    ].filter(Boolean).join(' · ');
+    row.innerHTML = `<button type="button" class="structure-main" title="${entry === state.active ? 'Active structure' : 'Make active'}"><i style="background:${colorToHex(entryColor(entry))}"></i><span><strong>${escapeHTML(entry.name)}</strong><small>${escapeHTML(detail)}</small></span></button>
+      <button type="button" class="structure-action" data-action="visibility" title="${entry.visible ? 'Hide' : 'Show'} ${escapeHTML(entry.name)}" aria-pressed="${entry.visible}">${entry.visible ? EYE_ICON : EYE_OFF_ICON}</button>
+      <button type="button" class="structure-action" data-action="remove" title="Remove ${escapeHTML(entry.name)} from the scene" aria-label="Remove">×</button>`;
+    row.querySelector('.structure-main').addEventListener('click', () => setActiveEntry(entry));
+    row.querySelector('[data-action="visibility"]').addEventListener('click', () => setEntryVisible(entry, !entry.visible));
+    row.querySelector('[data-action="remove"]').addEventListener('click', () => removeEntry(entry));
+    fragment.appendChild(row);
+  }
+  els.structureList.replaceChildren(fragment);
+}
+
+function setEntryVisible(entry, visible) {
+  entry.visible = visible;
+  renderStructureList();
+  markSceneDirty();
+  refreshSurface(entry);
+  renderLegend();
+}
+
+function updateCompareControls() {
+  const entries = state.entries;
+  const multiple = entries.length > 1;
+  els.compareControls.hidden = !multiple;
+  els.compareRun.hidden = !multiple;
+  els.compareReset.hidden = !entries.some((entry) => entry.transform);
+  els.compareFitSelection.closest('.toggles').hidden = !multiple;
+  els.compareHint.hidden = multiple;
+  const fill = (select, options, preferred) => {
+    const previous = select.value;
+    select.replaceChildren(...options.map(([value, label]) => new Option(label, value)));
+    const values = options.map(([value]) => value);
+    select.value = values.includes(previous) ? previous : values.includes(preferred) ? preferred : values[0] ?? '';
+  };
+  if (multiple) {
+    const choices = entries.map((entry) => [String(entry.id), entry.name]);
+    const reference = entries.find((entry) => !entry.comparison) ?? entries[0];
+    fill(els.compareReference, choices, String(reference.id));
+    const mobileChoices = choices.filter(([id]) => id !== els.compareReference.value);
+    if (mobileChoices.length > 1) mobileChoices.push(['*', 'All other structures']);
+    const preferred = state.active && String(state.active.id) !== els.compareReference.value ? String(state.active.id) : mobileChoices[0]?.[0];
+    fill(els.compareMobile, mobileChoices, preferred);
+    populateCompareChains();
+  }
+  const active = state.active;
+  const hasUniprot = Boolean(active && !active.structure.meta.isPredicted && [...active.structure.sequences.values()].some((info) => info.kind === 'protein' && info.uniprot?.some((segment) => segment.accession)));
+  els.compareAlphaFold.disabled = !hasUniprot;
+  els.compareAlphaFold.title = hasUniprot ? 'Fetch the AlphaFold DB model for each UniProt accession of this entry and superpose it by UniProt numbering' : 'Needs an experimental structure with a UniProt cross-reference';
+  const models = active?.structure.models.length ?? 1;
+  els.compareModels.disabled = models < 2;
+  els.compareModels.textContent = active?.overlay ? 'Show one model' : 'Overlay models';
+  els.compareModels.title = models < 2 ? 'Needs a file with several models (NMR ensemble, predictions)' : `Superpose all ${models} models on their common core and show them together`;
+}
+
+function populateCompareChains() {
+  const fill = (select, entry) => {
+    const previous = select.value;
+    const options = [new Option('All chains (paired automatically)', '*')];
+    if (entry) {
+      for (const chain of polymerChainResidues(activeModelOf(entry)).values()) {
+        const info = entry.structure.chains.find((item) => item.id === chain.id);
+        options.push(new Option(info ? chainOptionLabel(info) : chain.id, chain.id));
+      }
+    }
+    select.replaceChildren(...options);
+    select.value = [...select.options].some((option) => option.value === previous) ? previous : '*';
+  };
+  fill(els.compareRefChain, entryById(els.compareReference.value));
+  const mobile = els.compareMobile.value === '*' ? null : entryById(els.compareMobile.value);
+  fill(els.compareMobChain, mobile);
+  els.compareMobChain.disabled = !mobile;
+}
+
+function pairOf(entry) {
+  return { model: activeModelOf(entry), structure: entry.structure };
+}
+
+// Superposes one or more moving structures onto a reference. Reads the Analysis tab controls
+// unless options name the structures directly.
+function runSuperposition(options = {}) {
+  const reference = options.reference ?? entryById(els.compareReference.value);
+  const mobiles = (options.mobiles ?? (els.compareMobile.value === '*'
+    ? state.entries.filter((entry) => entry !== reference)
+    : [entryById(els.compareMobile.value)])).filter((entry) => entry && entry !== reference);
+  if (!reference || !mobiles.length) {
+    showToast('Choose two different structures to superpose.', true);
+    return [];
+  }
+  const refChain = options.refChain ?? (els.compareRefChain.value || '*');
+  const mobChain = options.mobChain ?? (els.compareMobChain.value || '*');
+  let fitKeys = null;
+  if (options.fitSelection ?? els.compareFitSelection.checked) {
+    fitKeys = new Set(reference.selection);
+    if (fitKeys.size < 3) {
+      showToast(`Select at least three residues of ${reference.name} to fit on (for example one domain), or untick "Fit on selected residues".`, true);
+      return [];
+    }
+  }
+  const results = [];
+  for (const mobile of mobiles) {
+    try {
+      const result = compareStructures(pairOf(reference), pairOf(mobile), {
+        refChains: refChain !== '*' ? [refChain] : null,
+        mobChains: mobChain !== '*' && mobiles.length === 1 ? [mobChain] : null,
+        fitKeys,
+      });
+      applyComparison(reference, mobile, result);
+      results.push({ mobile, result });
+    } catch (error) {
+      console.warn(error);
+      results.push({ mobile, error });
+    }
+  }
+  const predicted = results.filter((item) => item.result && stylePredictedComparison(reference, item.mobile));
+  renderCompareResult(reference, results, {
+    fitOnSelection: Boolean(fitKeys),
+    note: predicted.length ? 'Experimental structure in gray, predicted model colored by pLDDT.' : '',
+  });
+  if (results.some((item) => item.result)) {
+    if (!COMPARISON_SCHEMES.has(reference.color.scheme) && reference.color.scheme !== 'plddt') {
+      for (const entry of [reference, ...mobiles]) if (entry.color.scheme === 'chain') entry.color.scheme = 'structure';
+    }
+    syncStyleControls();
+    fitView(true, false);
+  }
+  return results;
+}
+
+// A predicted model superposed on an experimental structure keeps its pLDDT colors, is trimmed to
+// the aligned span when it is much longer (full-length models of one domain), and the
+// experimental structure turns neutral gray so it cannot be confused with the pLDDT blues.
+function stylePredictedComparison(reference, mobile) {
+  if (!mobile.structure.meta.isPredicted || reference.structure.meta.isPredicted || !mobile.comparison) return false;
+  if (mobile.color.scheme === 'structure' || mobile.color.scheme === 'chain') mobile.color.scheme = 'plddt';
+  const polymer = [...polymerChainResidues(activeModelOf(mobile)).values()].reduce((total, chain) => total + chain.residues.length, 0);
+  if (mobile.comparison.byMobile.size < polymer * 0.7) trimToAligned(mobile, true);
+  if (['chain', 'structure', 'plddt'].includes(reference.color.scheme)) {
+    reference.color.scheme = 'uniform';
+    reference.color.uniformColor = '#c9ced6';
+  }
+  return true;
+}
+
+function applyComparison(reference, mobile, result) {
+  applyEntryTransform(mobile, result.transform);
+  const byMobile = new Map();
+  const byReference = new Map();
+  for (const pair of result.pairs) {
+    byMobile.set(pair.mob.key, { key: pair.ref.key, distance: pair.distance, lddt: pair.lddt, fitted: pair.fitted });
+    byReference.set(pair.ref.key, { key: pair.mob.key, distance: pair.distance, lddt: pair.lddt, fitted: pair.fitted });
+  }
+  mobile.comparison = { referenceId: reference.id, time: performance.now(), stats: result.stats, chainPairs: result.chainPairs, byMobile, byReference };
+  if (mobile.display.residueFilter) trimToAligned(mobile, true);
+  state.correspondences.clear();
+  updateLocationHash();
+  updateMeasurementValues();
+  renderStructureList();
+  renderSequence();
+  markSceneDirty();
+  refreshSurface(mobile);
+}
+
+// Moves every model of a structure rigidly; the cumulative transform is kept so the move can be
+// undone and assemblies can be rebuilt in the deposited frame.
+function applyEntryTransform(entry, transform) {
+  if (!transform || isIdentityTransform(transform)) return;
+  for (const model of entry.structure.models) {
+    for (const atom of model.atoms) {
+      const moved = transformPoint(transform, atom.x, atom.y, atom.z);
+      atom.x = moved[0];
+      atom.y = moved[1];
+      atom.z = moved[2];
+    }
+    model.bounds = computeBounds(model.atoms);
+    model.cartoonCache = new Map();
+  }
+  const combined = entry.transform ? composeTransforms(transform, entry.transform) : { rotation: [...transform.rotation], translation: [...transform.translation] };
+  entry.transform = isIdentityTransform(combined, 1e-7) ? null : combined;
+  entry.transformVersion += 1;
+  for (const item of entry.interactions.list) {
+    if (item.pointA) item.pointA = transformPoint(transform, ...item.pointA);
+    if (item.pointB) item.pointB = transformPoint(transform, ...item.pointB);
+  }
+  entry.surface.key = '';
+}
+
+function resetEntryPosition(entry) {
+  if (entry.transform) applyEntryTransform(entry, invertTransform(entry.transform));
+  entry.transform = null;
+  entry.comparison = null;
+  // Anything fitted onto this structure was fitted onto coordinates that just moved.
+  for (const other of state.entries) if (other.comparison?.referenceId === entry.id) other.comparison = null;
+  state.correspondences.clear();
+}
+
+function resetComparedPositions() {
+  for (const entry of state.entries) if (entry.transform || entry.comparison) resetEntryPosition(entry);
+  for (const entry of state.entries) {
+    if (entry.color.scheme === 'deviation' || entry.color.scheme === 'lddt') entry.color.scheme = 'structure';
+    if (entry.display.residueFilter) setResidueFilter(entry, null);
+    refreshSurface(entry);
+  }
+  els.compareResult.hidden = true;
+  updateLocationHash();
+  updateMeasurementValues();
+  syncStyleControls();
+  renderStructureList();
+  renderSequence();
+  updateCompareControls();
+  markSceneDirty();
+  fitView(true, false);
+}
+
+function setResidueFilter(entry, keys) {
+  entry.display.residueFilter = keys;
+  entry.display.residueFilterKey = keys ? `filter-${keys.size}-${performance.now().toFixed(0)}` : '';
+}
+
+// Hides the polymer residues of a moved structure outside the span it shares with its reference
+// (for example the extra domains of a full-length AlphaFold model). Unaligned loops inside the
+// span stay visible, since they are often exactly the regions an experiment did not resolve.
+function trimToAligned(entry, trim) {
+  if (!trim || !entry.comparison) {
+    setResidueFilter(entry, null);
+    return;
+  }
+  const keep = new Set();
+  const model = activeModelOf(entry);
+  for (const chain of polymerChainResidues(model).values()) {
+    const aligned = chain.residues.map((residue, index) => (entry.comparison.byMobile.has(residue.key) ? index : -1)).filter((index) => index >= 0);
+    if (!aligned.length) continue;
+    for (let index = aligned[0]; index <= aligned.at(-1); index += 1) keep.add(chain.residues[index].key);
+  }
+  setResidueFilter(entry, keep);
+}
+
+// The per-residue comparison data describing `entry`: its own superposition, or the most recent
+// one that used it as the reference (the active structure's, when it is one of them).
+function comparisonFor(entry) {
+  if (!entry) return null;
+  if (entry.comparison) {
+    return comparisonView(entry.comparison.byMobile, entryById(entry.comparison.referenceId)?.name ?? 'reference');
+  }
+  const mobiles = state.entries.filter((other) => other.comparison?.referenceId === entry.id);
+  if (!mobiles.length) return null;
+  const mobile = mobiles.includes(state.active) ? state.active : mobiles.reduce((a, b) => (b.comparison.time > a.comparison.time ? b : a));
+  return comparisonView(mobile.comparison.byReference, mobile.name);
+}
+
+function comparisonView(map, partnerName) {
+  return {
+    partnerName,
+    lookup: (key) => map.get(key) ?? null,
+    values(metric) {
+      const values = new Map();
+      for (const [key, item] of map) {
+        const value = metric === 'lddt' ? item.lddt : item.distance;
+        if (Number.isFinite(value)) values.set(key, value);
+      }
+      return values;
+    },
+  };
+}
+
+// Residue-key correspondence between two structures, directly or through a shared reference.
+function correspondence(from, to) {
+  const cacheKey = `${from.id}>${to.id}`;
+  if (state.correspondences.has(cacheKey)) return state.correspondences.get(cacheKey);
+  const toReference = (entry) => new Map([...entry.comparison.byMobile].map(([key, item]) => [key, item.key]));
+  const fromReference = (entry) => new Map([...entry.comparison.byReference].map(([key, item]) => [key, item.key]));
+  let map = null;
+  if (to.comparison?.referenceId === from.id) map = fromReference(to);
+  else if (from.comparison?.referenceId === to.id) map = toReference(from);
+  else if (from.comparison && to.comparison && from.comparison.referenceId === to.comparison.referenceId) {
+    const up = toReference(from);
+    const down = fromReference(to);
+    map = new Map();
+    for (const [key, referenceKey] of up) {
+      const target = down.get(referenceKey);
+      if (target) map.set(key, target);
+    }
+  }
+  state.correspondences.set(cacheKey, map);
+  return map;
+}
+
+function mapKeys(from, to, keys) {
+  if (!from || !to || !keys) return [];
+  if (from === to) return [...keys];
+  const map = correspondence(from, to);
+  if (!map) return [];
+  const result = [];
+  for (const key of keys) {
+    const mapped = map.get(key);
+    if (mapped) result.push(mapped);
+  }
+  return result;
+}
+
+// Side chains around the active structure's focus are shown on the aligned residues of the
+// others too, so a binding site can be compared across structures.
+function mirroredFocus(entry) {
+  const source = state.active;
+  if (!source?.focus || source === entry) return null;
+  const keys = mapKeys(source, entry, source.focus.neighborhood);
+  return keys.length ? new Set(keys) : null;
+}
+
+function renderCompareResult(reference, results, options = {}) {
+  const rows = results.map(({ mobile, result, error }) => {
+    if (error) return `<div class="warn">${escapeHTML(mobile.name)}: ${escapeHTML(error.message)}</div>`;
+    const stats = result.stats;
+    const chains = result.chainPairs.length
+      ? `chains ${result.chainPairs.map((pair) => (pair.ref === pair.mob ? pair.ref : `${pair.ref}↔${pair.mob}`)).join(', ')}`
+      : stats.correspondence === 'uniprot' ? 'matched by UniProt numbering' : '';
+    const chainTable = result.chainPairs.length > 1
+      ? `<table><thead><tr><th>Chains</th><th>Pairs</th><th>Identity</th><th>RMSD</th><th>TM</th></tr></thead><tbody>${result.chainPairs.map((pair) => `<tr><td>${escapeHTML(pair.ref === pair.mob ? pair.ref : `${pair.ref}↔${pair.mob}`)}</td><td>${pair.pairs}</td><td>${(pair.identity * 100).toFixed(0)}%</td><td>${Number.isFinite(pair.rmsd) ? `${pair.rmsd.toFixed(2)} Å` : ''}</td><td>${Number.isFinite(pair.tmScore) ? pair.tmScore.toFixed(3) : ''}</td></tr>`).join('')}</tbody></table>`
+      : '';
+    const fittedOn = stats.fittedOn
+      ? `<div class="hint">Fitted on chain ${escapeHTML(stats.fittedOn)}: it brings more residues within 2 Å than a fit of all chains, so the chains are arranged differently in the two structures. Per-chain RMSD is under this fit; per-chain TM-score uses each chain's own best superposition.</div>`
+      : '';
+    return `<div class="compare-summary">
+      <div><strong>${escapeHTML(mobile.name)}</strong> onto <strong>${escapeHTML(reference.name)}</strong>${chains ? ` <span class="muted">· ${escapeHTML(chains)}</span>` : ''}</div>
+      <dl class="compare-stats">
+        <div><dt>RMSD</dt><dd>${stats.rmsd.toFixed(2)} Å <small>${stats.keptCount} of ${stats.fitCount} pairs</small></dd></div>
+        <div><dt>All pairs</dt><dd>${stats.rmsdAll.toFixed(2)} Å <small>${stats.pairCount} pairs</small></dd></div>
+        <div><dt>TM-score</dt><dd>${Number.isFinite(stats.tmScore) ? stats.tmScore.toFixed(3) : 'n/a'}</dd></div>
+        <div title="Local Distance Difference Test, over paired Cα atoms"><dt>lDDT</dt><dd>${Number.isFinite(stats.lddt) ? stats.lddt.toFixed(3) : 'n/a'}</dd></div>
+        <div><dt>Identity</dt><dd>${(stats.identity * 100).toFixed(1)}%</dd></div>
+        <div><dt>Within 2 Å</dt><dd>${stats.closeCount ?? stats.keptCount} <small>of ${stats.pairCount}</small></dd></div>
+      </dl>
+      ${fittedOn}${chainTable}
+    </div>`;
+  });
+  const succeeded = results.some((item) => item.result);
+  const trimmed = results.some((item) => item.result && item.mobile.display.residueFilter);
+  els.compareResult.hidden = false;
+  els.compareResult.innerHTML = `${rows.join('')}
+    ${succeeded ? `<div class="button-row">
+      <button type="button" data-compare-action="deviation">Color by deviation</button>
+      <button type="button" data-compare-action="lddt" title="Local Distance Difference Test: the fraction of local Cα distances (within 15 Å) that agree, per residue">Color by lDDT</button>
+      <button type="button" data-compare-action="structure">Color by structure</button>
+      <button type="button" data-compare-action="trim" aria-pressed="${trimmed}">${trimmed ? 'Show all residues' : 'Trim to aligned region'}</button>
+    </div>
+    <p class="hint">${options.note ? `${escapeHTML(options.note)} ` : ''}RMSD over Cα pairs kept after pruning pairs more than 2 Å apart${options.fitOnSelection ? ', fitted on the selected residues only' : ''}. TM-score is normalized by the reference length; lDDT compares local distances within 15 Å and needs no superposition. Hover a residue to see its deviation.</p>` : ''}`;
+  els.compareResult.dataset.reference = String(reference.id);
+  els.compareResult.dataset.mobiles = results.filter((item) => item.result).map((item) => item.mobile.id).join(',');
+  updateCompareControls();
+}
+
+function comparedEntries() {
+  const ids = new Set([els.compareResult.dataset.reference, ...(els.compareResult.dataset.mobiles ?? '').split(',')].filter(Boolean));
+  const entries = state.entries.filter((entry) => ids.has(String(entry.id)));
+  return entries.length ? entries : state.entries;
+}
+
+function runCompareAction(action) {
+  const entries = comparedEntries();
+  if (action === 'deviation' || action === 'lddt' || action === 'structure') {
+    setColorScheme(action, entries);
+    syncStyleControls();
+    return;
+  }
+  if (action === 'rmsf') {
+    setColorScheme('rmsf', [state.active]);
+    syncStyleControls();
+    return;
+  }
+  if (action === 'trim') {
+    const mobiles = entries.filter((entry) => entry.comparison);
+    const trimmed = mobiles.some((entry) => entry.display.residueFilter);
+    for (const entry of mobiles) {
+      trimToAligned(entry, !trimmed);
+      refreshSurface(entry);
+    }
+    const button = els.compareResult.querySelector('[data-compare-action="trim"]');
+    if (button) {
+      button.textContent = trimmed ? 'Trim to aligned region' : 'Show all residues';
+      button.setAttribute('aria-pressed', String(!trimmed));
+    }
+    markSceneDirty();
+  }
+}
+
+// Fetches the AlphaFold DB model of every UniProt accession in the active entry and superposes
+// each onto its chain by UniProt numbering (sequence alignment as a fallback).
+async function compareWithAlphaFold() {
+  const reference = state.active;
+  if (!reference) return;
+  if (reference.structure.meta.isPredicted) {
+    showToast('Make an experimental structure active to compare it with its AlphaFold model.', true);
+    return;
+  }
+  const accessions = new Map();
+  for (const [chainId, info] of reference.structure.sequences) {
+    if (info.kind !== 'protein') continue;
+    for (const segment of info.uniprot ?? []) {
+      const accession = segment.accession?.toUpperCase();
+      if (accession && !accessions.has(accession)) accessions.set(accession, chainId);
+    }
+  }
+  if (!accessions.size) {
+    showToast(`${reference.name} has no UniProt cross-reference, so its AlphaFold model cannot be located.`, true);
+    return;
+  }
+  const results = [];
+  for (const [accession, chainId] of [...accessions].slice(0, 4)) {
+    let model = state.entries.find((entry) => entry.fetchId === accession && entry !== reference) ?? null;
+    if (!model) model = await fetchStructure(accession, { add: true, activate: false });
+    if (!model) {
+      results.push({ mobile: { name: `AF-${accession}` }, error: new Error('no AlphaFold DB model could be fetched.') });
+      continue;
+    }
+    model.color.scheme = 'plddt';
+    let result = null;
+    let lastError = null;
+    for (const options of [{ correspondence: 'uniprot', refChains: [chainId], accession }, { refChains: [chainId] }]) {
+      try {
+        result = compareStructures(pairOf(reference), pairOf(model), options);
+        if (result.stats.pairCount >= 10) break;
+        result = null;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (result) {
+      applyComparison(reference, model, result);
+      stylePredictedComparison(reference, model);
+      results.push({ mobile: model, result });
+    } else {
+      results.push({ mobile: model, error: lastError ?? new Error('too few residues could be paired.') });
+    }
+  }
+  setActiveEntry(reference);
+  renderCompareResult(reference, results, { note: 'Experimental structure in gray, AlphaFold model colored by pLDDT.' });
+  syncStyleControls();
+  markSceneDirty();
+  fitView(true, false);
+}
+
+// Shows every model of an ensemble at once, superposed on the core they share, with per-residue
+// RMSF; a second call returns to one model at a time.
+function toggleModelOverlay() {
+  const entry = state.active;
+  if (!entry || entry.structure.models.length < 2) return;
+  stopModelPlayback();
+  if (entry.overlay) {
+    entry.overlay = false;
+    if (entry.color.scheme === 'rmsf') entry.color.scheme = 'chain';
+  } else {
+    const models = entry.structure.models.slice(0, MAX_OVERLAY_MODELS);
+    const referenceIndex = Math.min(entry.activeModel, models.length - 1);
+    let result;
+    try {
+      result = superposeEnsemble(models, referenceIndex);
+    } catch (error) {
+      showToast(error.message, true);
+      return;
+    }
+    models.forEach((model, index) => {
+      const transform = result.transforms[index];
+      if (isIdentityTransform(transform)) return;
+      for (const atom of model.atoms) {
+        const moved = transformPoint(transform, atom.x, atom.y, atom.z);
+        atom.x = moved[0];
+        atom.y = moved[1];
+        atom.z = moved[2];
+      }
+      model.bounds = computeBounds(model.atoms);
+      model.cartoonCache = new Map();
+    });
+    entry.rmsf = result.rmsf;
+    entry.overlay = true;
+    const values = [...result.rmsf.values()].sort((a, b) => a - b);
+    const median = values[Math.floor(values.length / 2)] ?? 0;
+    els.compareResult.hidden = false;
+    els.compareResult.dataset.reference = String(entry.id);
+    els.compareResult.dataset.mobiles = '';
+    els.compareResult.innerHTML = `<div class="compare-summary"><div><strong>${escapeHTML(entry.name)}</strong> · ${models.length} models superposed on model ${models[referenceIndex].number}</div>
+      <dl class="compare-stats">
+        <div><dt>Mean RMSD</dt><dd>${result.meanRmsd.toFixed(2)} Å <small>core Cα</small></dd></div>
+        <div><dt>Median RMSF</dt><dd>${median.toFixed(2)} Å</dd></div>
+        <div><dt>Max RMSF</dt><dd>${(values.at(-1) ?? 0).toFixed(1)} Å</dd></div>
+        <div><dt>Residues</dt><dd>${result.keys.length}</dd></div>
+      </dl></div>
+      <div class="button-row"><button type="button" data-compare-action="rmsf">Color by RMSF</button></div>
+      <p class="hint">Each model is fitted to the reference model on Cα atoms, pruning pairs more than 2 Å apart so flexible termini do not steer the fit. RMSF is the fluctuation about the mean position.</p>`;
+    if (models.length < entry.structure.models.length) showToast(`Showing the first ${MAX_OVERLAY_MODELS} of ${entry.structure.models.length} models.`);
+  }
+  layoutParts();
+  updateModelLabel();
+  updateCompareControls();
+  renderStructureList();
+  markSceneDirty();
+  fitView(true, false);
+}
+
 /* ---------- Structure UI ---------- */
 
 function updateStructureUI() {
@@ -1603,7 +2578,8 @@ function updateStructureUI() {
   const meta = structure.meta;
   els.title.textContent = meta.title;
   els.title.title = meta.title;
-  els.subtitle.textContent = [state.sourceLabel, structure.format === 'mmcif' ? 'PDBx/mmCIF' : 'PDB'].filter(Boolean).join(' · ');
+  const count = state.entries.length;
+  els.subtitle.textContent = [count > 1 ? `${state.active.name} · ${count} structures` : '', state.sourceLabel, structure.format === 'mmcif' ? 'PDBx/mmCIF' : 'PDB'].filter(Boolean).join(' · ');
   document.title = `${meta.code || structure.label} · Proteoscope`;
   setMeta(els.metaMethod, meta.isPredicted && !meta.method ? 'Predicted model' : titleCase(meta.method) || 'Unknown');
   setMeta(els.metaResolution, meta.resolution ? meta.resolution.replace(' Angstroms', ' Å') : 'n/a');
@@ -1632,6 +2608,9 @@ function updateStructureUI() {
   renderSelectionPanel();
   renderInteractions();
   renderMeasurements();
+  renderStructureList();
+  renderStyleScope();
+  updateCompareControls();
   refreshTabPanels();
   clearSearch();
   updateViewOffset();
@@ -1775,6 +2754,7 @@ function chainOptionLabel(chain) {
 
 function renderChains() {
   if (!state.structure) return;
+  els.chainsTitle.textContent = state.entries.length > 1 ? `Chains · ${state.active.name}` : 'Chains';
   const fragment = document.createDocumentFragment();
   state.structure.chains.forEach((chain, index) => {
     const visible = !state.display.visibleChains || state.display.visibleChains.has(chain.id);
@@ -1812,10 +2792,9 @@ function invertChains() {
 
 function setVisibleChains(chains) {
   state.display.visibleChains = chains;
-  state.cartoonKey = '';
   renderChains();
   markSceneDirty();
-  refreshSurface();
+  refreshSurface(state.active);
 }
 
 /* ---------- Sequence ---------- */
@@ -1828,7 +2807,7 @@ function renderSequence() {
     els.sequenceInfo.textContent = '';
     return;
   }
-  sequenceView.render(info, residueColor);
+  sequenceView.render(info, residueColor, { partner: sequencePartner() });
   const uniprot = info.uniprot?.[0];
   const missing = info.items.filter((item) => !item.residue && !item.gap).length;
   els.sequenceInfo.textContent = [
@@ -1837,6 +2816,34 @@ function renderSequence() {
     info.source === 'model' ? 'from coordinates' : `from ${info.source}`,
     uniprot?.accession ? `UniProt ${uniprot.accession}` : '',
   ].filter(Boolean).join(' · ');
+}
+
+// Structures whose residues are paired with the active one (directly or through a shared
+// reference) can be shown as a second sequence row.
+function sequencePartner() {
+  const active = state.active;
+  const partners = active ? state.entries.filter((entry) => entry !== active && correspondence(active, entry)?.size) : [];
+  els.sequencePartner.hidden = !partners.length;
+  if (!partners.length) {
+    els.sequencePartner.replaceChildren();
+    return null;
+  }
+  const choice = state.sequencePartnerChoice;
+  els.sequencePartner.replaceChildren(new Option('No aligned row', 'none'), ...partners.map((entry) => new Option(`Aligned: ${entry.name}`, String(entry.id))));
+  const partner = choice === 'none' ? null : partners.find((entry) => String(entry.id) === choice) ?? partners.at(-1);
+  els.sequencePartner.value = partner ? String(partner.id) : 'none';
+  if (!partner) return null;
+  const map = correspondence(active, partner);
+  const model = activeModelOf(partner);
+  return {
+    name: partner.name,
+    lookup(key) {
+      const residue = model.residueMap.get(map.get(key));
+      if (!residue) return null;
+      const deviation = comparisonFor(active)?.partnerName === partner.name ? comparisonFor(active).lookup(key) : null;
+      return { code: residue.code || 'X', label: `${residue.resName} ${residue.chain}${residue.resSeq}${residue.iCode || ''}${deviation ? ` · ${deviation.distance.toFixed(1)} Å` : ''}` };
+    },
+  };
 }
 
 /* ---------- Selection panel ---------- */
@@ -2027,31 +3034,47 @@ function surfaceWorker() {
   return state.workers;
 }
 
-function surfaceAtoms(model) {
-  return model.atoms.filter((atom) => atom.kind !== 'water' && !atom.isHydrogen && (!state.display.visibleChains || state.display.visibleChains.has(atom.chain)));
+function surfaceAtoms(entry, model) {
+  const { visibleChains, residueFilter } = entry.display;
+  return model.atoms.filter((atom) => atom.kind !== 'water' && !atom.isHydrogen
+    && (!visibleChains || visibleChains.has(atom.chain))
+    && (!residueFilter || (atom.kind !== 'protein' && atom.kind !== 'nucleic') || residueFilter.has(atom.residueKey)));
 }
 
-async function refreshSurface() {
-  if (!state.structure) return;
-  const kind = state.surface.kind;
-  if (kind === 'off') {
-    state.surface.data = null;
-    state.surface.key = '';
-    state.renderer.setMesh('surface', null);
-    els.surfaceStatus.textContent = '';
+// Recomputes the surface of one structure, or of every structure when none is given.
+async function refreshSurface(target = null) {
+  const entries = target ? [target] : [...state.entries];
+  await Promise.all(entries.map(refreshEntrySurface));
+}
+
+async function refreshEntrySurface(entry) {
+  const surface = entry.surface;
+  const meshId = `surface:${entry.id}`;
+  const isActive = entry === state.active;
+  if (surface.kind === 'off' || !entry.visible) {
+    if (surface.kind === 'off') {
+      surface.data = null;
+      surface.key = '';
+    }
+    state.renderer.setMesh(meshId, null);
+    if (isActive) els.surfaceStatus.textContent = '';
+    renderLegend();
     requestRender();
     return;
   }
   if (state.renderer.kind !== 'webgpu') {
-    els.surfaceStatus.textContent = 'Surfaces need WebGPU.';
+    if (isActive) els.surfaceStatus.textContent = 'Surfaces need WebGPU.';
     return;
   }
-  const model = activeModel();
-  const atoms = surfaceAtoms(model);
-  const key = [state.structure.label, state.structure.activeAssemblyId, model.number, kind, state.display.visibleChains ? [...state.display.visibleChains].sort().join(',') : '*'].join('|');
-  if (key === state.surface.key && state.surface.data) return;
-  state.surface.key = key;
-  const ticket = (state.surface.pending += 1);
+  const model = activeModelOf(entry);
+  const atoms = surfaceAtoms(entry, model);
+  const key = [entry.structure.activeAssemblyId, model.number, surface.kind, entry.display.visibleChains ? [...entry.display.visibleChains].sort().join(',') : '*', entry.display.residueFilterKey || '*', entry.transformVersion].join('|');
+  if (key === surface.key && surface.data) {
+    if (!state.renderer.meshIds().includes(meshId)) await applySurfaceColors(entry, true);
+    return;
+  }
+  surface.key = key;
+  const ticket = (surface.pending += 1);
   const positions = new Float32Array(atoms.length * 3);
   const radii = new Float32Array(atoms.length);
   atoms.forEach((atom, index) => {
@@ -2060,29 +3083,32 @@ async function refreshSurface() {
     positions[index * 3 + 2] = atom.z;
     radii[index] = elementInfo(atom.element).vdw;
   });
-  els.surfaceStatus.textContent = `Computing ${els.surfaceKind.selectedOptions[0]?.textContent ?? kind} surface for ${formatNumber(atoms.length)} atoms…`;
+  const label = els.surfaceKind.querySelector(`option[value="${surface.kind}"]`)?.textContent ?? surface.kind;
+  if (isActive) els.surfaceStatus.textContent = `Computing ${label} surface for ${formatNumber(atoms.length)} atoms…`;
   const started = performance.now();
   try {
-    const result = await surfaceWorker().run('surface', { positions, radii, options: { kind } }, [positions.buffer, radii.buffer]);
-    if (ticket !== state.surface.pending) return;
+    const result = await surfaceWorker().run('surface', { positions, radii, options: { kind: surface.kind } }, [positions.buffer, radii.buffer]);
+    if (ticket !== surface.pending || !state.entries.includes(entry)) return;
     const atomIds = new Uint32Array(result.atoms.length);
     for (let index = 0; index < result.atoms.length; index += 1) atomIds[index] = atoms[result.atoms[index]]?.id ?? 0;
-    state.surface.data = { positions: result.positions, normals: result.normals, indices: result.indices, atoms: atomIds, potential: null };
+    surface.data = { positions: result.positions, normals: result.normals, indices: result.indices, atoms: atomIds, potential: null };
     const triangles = result.indices.length / 3;
-    els.surfaceStatus.textContent = `${formatNumber(triangles)} triangles · ${((performance.now() - started) / 1000).toFixed(1)} s${result.spacing ? ` · grid ${result.spacing.toFixed(2)} Å` : ''}`;
-    await applySurfaceColors(true);
+    surface.status = `${formatNumber(triangles)} triangles · ${((performance.now() - started) / 1000).toFixed(1)} s${result.spacing ? ` · grid ${result.spacing.toFixed(2)} Å` : ''}`;
+    if (entry === state.active) els.surfaceStatus.textContent = surface.status;
+    await applySurfaceColors(entry, true);
   } catch (error) {
     console.error(error);
-    if (ticket === state.surface.pending) els.surfaceStatus.textContent = `Surface failed: ${error.message}`;
+    if (ticket === surface.pending && entry === state.active) els.surfaceStatus.textContent = `Surface failed: ${error.message}`;
   }
 }
 
-async function applySurfaceColors(force = true) {
-  const data = state.surface.data;
-  if (!data || !state.structure) return;
-  const model = activeModel();
-  const mode = state.surface.color;
+async function applySurfaceColors(entry = state.active, force = true) {
+  const data = entry?.surface.data;
+  if (!data || !entry.visible) return;
+  const model = activeModelOf(entry);
+  const mode = entry.surface.color;
   const vertexCount = data.positions.length / 3;
+  const isActive = entry === state.active;
   let vertexColors = null;
   if (mode === 'electrostatic') {
     if (!data.potential) {
@@ -2100,7 +3126,7 @@ async function applySurfaceColors(force = true) {
         chargePositions[index * 3 + 2] = atom.z;
         chargeValues[index] = charges[atomIndex];
       });
-      els.surfaceStatus.textContent = 'Computing Coulombic potential…';
+      if (isActive) els.surfaceStatus.textContent = 'Computing Coulombic potential…';
       const points = data.positions.slice();
       const normals = data.normals.slice();
       data.potential = await surfaceWorker().run('potential', {
@@ -2111,8 +3137,9 @@ async function applySurfaceColors(force = true) {
         options: { offset: 1.4 },
       }, [points.buffer, normals.buffer, chargePositions.buffer, chargeValues.buffer]);
       data.range = module.COULOMBIC_RANGE ?? [-10, 10];
-      els.surfaceStatus.textContent = `${formatNumber(data.indices.length / 3)} triangles · Coulombic potential from ${formatNumber(charged.length)} charged atoms`;
-      if (data !== state.surface.data) return;
+      entry.surface.status = `${formatNumber(data.indices.length / 3)} triangles · Coulombic potential from ${formatNumber(charged.length)} charged atoms`;
+      if (entry === state.active) els.surfaceStatus.textContent = entry.surface.status;
+      if (data !== entry.surface.data) return;
     }
     vertexColors = new Uint32Array(vertexCount);
     const [low, high] = data.range;
@@ -2124,7 +3151,7 @@ async function applySurfaceColors(force = true) {
     vertexColors = new Uint32Array(vertexCount);
     for (let index = 0; index < vertexCount; index += 1) {
       const atom = model.atoms[data.atoms[index]];
-      const residue = residueOf(atom);
+      const residue = atom ? residueIn(model, atom) : null;
       const value = KYTE_DOOLITTLE[residue?.parent];
       vertexColors[index] = packColor(value === undefined ? [0.85, 0.85, 0.85] : sampleColormap('hydrophobicity', (value + 4.5) / 9));
     }
@@ -2147,13 +3174,14 @@ async function applySurfaceColors(force = true) {
     uints[offset + 7] = vertexColors ? vertexColors[index] : 0;
   }
   data.uploadedMode = mode;
-  state.renderer.setMesh('surface', { vertices: buffer, indices: data.indices, opacity: state.surface.opacity });
+  const part = state.partByModel.get(model);
+  state.renderer.setMesh(`surface:${entry.id}`, { vertices: buffer, indices: data.indices, opacity: entry.surface.opacity, atomOffset: part?.offset ?? 0 });
   if (mode === 'electrostatic') {
-    state.surfaceLegend = { type: 'gradient', title: 'Coulombic potential (kcal/mol·e)', colormap: 'electrostatic', minLabel: String(data.range[0]), maxLabel: `+${data.range[1]}`, note: 'Formal charges, ε = 4r, 1.4 Å offset' };
+    entry.surfaceLegend = { type: 'gradient', title: 'Coulombic potential (kcal/mol·e)', colormap: 'electrostatic', minLabel: String(data.range[0]), maxLabel: `+${data.range[1]}`, note: 'Formal charges, ε = 4r, 1.4 Å offset' };
   } else if (mode === 'hydrophobicity') {
-    state.surfaceLegend = { type: 'gradient', title: 'Surface hydropathy', colormap: 'hydrophobicity', minLabel: 'Hydrophilic', maxLabel: 'Hydrophobic' };
+    entry.surfaceLegend = { type: 'gradient', title: 'Surface hydropathy', colormap: 'hydrophobicity', minLabel: 'Hydrophilic', maxLabel: 'Hydrophobic' };
   } else {
-    state.surfaceLegend = null;
+    entry.surfaceLegend = null;
   }
   renderLegend();
   requestRender();
@@ -2318,17 +3346,18 @@ function onProfileClick(event) {
 
 /* ---------- PAE ---------- */
 
-async function loadPAEFromURL(url) {
+async function loadPAEFromURL(url, entry = state.active) {
   try {
     const response = await fetch(url);
     if (!response.ok) return;
-    loadPAEFromJSON(await response.json(), 'AlphaFold DB');
+    loadPAEFromJSON(await response.json(), 'AlphaFold DB', entry);
   } catch (error) {
     console.warn('PAE fetch failed', error);
   }
 }
 
-function loadPAEFromJSON(json, source) {
+function loadPAEFromJSON(json, source, entry = state.active) {
+  if (!entry) return;
   const document0 = Array.isArray(json) ? json[0] : json;
   const matrix = document0?.predicted_aligned_error ?? document0?.pae;
   if (!Array.isArray(matrix) || !Array.isArray(matrix[0])) {
@@ -2345,8 +3374,8 @@ function loadPAEFromJSON(json, source) {
       if (value > max) max = value;
     }
   }
-  const residues = paeResidues(size, document0);
-  state.pae = {
+  const residues = paeResidues(size, document0, entry);
+  entry.pae = {
     size,
     matrix: flat,
     max: Number(document0.max_predicted_aligned_error ?? document0.max_pae) || Math.max(31.75, max),
@@ -2354,16 +3383,18 @@ function loadPAEFromJSON(json, source) {
     chainBoundaries: chainBoundaries(residues),
     source,
   };
-  if (Array.isArray(document0.plddt) && state.structure && !state.structure.meta.isPredicted) {
-    state.structure.meta.isPredicted = true;
+  if (Array.isArray(document0.plddt) && !entry.structure.meta.isPredicted) {
+    entry.structure.meta.isPredicted = true;
   }
-  renderPAE();
-  showToast(`Loaded PAE matrix (${size} × ${size}) from ${source}.`);
+  if (entry === state.active) {
+    renderPAE();
+    showToast(`Loaded PAE matrix (${size} × ${size}) from ${source}.`);
+  }
 }
 
-function paeResidues(size, document0) {
-  if (!state.structure) return [];
-  const model = activeModel();
+function paeResidues(size, document0, entry = state.active) {
+  if (!entry) return [];
+  const model = activeModelOf(entry);
   const chains = document0.token_chain_ids;
   const numbers = document0.token_res_ids;
   if (Array.isArray(chains) && Array.isArray(numbers) && chains.length === size) {
@@ -2678,7 +3709,7 @@ function applyPeptides(module, peptides, label) {
     }
     setSites(sites);
   }
-  setColorScheme('coverage');
+  setColorScheme('coverage', [state.active]);
   renderProfile();
 }
 
@@ -2763,8 +3794,8 @@ function setSites(sites) {
   markSceneDirty();
 }
 
-function siteResidueKeys() {
-  return new Set(state.proteomics.sites.map((site) => site.residue.key));
+function siteResidueKeys(entry = state.active) {
+  return new Set(entry.proteomics.sites.map((site) => site.residue.key));
 }
 
 async function mapCrosslinksFromInput() {
@@ -2848,28 +3879,96 @@ async function applyResidueDataFromInput() {
   els.colormap.value = els.dataColormap.value;
   els.dataResult.hidden = false;
   els.dataResult.innerHTML = `<strong>${values.size}</strong> residues colored${unmatched ? ` · <span class="warn">${unmatched} rows did not match a residue</span>` : ''}${parsed.skipped ? ` · ${parsed.skipped} lines skipped` : ''}.`;
-  setColorScheme('data');
+  setColorScheme('data', [state.active]);
   renderProfile();
 }
 
 /* ---------- Color scheme and legend ---------- */
 
-function setColorScheme(scheme) {
-  state.color.scheme = scheme;
-  els.colorScheme.value = scheme;
-  const categorical = ['chain', 'entity'].includes(scheme);
-  const continuous = ['bfactor', 'exposure', 'coverage', 'data'].includes(scheme);
-  els.paletteField.hidden = !categorical;
-  els.colormapField.hidden = !continuous;
-  els.uniformField.hidden = scheme !== 'uniform';
+// Data-driven schemes (coverage, custom data, exposure) describe one structure, so callers pass
+// the entries they apply to; the Style tab applies its choice to the style scope.
+function setColorScheme(scheme, entries = styleTargets()) {
+  for (const entry of entries) entry.color.scheme = scheme;
+  els.colorScheme.value = state.color.scheme;
+  updateColorFields(state.color.scheme);
   if (scheme === 'exposure' && !state.sasa) showToast('Compute SASA in the Analysis tab to color by solvent exposure.');
   if (scheme === 'coverage' && !state.proteomics.coverage) showToast('Map peptides in the Proteomics tab to color by coverage.');
   if (scheme === 'data' && !state.proteomics.data) showToast('Load residue values in the Proteomics tab first.');
+  if ((scheme === 'deviation' || scheme === 'lddt') && !entries.some((entry) => entry.id && comparisonFor(entry))) showToast('Superpose two structures in the Analysis tab to color by their differences.');
+  if (scheme === 'rmsf' && !entries.some((entry) => entry.rmsf)) showToast('Overlay the models of an ensemble in the Analysis tab to color by RMSF.');
   markColorsDirty();
 }
 
+function updateColorFields(scheme) {
+  els.paletteField.hidden = !['chain', 'entity'].includes(scheme);
+  els.colormapField.hidden = !['bfactor', 'exposure', 'coverage', 'data', 'deviation', 'rmsf'].includes(scheme);
+  els.uniformField.hidden = scheme !== 'uniform';
+}
+
+// Mirrors the active structure's style settings into the Style tab controls.
+function syncStyleControls() {
+  const display = state.display;
+  const color = state.color;
+  const surface = state.surface;
+  els.polymerRep.value = display.polymer;
+  els.ligandRep.value = display.ligand;
+  els.sidechainMode.value = display.sidechains;
+  els.showWater.checked = display.showWater;
+  els.showHydrogen.checked = display.showHydrogen;
+  document.querySelector('#atom-scale').value = String(display.atomScale);
+  document.querySelector('#bond-scale').value = String(display.bondScale);
+  document.querySelector('#cartoon-width').value = String(display.cartoonWidth);
+  document.querySelector('#cartoon-quality').value = String(display.cartoonQuality);
+  els.surfaceKind.value = surface.kind;
+  els.surfaceColor.value = surface.color;
+  els.surfaceOpacity.value = String(surface.opacity);
+  els.surfaceOpacityValue.textContent = `${Math.round(surface.opacity * 100)}%`;
+  els.surfaceStatus.textContent = surface.kind !== 'off' ? surface.status ?? '' : '';
+  els.colorScheme.value = color.scheme;
+  els.chainPalette.value = color.palette;
+  els.colormap.value = color.colormap;
+  els.uniformColor.value = color.uniformColor;
+  els.heteroElement.checked = color.heteroByElement;
+  updateColorFields(color.scheme);
+  syncPresetButtons();
+  syncControlOutputs();
+  renderStyleScope();
+}
+
+function renderStyleScope() {
+  const multiple = state.entries.length > 1;
+  els.styleScope.hidden = !multiple;
+  if (!multiple) return;
+  document.querySelectorAll('[data-style-scope]').forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.styleScope === state.styleScope);
+    if (button.dataset.styleScope === 'active') button.textContent = `Only ${state.active?.name ?? 'active'}`;
+  });
+}
+
+// Legends of every visible structure (active first), without duplicates.
+function collectLegends() {
+  const legends = [];
+  const seen = new Set();
+  const add = (legend) => {
+    if (!legend) return;
+    const key = JSON.stringify([legend.type, legend.title, legend.items?.map((item) => item.label), legend.minLabel, legend.maxLabel]);
+    if (seen.has(key)) return;
+    seen.add(key);
+    legends.push(legend);
+  };
+  const visible = state.entries.filter((entry) => entry.visible);
+  const ordered = [state.active, ...visible.filter((entry) => entry !== state.active)].filter((entry) => entry?.visible);
+  const byStructure = visible.filter((entry) => entry.color.scheme === 'structure');
+  if (byStructure.length) {
+    add({ type: 'categorical', title: 'Structures', items: byStructure.map((entry) => ({ label: entry.name, color: entryColor(entry) })) });
+  }
+  for (const entry of ordered) add(entry.legend);
+  for (const entry of ordered) if (entry.surface.kind !== 'off') add(entry.surfaceLegend);
+  return legends;
+}
+
 function renderLegend() {
-  const legends = [state.legend, state.surface.kind !== 'off' ? state.surfaceLegend : null].filter(Boolean);
+  const legends = collectLegends();
   if (!legends.length) {
     els.legend.hidden = true;
     return;
@@ -2931,29 +4030,32 @@ function syncControlOutputs() {
 
 function setActiveModel(index) {
   if (!state.structure) return;
-  state.activeModel = Math.max(0, Math.min(state.structure.models.length - 1, index));
-  els.modelSlider.value = String(state.activeModel + 1);
-  state.measurePending = [];
-  state.measurements = [];
+  const entry = state.active;
+  entry.activeModel = Math.max(0, Math.min(entry.structure.models.length - 1, index));
+  els.modelSlider.value = String(entry.activeModel + 1);
   state.interactions = { ...state.interactions, list: [] };
-  state.atomFlags = null;
-  if (state.sasa) {
-    state.sasa = null;
+  if (entry.sasa) {
+    entry.sasa = null;
     els.sasaColor.disabled = true;
     els.sasaResult.hidden = true;
-    if (state.color.scheme === 'exposure') markColorsDirty();
+    if (entry.color.scheme === 'exposure') markColorsDirty();
   }
+  // Measurements on the previous model are dropped when the scene layout is rebuilt.
+  layoutParts();
   renderMeasurements();
   renderInteractions();
   updateModelLabel();
   markSceneDirty();
-  if (state.focus) computeFocusInteractions([...state.focus.residues]);
-  if (state.surface.kind !== 'off') refreshSurface();
+  if (entry.focus) computeFocusInteractions([...entry.focus.residues]);
+  if (entry.surface.kind !== 'off') refreshSurface(entry);
 }
 
 function updateModelLabel() {
   const total = state.structure?.models.length ?? 1;
-  els.modelLabel.textContent = `${state.activeModel + 1} / ${total}`;
+  const overlay = Boolean(state.active?.overlay) && total > 1;
+  els.modelLabel.textContent = overlay ? `all ${Math.min(total, MAX_OVERLAY_MODELS)}` : `${state.activeModel + 1} / ${total}`;
+  els.modelSlider.disabled = overlay;
+  els.modelPlay.disabled = overlay;
   const model = state.structure ? activeModel() : null;
   els.atomsLabel.textContent = total > 1 ? 'Atoms/model' : 'Atoms';
   els.atomsMetric.textContent = formatNumber(model?.atoms.length ?? 0);
@@ -2964,6 +4066,7 @@ function toggleModelPlayback() {
     stopModelPlayback();
     return;
   }
+  if (state.active?.overlay) return;
   els.modelPlay.textContent = '❚❚';
   state.modelTimer = setInterval(() => {
     const total = state.structure?.models.length ?? 1;
@@ -3109,7 +4212,7 @@ async function exportImage(target) {
 }
 
 function drawExportLabels(ctx, view, width, height, cssScale) {
-  const labels = collectLabels(activeModel());
+  const labels = collectLabels();
   ctx.font = `600 ${Math.round(11 * cssScale)}px Inter, ui-sans-serif, system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -3132,7 +4235,7 @@ function drawExportLabels(ctx, view, width, height, cssScale) {
 }
 
 function drawExportLegend(ctx, width, height, cssScale) {
-  const legends = [state.legend, state.surface.kind !== 'off' ? state.surfaceLegend : null].filter(Boolean);
+  const legends = collectLegends();
   if (!legends.length) return;
   const light = state.background === 'white' || state.background === 'gray';
   let y = height - 16 * cssScale;
@@ -3314,12 +4417,6 @@ async function loadModule(name, path) {
 
 /* ---------- Helpers ---------- */
 
-function residueOf(atom) {
-  if (!atom || !state.structure) return null;
-  const model = activeModel();
-  return model.residues[model.atomResidue[atom.id]] ?? null;
-}
-
 function residueLabel(residue) {
   if (!residue) return '';
   return `${residue.resName} ${residue.resSeq}${residue.iCode || ''} · chain ${residue.chain}`;
@@ -3405,6 +4502,17 @@ function nextFrame() {
 globalThis.proteoscope = {
   state,
   fetch: fetchStructure,
+  add: (query) => fetchStructure(query, { add: true }),
+  structures: () => state.entries.map((entry) => ({ id: entry.id, name: entry.name, active: entry === state.active, visible: entry.visible, comparison: entry.comparison?.stats ?? null })),
+  activate: (name) => setActiveEntry(state.entries.find((entry) => entry.name === name || entry.id === name)),
+  superpose: (mobile, reference, options = {}) => {
+    const find = (value) => state.entries.find((entry) => entry.name === value || entry.id === value);
+    const referenceEntry = find(reference) ?? state.entries[0];
+    const mobiles = mobile ? [find(mobile)].filter(Boolean) : state.entries.filter((entry) => entry !== referenceEntry);
+    return runSuperposition({ ...options, reference: referenceEntry, mobiles }).map((item) => ({ name: item.mobile.name, stats: item.result?.stats, error: item.error?.message }));
+  },
+  compareWithAlphaFold,
+  overlayModels: toggleModelOverlay,
   select: (keys) => selectResidues(keys, { frame: true }),
   focus: focusResidues,
   representation: applyRepresentationPreset,

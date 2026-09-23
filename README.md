@@ -10,8 +10,9 @@ happen in your browser, so local files never leave your computer.
 It covers the everyday structural biology loop: open a structure by file, PDB
 ID or UniProt accession; style it; find and focus a ligand or residue; see its
 interactions, surface and electrostatics; judge model quality (B-factors,
-AlphaFold pLDDT and PAE, Ramachandran); map proteomics data onto it; and
-export a publication-ready figure.
+AlphaFold pLDDT and PAE, Ramachandran); compare it with other structures or
+its AlphaFold prediction; map proteomics data onto it; and export a
+publication-ready figure.
 
 Highlights:
 
@@ -33,6 +34,14 @@ Highlights:
   - Distance, angle and torsion rulers.
 - **AlphaFold.** Fetch any UniProt accession from AlphaFold DB; view pLDDT
   coloring and an interactive PAE plot linked to the 3D view.
+- **Comparison.**
+  - Several structures in one scene, each with its own style.
+  - Superposition by sequence alignment with outlier pruning, reporting RMSD,
+    TM-score and lDDT, overall and per chain.
+  - Color by deviation or local agreement; aligned sequences with
+    substitutions marked.
+  - One-click comparison of an experimental structure with its AlphaFold
+    model, and NMR ensemble overlays with per-residue RMSF.
 - **Proteomics.**
   - ProtParam-style sequence properties.
   - Peptide coverage from MaxQuant, DIA-NN, Spectronaut, ProForma or Comet
@@ -158,10 +167,13 @@ You can also run it from PowerShell:
 | --- | --- |
 | **RCSB PDB** | Type a PDB ID (for example `4HHB`, or an extended ID such as `pdb_00004hhb`) in **Open structure** and press **Fetch**. The PDBx/mmCIF file is downloaded from RCSB. |
 | **AlphaFold DB** | Type a UniProt accession (for example `P04637`). The current AlphaFold DB model and its predicted aligned error (PAE) matrix are downloaded. |
-| **Local file** | Click **Open local file** or drag files onto the window. Accepts `.pdb`, `.ent`, `.cif` and `.mmcif`, optionally gzip-compressed (`.gz`). |
-| **Command line** | `proteoscope structure.cif model.pdb.gz` opens the first file at startup. |
+| **Local file** | Click **Open local file** or drag files onto the window. Accepts `.pdb`, `.ent`, `.cif` and `.mmcif`, optionally gzip-compressed (`.gz`). Several files open together. |
+| **Command line** | `proteoscope structure.cif model.pdb.gz` opens every file at startup; the first is active. |
 | **Examples** | **Bundled examples** lists the structures embedded from `data/`. |
-| **Deep link** | `http://127.0.0.1:8765/#fetch=4HHB` fetches on load. |
+| **Deep link** | `http://127.0.0.1:8765/#fetch=4HHB` fetches on load. `#fetch=4AKE,1AKE&superpose` loads both and superposes the second onto the first. |
+
+A new structure replaces the scene unless **Add to the scene instead of
+replacing** is ticked; see [Comparing Structures](#comparing-structures).
 
 Remote downloads go through the local Proteoscope server, which only contacts
 `files.rcsb.org`, `alphafold.ebi.ac.uk` and `rest.uniprot.org`. Results are
@@ -176,13 +188,15 @@ a loaded model to show its PAE plot.
 
 - **Top bar:** structure title, search (press `/`), renderer badge, panel toggles.
 - **Left panel tabs:**
-  - **Structure:** entry metadata (method, resolution, R-free, organism,
-    deposition date), biological assemblies, composition and molecules, and
-    the secondary-structure source.
+  - **Structure:** the structures in the scene (when there are several), entry
+    metadata (method, resolution, R-free, organism, deposition date),
+    biological assemblies, composition and molecules, and the
+    secondary-structure source.
   - **Style:** representations, surface, color scheme, sizes, lighting and
-    effects, background, projection and clipping.
-  - **Analysis:** interactions, solvent accessibility, Ramachandran plot,
-    per-residue profile, PAE.
+    effects, background, projection and clipping. With several structures,
+    changes apply to all of them or only to the active one.
+  - **Analysis:** structure comparison, interactions, solvent accessibility,
+    Ramachandran plot, per-residue profile, PAE.
   - **Proteomics:** sequence properties, UniProt annotations, peptides,
     sites and variants, cross-links, custom data.
 - **Right panel:**
@@ -192,6 +206,8 @@ a loaded model to show its PAE plot.
   - Residues missing from the model are grey, and helices and strands are
     underlined.
   - Numbering gaps are marked.
+  - After a superposition, a second row shows the aligned residues of the
+    other structure, with substitutions highlighted.
   - Click to select, shift-click to add, drag for a range, double-click to
     focus.
 - **Toolbar:** reset view, focus, distance, angle and torsion rulers, spin,
@@ -207,7 +223,7 @@ a loaded model to show its PAE plot.
 | Pan | Shift-drag or right-drag |
 | Roll | Alt/Option-drag |
 | Zoom | Scroll or pinch |
-| Select residue / add to selection | Click / Shift-click |
+| Select residue / add to selection | Click / Shift-click (clicking another structure makes it active) |
 | Focus a residue or ligand | Double-click, or select and press `F` |
 | Reset view | `R` |
 | Representation presets | `1` cartoon, `2` ball & stick, `3` sticks, `4` spacefill, `5` trace, `6` surface |
@@ -267,6 +283,10 @@ are recognized automatically.
 | AlphaFold confidence (pLDDT) | AlphaFold DB colors: >90 dark blue, 70–90 light blue, 50–70 yellow, <50 orange. Applied automatically to predicted models. |
 | Solvent exposure | Relative SASA, after **Compute SASA** |
 | Peptide coverage / Custom residue data | From the Proteomics tab |
+| Structure | One color per structure; the default when a scene holds several |
+| Deviation after superposition | Cα distance to the aligned residue, 0 to 4 Å (blue-white-red) |
+| Local agreement (lDDT) | Per-residue lDDT against the compared structure, in the pLDDT colors |
+| Ensemble flexibility (RMSF) | Per-residue RMSF across overlaid models |
 | Uniform | Any color |
 
 *Heteroatoms by element* (on by default) colors N, O, S and other non-carbon
@@ -321,6 +341,63 @@ Pick a ruler in the toolbar or press `D` (distance), `A` (angle) or `T`
 (torsion/dihedral), then click 2, 3 or 4 atoms. Values appear as 3D labels
 and in the Measurements card. Remove one with ×, or press Backspace to remove
 the last.
+
+## Comparing Structures
+
+![Adenylate kinase open (4AKE) and closed (1AKE, with the inhibitor Ap5A) superposed on the CORE domain and colored by Cα deviation: the LID and NMP domains that close over the substrate are red](docs/images/compare-deviation.jpg)
+
+- **Loading several structures.** Tick **Add to the scene instead of
+  replacing** before fetching or opening, drop several files at once, pass
+  several files on the command line, or use a link such as
+  `#fetch=4AKE,1AKE&superpose`.
+- **The structures list** (Structure tab) shows every structure with its
+  color. Click one, in the list or in the 3D view, to make it active: the
+  metadata, chains, sequence, selection and the Analysis and Proteomics tabs
+  follow the active structure. The eye button hides a structure and × removes
+  it. Scope Style-tab changes to all structures or only the active one.
+- **Superpose** (Analysis tab) moves one structure, or all others, onto a
+  reference:
+  - Residues are paired by a global alignment (BLOSUM62 blended with
+    secondary structure, as in ChimeraX *matchmaker*), and principal atoms
+    (Cα, or C4′ in nucleic acids) are fitted by least squares.
+  - Pairs more than 2 Å apart are pruned iteratively, so a flexible loop or a
+    moving domain does not drag the fit. **Fit on selected residues** fits on a
+    domain or binding site you selected.
+  - Chains are paired automatically by sequence, and identical subunits by
+    position; choose chains to compare one pair. When the chains of a complex
+    are arranged differently, the fit uses the chain pair that superposes
+    best.
+  - The result reports RMSD of the fitted core and of all pairs, TM-score
+    (normalized by the reference), lDDT, sequence identity and the number of
+    pairs within 2 Å, with a per-chain table for complexes.
+- **Seeing differences.**
+  - Color by **deviation** (Cα distance after superposition) or **lDDT**, which
+    compares local distances and needs no superposition, so a hinge motion
+    does not mask a well-preserved domain.
+  - Hovering a residue shows its deviation; selecting or hovering highlights
+    the aligned residue in the other structure; focusing a binding site shows
+    the matching side chains in both.
+  - **Trim to aligned region** hides residues outside the compared span.
+  - Measurements work between structures.
+- **Compare with AlphaFold** fetches the AlphaFold DB model for each UniProt
+  accession of the active entry and superposes it by UniProt numbering. The
+  experimental structure turns gray, the model keeps its pLDDT colors and is
+  trimmed to the aligned span, and its PAE matrix is available when it is
+  active.
+- **Overlay models** superposes every model of an ensemble (for example an
+  NMR structure) on the core the models share and shows them together, with
+  mean RMSD and per-residue RMSF; color by RMSF to see the flexible regions.
+
+![EGFR kinase domain with erlotinib (1M17, gray) and the AlphaFold DB model of EGFR (P00533) superposed by UniProt numbering and colored by pLDDT](docs/images/compare-alphafold.jpg)
+
+Checked against known cases:
+
+| Comparison | Result |
+| --- | --- |
+| Adenylate kinase closed (1AKE) onto open (4AKE), chain A | 1.08 Å over 112 core pairs; TM-score 0.68; the LID and NMP domains deviate |
+| Human α-globin vs β-globin (4HHB chains A and B) | 44.6% identity with the D-helix gap; 1.10 Å over 120 pairs; TM-score 0.89 |
+| EGFR (1M17) vs AlphaFold model P00533 | 0.78 Å over 249 of 312 pairs; TM-score 0.89; lDDT 0.92 |
+| Hemoglobin R state (1HHO assembly) onto T state (4HHB) | One αβ dimer fits within 1.1–1.5 Å, the other is rotated (2.7–4.5 Å) |
 
 ## Analysis Tab
 
@@ -412,7 +489,10 @@ Interaction tables export as CSV.
   assembly**. Assemblies above 300,000 atoms per model are shown as
   unavailable.
 - **Ensembles.** Multi-model files, such as NMR ensembles, show a model slider
-  with a play button.
+  with a play button, and **Overlay models** in the Analysis tab shows all
+  models at once.
+- Changing the assembly of a structure undoes its superposition, because
+  assembly operators are defined in the deposited coordinate frame.
 
 ## Structure Parsing Notes
 
@@ -475,6 +555,12 @@ proteoscope.lighting('illustrative');
 const ligand = proteoscope.residues().find((r) => r.resName === 'MOV');
 await proteoscope.focus([ligand.key]);            // frame, side chains, interactions
 const png = await proteoscope.snapshot({ scale: 3, transparent: true });  // data URL
+
+// Comparisons
+await proteoscope.add('P01116');                  // add the AlphaFold model of KRAS to the scene
+proteoscope.superpose('AF-P01116-F1', '6OIM');    // moving, reference; returns RMSD, TM-score, lDDT
+proteoscope.structures();                         // names, visibility and comparison statistics
+// With 6OIM active, `await proteoscope.compareWithAlphaFold()` does both steps.
 ```
 
 ## Development
@@ -531,6 +617,7 @@ node --test "web/lib/*.test.mjs"
 | `web/lib/structure.js` | Residues, polymer typing, bonds, secondary structure, sequences, UniProt mapping |
 | `web/lib/dssp.js` | DSSP secondary-structure assignment |
 | `web/lib/cartoon.js` | Protein and nucleic-acid cartoon meshes |
+| `web/lib/align.js`, `web/lib/superpose.js`, `web/lib/compare.js` | Sequence alignment, least-squares superposition, TM-score, lDDT, RMSF, chain pairing |
 | `web/lib/scene.js`, `web/lib/coloring.js` | Representation and color-scheme logic |
 | `web/lib/renderer.js` | WebGPU renderer: impostors, G-buffer, SSAO, outlines, FXAA, picking, capture |
 | `web/lib/renderer-canvas.js` | Canvas 2D fallback renderer |

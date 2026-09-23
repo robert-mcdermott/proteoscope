@@ -1,7 +1,8 @@
 # Proteoscope Review and Roadmap
 
 This document records a review of Proteoscope v0.4, the state of the field it
-competes in (researched September 2026), what the `wave1` branch changes, and a
+competes in (researched September 2026), what the `wave1` branch changes, the
+first slice of wave 2 (structure comparison, `wave2` branch), and a
 prioritized plan for later waves.
 
 ## 1. Where v0.4 stood
@@ -79,7 +80,7 @@ Missing capabilities relative to the tools researchers use daily:
 
 ## 2. The landscape (research summary)
 
-| Capability | Mol* | ChimeraX | PyMOL | iCn3D | Proteoscope wave 1 |
+| Capability | Mol* | ChimeraX | PyMOL | iCn3D | Proteoscope |
 | --- | --- | --- | --- | --- | --- |
 | Install-free | Web | No | No | Web | Single binary, offline |
 | Renderer | WebGL2 | OpenGL | OpenGL / CPU ray tracing | WebGL | **WebGPU** |
@@ -89,8 +90,8 @@ Missing capabilities relative to the tools researchers use daily:
 | Ligand interactions | Yes | Yes (hbonds, contacts) | Polar contacts | Yes | PLIP criteria, 8 types |
 | pLDDT and PAE linked to 3D | Yes | Yes | pLDDT via B-factor | Yes | Yes (AFDB, AF3, ColabFold) |
 | Proteomics overlays (peptides, PTMs, cross-links) | No | Plugins (XMAS) | Plugins (PyXlinkViewer) | PTM annotations | **Built in, local-only** |
-| Superposition | TM-align | Matchmaker | align/super | VAST+/TM-align | Wave 2 |
-| Density maps | Yes | Yes | Yes | Yes | Wave 2 |
+| Superposition | TM-align | Matchmaker | align/super | VAST+/TM-align | Sequence-based with pruning; RMSD, TM-score, lDDT (wave 2) |
+| Density maps | Yes | Yes | Yes | Yes | Wave 3 |
 | Sessions, shareable state | MolViewSpec | Sessions | Sessions | Short URLs | Wave 2 |
 
 Recurring researcher pain points from papers, forums, and issue trackers:
@@ -184,7 +185,7 @@ Proteoscope's positioning follows from this:
   - Nucleic acids get a backbone tube, base slabs, and connectors.
 - **Per-component representations** for polymer, ligands and ions, and
   water. Side chains can be shown around the focus or everywhere.
-- **Sixteen color schemes:**
+- **Fifteen color schemes:**
   - Chain, entity, rainbow N→C, secondary structure, molecule type.
   - Element, residue class, Kyte-Doolittle hydrophobicity, nucleotide.
   - B-factor, and AlphaFold pLDDT in the standard AFDB colors.
@@ -288,18 +289,82 @@ Proteoscope's positioning follows from this:
   checks, and dev mode.
 - The 12 MB ribosome mmCIF and PDB files parse to identical models.
 
-## 4. Roadmap
+## 4. Wave 2, first slice: comparing structures
+
+Comparison was the largest gap left after wave 1: researchers constantly set a
+prediction against an experiment, apo against holo, wild type against mutant,
+or one conformational state against another, and had to leave Proteoscope for
+it.
+
+### Several structures in one scene (`web/app.js`)
+
+- **Entries.** Each loaded structure is an entry with its own style, color
+  scheme, surface, selection, focus, labels, interactions, SASA, proteomics
+  overlays, PAE and rigid transform. One entry is active; the panels, the
+  sequence and the Analysis and Proteomics tabs follow it.
+- **Loading.** *Add to the scene instead of replacing*, several dropped files,
+  several command-line files, and `#fetch=ID,ID&superpose` links.
+- **Structures list.** Activate, hide or remove structures. Clicking an atom
+  of another structure activates it. Style changes apply to all structures or
+  only the active one.
+- **Rendering.** All rendered models share the renderer's per-atom color and
+  flag buffers: each gets a contiguous slice, and meshes carry a per-mesh atom
+  offset. Picking maps the global index back to the structure, model and atom.
+  Measurements can join atoms of different structures.
+
+### Superposition and scores (`align.js`, `superpose.js`, `compare.js`)
+
+- **Pairing.** Gotoh global alignment with free end gaps, BLOSUM62 blended
+  with a secondary-structure term (ChimeraX matchmaker defaults). Chains are
+  paired by sequence; near-identical subunits are paired by position after a
+  seed superposition, trying several seeds and keeping the pairing that fits
+  best. UniProt numbering pairs a PDB chain with an AlphaFold DB model.
+- **Fit.** Horn's quaternion least-squares fit (never a reflection) on Cα or
+  C4′ atoms, with ChimeraX-style pruning of pairs beyond 2 Å. Candidate fits on
+  all chains and on each chain pair compete, so copies packed differently in
+  two crystals (4AKE and 1AKE) do not collapse the fit.
+- **Scores.** RMSD of the fitted core and of all pairs, TM-score with the
+  TM-score program's fragment search, superposition-free lDDT, identity, pairs
+  within 2 Å, and per-chain RMSD and TM-score.
+- **Views.** Deviation and lDDT color schemes on both structures, a
+  "Structure" scheme, tooltips with per-residue deviation, selection, hover
+  and focus mirrored onto aligned residues, an aligned sequence row with
+  substitutions marked, and trimming to the aligned span.
+- **Compare with AlphaFold.** Fetches the model for each UniProt accession of
+  the active entry, superposes it by UniProt numbering, trims it to the
+  aligned span, and grays the experimental structure so it cannot be confused
+  with pLDDT colors.
+- **Ensembles.** *Overlay models* superposes every model on the shared core
+  and reports mean RMSD and per-residue RMSF, with an RMSF color scheme.
+
+### Validation
+
+24 new tests (115 JavaScript tests in total) cover BLOSUM62, alignment of
+fragments, deletions and point mutations, exact recovery of rigid transforms,
+rejection of reflections, pruning of displaced pairs, TM-score search and
+normalization, lDDT and RMSF on analytic cases, chain pairing of relabeled
+subunits, fitting on a selection, UniProt pairing, and NMR ensembles.
+Checks on real structures:
+
+| Comparison | Result |
+| --- | --- |
+| Adenylate kinase 1AKE onto 4AKE, chain A | 1.08 Å over 112 of 214 pairs (the CORE domain); all pairs 8.2 Å; TM-score 0.68 |
+| α- vs β-globin, 4HHB chains A and B | 44.6% identity with the known D-helix gap; 1.10 Å over 120 pairs; TM-score 0.89 |
+| EGFR 1M17 vs AlphaFold P00533 (UniProt numbering) | 0.78 Å over 249 of 312 pairs; TM-score 0.89; lDDT 0.92 |
+| ABL 2HYY vs AlphaFold P00519 | 0.58 Å over 232 of 263 pairs; TM-score 0.92 |
+| BRAF V600E 3OG7 vs wild type 1UWH | 0.69 Å over 459 pairs; TM-score 0.97; the construct's surface mutations are flagged |
+| Hemoglobin R (1HHO assembly) onto T (4HHB) | One αβ dimer within 1.1–1.5 Å, the other rotated (2.7–4.5 Å): the T→R quaternary change |
+| NMR ensemble 1JM7, 14 models | Mean core RMSD 0.86 Å; median RMSF 0.63 Å; termini up to 10.7 Å |
+
+## 5. Roadmap
 
 Priorities are ordered by value to researchers, weighed against effort.
 
 ### Wave 2: comparison, reproducibility, confidence
 
-1. **Multiple structures and superposition.**
-   - Load several models at once.
-   - Sequence-aligned Kabsch fit and TM-align.
-   - RMSD per residue.
-   - Main use cases: predicted versus experimental, apo versus holo, and
-     mutant comparison.
+1. **Multiple structures and superposition.** Delivered in the first slice
+   (§4). Still open: structure-only alignment (TM-align or US-align) for
+   remote homologs, and animated morphs between superposed conformations.
 2. **Sessions and shareable state.**
    - Save and restore camera, styles, selections, and proteomics overlays as
      JSON.
@@ -347,9 +412,11 @@ Priorities are ordered by value to researchers, weighed against effort.
   scripted figure batches.
 - **Other.** WebXR, localization, and accessibility audits.
 
-## 5. Known limitations of wave 1
+## 6. Known limitations
 
-- One structure at a time. Superposition is planned for wave 2.
+- **Superposition** pairs residues by sequence (or UniProt numbering), so
+  remote homologs with little sequence identity need a structure-only aligner,
+  which is not yet available.
 - **Electrostatics** use formal charges with a distance-dependent dielectric.
   The map is qualitative, not a Poisson-Boltzmann solution.
 - **Interactions** infer ligand chemistry from geometry; bond orders and pKa

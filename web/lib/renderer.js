@@ -352,7 +352,7 @@ fn fsCylinder(in: CylinderVarying) -> ImpostorOut {
 struct MeshParams {
   opacity: f32,
   flags: u32,
-  pad0: f32,
+  atomOffset: u32,
   pad1: f32,
 };
 
@@ -374,15 +374,16 @@ fn vsMesh(
   @location(3) color: vec4f,
 ) -> MeshVarying {
   var out: MeshVarying;
+  let id = atom + meshParams.atomOffset;
   out.position = frame.viewProj * vec4f(position, 1.0);
   out.world = position;
   out.normal = normal;
-  var base = atomColors[atom].rgb;
+  var base = atomColors[id].rgb;
   if (color.a > 0.0) {
     base = color.rgb;
   }
-  out.color = applyFlags(base, atomFlags[atom]);
-  out.atom = atom;
+  out.color = applyFlags(base, atomFlags[id]);
+  out.atom = id;
   return out;
 }
 
@@ -999,6 +1000,7 @@ export async function createRenderer(canvas, options = {}) {
       paramsBuffer,
       indexCount: mesh.indices.length,
       opacity: mesh.opacity ?? 1,
+      atomOffset: mesh.atomOffset ?? 0,
       bindGroup: device.createBindGroup({ layout: meshLayout, entries: [{ binding: 0, resource: { buffer: paramsBuffer } }] }),
     };
     writeMeshParams(entry);
@@ -1012,8 +1014,24 @@ export async function createRenderer(canvas, options = {}) {
     writeMeshParams(entry);
   }
 
+  // Mesh vertices carry atom indices local to their structure; the offset places them in the
+  // shared atom color/flag buffers when several structures are drawn together.
+  function setMeshAtomOffset(id, atomOffset) {
+    const entry = scene.meshes.get(id);
+    if (!entry || entry.atomOffset === atomOffset) return;
+    entry.atomOffset = atomOffset;
+    writeMeshParams(entry);
+  }
+
   function writeMeshParams(entry) {
-    device.queue.writeBuffer(entry.paramsBuffer, 0, new Float32Array([entry.opacity, 0, 0, 0]));
+    const params = new ArrayBuffer(16);
+    new Float32Array(params, 0, 1)[0] = entry.opacity;
+    new Uint32Array(params, 8, 1)[0] = entry.atomOffset >>> 0;
+    device.queue.writeBuffer(entry.paramsBuffer, 0, params);
+  }
+
+  function meshIds() {
+    return [...scene.meshes.keys()];
   }
 
   function createTargets(width, height, exportTarget = false) {
@@ -1326,6 +1344,8 @@ export async function createRenderer(canvas, options = {}) {
     setCylinders,
     setMesh,
     setMeshOpacity,
+    setMeshAtomOffset,
+    meshIds,
     render,
     pick,
     capture,
