@@ -176,9 +176,12 @@ Proteoscope prints a local URL, usually `http://127.0.0.1:8765`, and opens it
 in your browser; press Ctrl+C in the terminal to stop it. Files named on the
 command line open directly, for example `proteoscope 1abc.cif`.
 
-Use a browser with WebGPU: Chrome, Edge or Brave on any desktop OS, Safari 26
-or later on macOS, or Firefox 141 or later on Windows. Other browsers fall back
-to a simplified compatibility renderer.
+Use Chrome, Edge or Brave, on any desktop system; Proteoscope is developed and
+tested in these Chromium-based browsers. It needs WebGPU, which Safari provides
+only from macOS Tahoe (26): Safari on macOS Sequoia or earlier, even Safari 26,
+does not. Firefox provides it from version 141 on Windows. Browsers without
+WebGPU get a simplified renderer without surfaces, ambient occlusion or
+outlines.
 
 Releases can lag behind the main branch. To use the newest features, build
 from source (see [Development](#development)). [CHANGELOG.md](CHANGELOG.md)
@@ -257,6 +260,10 @@ For a protein, the list shows:
 active one. **This protein** lists the structures of the active structure's
 protein, and **Similar** searches for sequences like the chain in the sequence
 panel. The `search` command does the same from the command line.
+
+A search sends what you type to these services. A pasted sequence, and the
+chain's sequence when you use **Similar**, go to RCSB's sequence search, so
+use them with care for unpublished sequences.
 
 ## Bundled Examples
 
@@ -1076,9 +1083,11 @@ proteoscope [flags] [structure files or prediction folders...]
   --version           print the version and exit
 ```
 
-The server only answers requests whose Host is the local address, and it
-rejects cross-origin API calls. This protects against DNS-rebinding and
-cross-site requests.
+With the default `--host`, the server only answers requests whose Host is the
+local address, and it always rejects cross-origin API calls. This protects
+against DNS-rebinding and cross-site requests. A `--host` such as `0.0.0.0`
+serves Proteoscope to other machines on the network; use it only on a network
+you trust.
 
 ## Scripting
 
@@ -1122,9 +1131,9 @@ Image(base64.b64decode(image.split(",", 1)[1]))
 ```
 
 Commands go to the most recently opened Proteoscope page. Remote control is
-off unless the flag is given; it answers only on the loopback address, and
-requests from web pages on other sites are refused, but any program on your
-computer can send commands while it is on.
+off unless the flag is given; it accepts requests only from this computer,
+whatever `--host` is, and requests from web pages on other sites are refused,
+but any program on your computer can send commands while it is on.
 
 ## Development
 
@@ -1246,8 +1255,9 @@ review, a comparison with other viewers and the roadmap.
 ### The badge says "Canvas preview"
 
 Your browser did not provide WebGPU, so Proteoscope is using a simplified
-renderer without surfaces, ambient occlusion or outlines. Use Chrome, Edge or
-Brave, Safari 26 or later on macOS, or Firefox 141 or later on Windows. To
+renderer without surfaces, ambient occlusion or outlines. Open the same address
+in Chrome, Edge or Brave. Safari provides WebGPU only from macOS Tahoe (26), so
+Safari on macOS Sequoia or earlier always shows the simplified renderer. To
 force the compatibility renderer, for example to work around a GPU driver
 problem, open `http://127.0.0.1:8765/?renderer=canvas`.
 

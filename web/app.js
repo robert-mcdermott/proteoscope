@@ -588,7 +588,13 @@ async function initRenderer() {
     state.canvasFallback = true;
     els.gpuBadge.textContent = 'Canvas preview';
     els.gpuBadge.classList.add('is-fallback');
-    els.gpuBadge.title = 'WebGPU is not available in this browser, so Proteoscope uses a simplified compatibility renderer without surfaces, ambient occlusion or outlines. Use a current Chrome, Edge, Safari 26+ or Firefox 141+ (Windows) for full quality.';
+    // Safari 26 provides WebGPU only on macOS Tahoe (26) and later; on Sequoia navigator.gpu is absent.
+    const safari = /Safari\//.test(navigator.userAgent) && !/Chrome|Chromium|Edg\//.test(navigator.userAgent);
+    const reason = safari && !navigator.gpu
+      ? 'Safari provides WebGPU only from macOS Tahoe (26), so Proteoscope uses a simplified renderer without surfaces, ambient occlusion or outlines.'
+      : 'This browser does not provide WebGPU, so Proteoscope uses a simplified renderer without surfaces, ambient occlusion or outlines.';
+    els.gpuBadge.title = `${reason} For full quality, open ${location.origin} in Chrome, Edge or Brave.`;
+    if (new URLSearchParams(location.search).get('renderer') !== 'canvas') showToast(`${reason} For full quality, open this page in Chrome, Edge or Brave.`, true);
   }
 }
 
