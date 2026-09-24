@@ -4,9 +4,10 @@
 
 Proteoscope is a 3D viewer and analysis workbench for protein and
 nucleic-acid structures, predicted complexes, density maps and structural
-proteomics data. It runs on your own computer: download one file and start it,
-with no installation or account. Parsing, rendering and analysis all happen in
-your browser, so your files never leave your machine.
+proteomics data. It runs on your own computer as one self-contained program:
+a single command installs it, and it needs no Python, packages or account.
+Parsing, rendering and analysis all happen in your browser, so your files never
+leave your machine.
 
 It covers the everyday structural biology loop: find the structures and models
 of a protein by gene, name, accession or sequence, or open a file; style it;

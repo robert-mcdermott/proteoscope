@@ -14,7 +14,7 @@ as version 0.6.0 ([CHANGELOG.md](../CHANGELOG.md)).
 
 ### Strengths worth keeping
 
-- **Distribution model.** One binary, no install, no build step, runs offline.
+- **Distribution model.** One self-contained binary, no dependencies, no build step, runs offline.
   No mainstream viewer offers this; Mol* needs a web page, ChimeraX and PyMOL
   need installers.
 - **Local-first privacy.** Files are parsed in the browser and never leave the
@@ -87,7 +87,7 @@ Missing capabilities relative to the tools researchers use daily:
 
 | Capability | Mol* | ChimeraX | PyMOL | iCn3D | Proteoscope |
 | --- | --- | --- | --- | --- | --- |
-| Install-free | Web | No | No | Web | Single binary, offline |
+| No dependencies to install | Web | No | No | Web | Single binary, offline |
 | Renderer | WebGL2 | OpenGL | OpenGL / CPU ray tracing | WebGL | **WebGPU** |
 | SSAO, outlines, fog | Yes | Yes (soft/full/silhouettes) | Ray-trace modes | Partial | Yes, plus "Illustrative" preset |
 | Molecular surface, electrostatics | Yes | Yes (Coulombic) | Yes (APBS plugin) | DelPhi | SES/SAS/Gaussian + Coulombic |
