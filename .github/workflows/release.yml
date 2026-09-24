@@ -1,0 +1,69 @@
+name: Release
+
+# Pushing a tag such as v0.6.0 builds the binaries and attaches them, with their checksums and the
+# CHANGELOG.md section of that version, to a draft release. Review the draft and publish it.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and draft the release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # Release binaries are built with a Go release that still gets security fixes; CI tests
+          # the minimum version in go.mod.
+          go-version: stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The tag matches the version
+        run: |
+          version="$(sed -n 's/^var version = "\(.*\)"$/\1/p' main.go)"
+          cff="$(sed -n 's/^version: //p' CITATION.cff)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ] || [ "$cff" != "$version" ]; then
+            echo "Tag $GITHUB_REF_NAME, main.go $version, CITATION.cff $cff: they must agree."
+            exit 1
+          fi
+          if ! grep -q "^## $version " CHANGELOG.md; then
+            echo "CHANGELOG.md has no section for $version."
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Tests
+        env:
+          PROTEOSCOPE_TIME_SCALE: '5'
+        run: |
+          go vet ./...
+          go test ./...
+          node --test "web/lib/*.test.mjs"
+          node validation/run.mjs limma msstatsptm conservation
+      - name: Build
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          mkdir dist
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            suffix=""
+            if [ "$os" = windows ]; then suffix=".exe"; fi
+            GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w" -o "dist/proteoscope-$os-$arch$suffix" .
+          done
+          cd dist && sha256sum proteoscope-* > SHA256SUMS && cat SHA256SUMS
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          awk -v heading="## $VERSION " 'index($0, heading) == 1 { found = 1; next } /^## / && found { exit } found' CHANGELOG.md > notes.md
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --draft --title "Proteoscope $VERSION" --notes-file notes.md
+          fi

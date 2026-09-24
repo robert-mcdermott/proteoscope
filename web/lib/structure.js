@@ -203,11 +203,13 @@ function linkPolymerResidues(residues) {
   }
 }
 
+// Residues that share a number keep file order: insertion codes can run backwards (thrombin's
+// light chain is 1H … 1A, 1; IMGT numbering puts 112B, 112A before 112), so sorting by them would
+// scramble the chain.
 export function compareResidues(a, b) {
   return naturalCompare(a.chain, b.chain) ||
     a.resSeq - b.resSeq ||
-    compareInsertionCode(a.iCode, b.iCode) ||
-    a.resName.localeCompare(b.resName);
+    a.atoms[0].id - b.atoms[0].id;
 }
 
 function compareInsertionCode(a, b) {

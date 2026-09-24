@@ -31,7 +31,7 @@ takes about 8 seconds.
 
 The command exits with status 1 when a check fails. Continuous integration
 runs the three offline suites (`limma`, `msstatsptm`, `conservation`) on every
-push. It runs all six weekly, and on pull requests that touch `web/lib` or
+pull request and every push to `main`. It runs all six weekly, and on pull requests that touch `web/lib` or
 this folder (`.github/workflows/validation.yml`).
 
 ## What is checked

@@ -105,6 +105,21 @@ test('polymer segments break on large C-alpha gaps', () => {
   assert.deepEqual(segments.map((segment) => segment.length), [2, 2]);
 });
 
+test('residues that share a number keep file order, whichever way their insertion codes run', () => {
+  const withCode = (line, code) => line.slice(0, 26) + code + line.slice(27);
+  // Thrombin's light chain (1H … 1A, 1) and an IMGT-numbered loop (111, 111A, 112A, 112).
+  const chains = { L: [[1, 'H'], [1, 'G'], [1, 'A'], [1, ''], [2, '']], H: [[111, ''], [111, 'A'], [112, 'A'], [112, ''], [113, '']] };
+  let serial = 0;
+  const pdb = Object.entries(chains).flatMap(([chain, residues], row) => residues.map(([number, code], index) =>
+    withCode(pdbAtom(++serial, 'CA', '', 'ALA', chain, number, index * 3.8, row * 20, 0), code || ' '))).join('\n');
+  const structure = derive(parsePDB(pdb, 'insertions.pdb'));
+  const residues = structure.models[0].residues;
+  const labels = (chain) => residues.filter((residue) => residue.chain === chain).map((residue) => `${residue.resSeq}${residue.iCode}`);
+  assert.deepEqual(labels('L'), ['1H', '1G', '1A', '1', '2']);
+  assert.deepEqual(labels('H'), ['111', '111A', '112A', '112', '113']);
+  assert.deepEqual(polymerSegments(residues, 'protein').map((segment) => segment.length), [5, 5], 'each chain stays one segment');
+});
+
 test('cartoon builds an indexed mesh that covers annotated residues', () => {
   const pdb = [pdbSheet('A', 1, 4), ...linearCAResidues('A', 1, 4)].join('\n');
   const structure = derive(parsePDB(pdb, 'cartoon.pdb'));

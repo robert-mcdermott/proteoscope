@@ -552,6 +552,10 @@ const PARSERS = {
       mapped: col.at('Mapped Proteins'), gene: col.at('Gene'), file: col.at('Spectrum File'), spectrum: col.at('Spectrum'), intensity: col.at('Intensity'),
       probability: col.at('PeptideProphet Probability', 'Probability'), charge: col.at('Charge'),
     };
+    // A precursor identified by several spectra in one run is quantified once: its intensity is the
+    // largest of its PSMs', as MSstats' converters do by default (summaryforMultipleRows = max). Each
+    // PSM row still counts as evidence and carries only what it adds to the maximum so far.
+    const largest = new Map();
     return (cells) => {
       const sequence = cell(cells, columns.sequence);
       if (!sequence) return null;
@@ -561,13 +565,18 @@ const PARSERS = {
       const file = cell(cells, columns.file) || cell(cells, columns.spectrum).split('.')[0];
       const parts = file.split(/[\\/]/).filter(Boolean);
       const primary = accessionOf(cell(cells, columns.protein));
+      const sample = parts.length > 1 ? parts[parts.length - 2] : (parts[0] ?? '').replace(/\.[^.]+$/, '');
+      const precursor = `${sample}|${modified || `${sequence}|${cell(cells, columns.assigned)}`}|${cell(cells, columns.charge)}`;
+      const intensity = toNumber(cell(cells, columns.intensity));
+      const before = largest.get(precursor) ?? 0;
+      if (intensity > before) largest.set(precursor, intensity);
       return {
         sequence: sequence.toUpperCase(),
         proteins: [primary, ...splitList(cell(cells, columns.mapped), /,\s*/).map(accessionOf)].filter(Boolean),
         genes: [cell(cells, columns.gene)].filter(Boolean),
-        sample: parts.length > 1 ? parts[parts.length - 2] : (parts[0] ?? '').replace(/\.[^.]+$/, ''),
+        sample,
         condition: '',
-        quantity: toNumber(cell(cells, columns.intensity)),
+        quantity: intensity > before ? intensity - before : Number.isFinite(intensity) ? 0 : NaN,
         q: NaN,
         probability: toNumber(cell(cells, columns.probability)),
         charge: toNumber(cell(cells, columns.charge)),

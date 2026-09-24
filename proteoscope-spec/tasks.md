@@ -411,3 +411,6 @@ the completed v0.1 application.
 
 - [x] 74. Documentation: README sections and screenshots, design, requirements, roadmap (wave 6)
   - _Requirements: 15, 38, 39, 40, 41, 42, 43, 44, 45_
+
+- [x] 75. Release 0.6.0: version in `main.go` and `CITATION.cff`, `CHANGELOG.md`, release workflow with six binaries and checksums, README downloads; residues sharing a number keep file order; FragPipe PSMs count once per precursor and run
+  - _Requirements: 44, 45_

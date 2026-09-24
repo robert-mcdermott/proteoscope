@@ -7,7 +7,8 @@ commands, sessions and scripting; `wave4`: predicted complexes, validation and
 variants; `wave5`: bring your data, find public data; `wave6`: maps, ligand
 chemistry and statistics), a review of the bundled
 examples and of the public databases Proteoscope can use without API keys, and
-a prioritized plan for what comes next.
+a prioritized plan for what comes next. Waves 1 to 6 were released together
+as version 0.6.0 ([CHANGELOG.md](../CHANGELOG.md)).
 
 ## 1. Where v0.4 stood
 
@@ -859,10 +860,13 @@ suite that checks the new analyses against their reference tools.
   copied or downloaded as BibTeX. `CITATION.cff` describes how to cite
   Proteoscope.
 - **Continuous integration.** GitHub Actions run gofmt, `go vet`, the Go
-  tests with the race detector, and cross-compilation for the four release
+  tests with the race detector, and cross-compilation for the six release
   targets. They also syntax-check every module and run the JavaScript tests
   and the offline validation suites. A weekly workflow runs the whole
   validation suite.
+- **Releases.** Pushing a version tag runs the tests, builds the binaries for
+  macOS, Linux and Windows on x64 and ARM64 with their SHA-256 checksums, and
+  attaches them to a draft release with the version's `CHANGELOG.md` section.
 - **Validation suite.** `validation/` recomputes numbers produced by
   reference tools and compares them: limma, MSstatsPTM, US-align, Capra &
   Singh's scorer, EMDB's validation pipeline, and MolProbity through the

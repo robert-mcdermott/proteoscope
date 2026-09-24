@@ -211,6 +211,16 @@ test('DIA-NN precursor matrices, Spectronaut fragment rows and single-experiment
   ), 'Phospho (STY)Sites.txt'), { accessions: ['P04637'] });
   const [site] = summarizeReport(sites, { qValue: 0.01, localization: 0.75 }).sites;
   assert.equal(quantValue(site, 'intensity'), Math.log10(5000), 'the total intensity stands for the one experiment');
+
+  // FragPipe psm.tsv: several PSMs of one precursor in a run count once, at their largest intensity.
+  const psm = (file, charge, intensity) => [`${file}.00001.00001.${charge}`, `/data/${file}/${file}.mzML`, 'PEPTIDEK', '', '', 'sp|P04637|P53_HUMAN', 'P04637', String(charge), intensity, '0.99'];
+  const fragpipe = await readReport(blob(table(
+    ['Spectrum', 'Spectrum File', 'Peptide', 'Modified Peptide', 'Assigned Modifications', 'Protein', 'Protein ID', 'Charge', 'Intensity', 'Probability'],
+    [psm('exp1', 2, '100'), psm('exp1', 2, '300'), psm('exp1', 2, '200'), psm('exp1', 3, '50'), psm('exp2', 2, '80')],
+  ), 'psm.tsv'), { accessions: ['P04637'], collect: { qValue: 0.01, localization: 0.75 } });
+  assert.equal(fragpipe.rows.length, 5, 'every PSM is still evidence');
+  assert.deepEqual(fragpipe.features.samples, ['exp1', 'exp2']);
+  assert.deepEqual([...fragpipe.features.values], [350, 80], 'the largest PSM per precursor, charge states summed');
 });
 
 test('statistics read every protein of a report as features: modified peptides and sites', async () => {

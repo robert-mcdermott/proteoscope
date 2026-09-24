@@ -15,8 +15,8 @@ export function principalAtom(residue) {
 
 // Chains as the structure aligner (tmalign.js) sees them: one atom per residue, Cα for proteins and
 // C3′ for nucleic acids as in US-align, in file order (the chain's path, which sorted numbers do
-// not give with insertion codes placed before their number, as in chymotrypsin numbering). Its
-// residue indices map back through `residues`.
+// not give when a chain's numbering is not monotonic). Its residue indices map back through
+// `residues`.
 export function alignerChains(model, chainIds = null) {
   const chains = [];
   for (const chain of polymerChainResidues(model).values()) {

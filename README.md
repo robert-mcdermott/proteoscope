@@ -137,15 +137,23 @@ Highlights:
 Most users do not need Go installed. Download a prebuilt binary from the
 Proteoscope release page:
 
-[https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.4](https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.4)
+[https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.6.0](https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.6.0)
 
 Choose the file for your operating system:
 
 | Platform | Download |
 | --- | --- |
-| macOS, Apple Silicon | [`proteoscope-darwin-arm64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.4/proteoscope-darwin-arm64) |
-| Linux, x64 | [`proteoscope-linux-amd64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.4/proteoscope-linux-amd64) |
-| Windows, x64 | [`proteoscope-windows-amd64.exe`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.4/proteoscope-windows-amd64.exe) |
+| macOS, Apple Silicon | [`proteoscope-darwin-arm64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.6.0/proteoscope-darwin-arm64) |
+| macOS, Intel | [`proteoscope-darwin-amd64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.6.0/proteoscope-darwin-amd64) |
+| Linux, x64 | [`proteoscope-linux-amd64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.6.0/proteoscope-linux-amd64) |
+| Linux, ARM64 | [`proteoscope-linux-arm64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.6.0/proteoscope-linux-arm64) |
+| Windows, x64 | [`proteoscope-windows-amd64.exe`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.6.0/proteoscope-windows-amd64.exe) |
+| Windows, ARM64 | [`proteoscope-windows-arm64.exe`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.6.0/proteoscope-windows-arm64.exe) |
+
+`SHA256SUMS` on the release page lists each file's checksum. Check a download
+with `shasum -a 256 -c SHA256SUMS --ignore-missing` (macOS, Linux) or
+`Get-FileHash` (PowerShell). What changed in each release is in
+[CHANGELOG.md](CHANGELOG.md).
 
 When Proteoscope starts, it prints a local URL, usually:
 
@@ -163,9 +171,8 @@ build from source (see [Development](#development)).
 
 ### macOS
 
-Download the macOS binary for your Mac:
-
-Open Terminal and run:
+Download the binary for your Mac (`arm64` for Apple Silicon, `amd64` for
+Intel), then open Terminal and run:
 
 ```sh
 chmod +x ./proteoscope-darwin-arm64
@@ -1216,8 +1223,20 @@ files that are not listed appear after the listed ones.
 GOOS=darwin GOARCH=arm64 go build -o dist/proteoscope-darwin-arm64 .
 GOOS=darwin GOARCH=amd64 go build -o dist/proteoscope-darwin-amd64 .
 GOOS=linux GOARCH=amd64 go build -o dist/proteoscope-linux-amd64 .
+GOOS=linux GOARCH=arm64 go build -o dist/proteoscope-linux-arm64 .
 GOOS=windows GOARCH=amd64 go build -o dist/proteoscope-windows-amd64.exe .
+GOOS=windows GOARCH=arm64 go build -o dist/proteoscope-windows-arm64.exe .
 ```
+
+### Release
+
+The version is `version` in `main.go`, and `CITATION.cff` repeats it. To
+release, set both, add the release to `CHANGELOG.md`, merge to `main` and push
+a tag such as `v0.6.0`. The release workflow
+(`.github/workflows/release.yml`) checks that the tag matches `main.go`, runs
+the tests, builds the six binaries with `-trimpath -ldflags "-s -w"`, and
+attaches them with `SHA256SUMS` to a draft release. Review the draft and
+publish it.
 
 ### Test
 
@@ -1232,7 +1251,8 @@ reference tools (limma, MSstatsPTM, US-align, Capra and Singh's scorer, EMDB
 and MolProbity); see [validation/README.md](validation/README.md). GitHub
 Actions run gofmt, `go vet`, the Go tests with the race detector, the
 JavaScript tests, the offline validation suites and the cross-compilation on
-every push, and the whole validation suite weekly.
+every pull request and every push to `main`, and the whole validation suite
+weekly.
 
 ### Code Layout
 

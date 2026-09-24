@@ -565,3 +565,4 @@ selection, distance measurement, and PNG export.
 1. WHEN a change is pushed or proposed, THE continuous integration SHALL check formatting, run static analysis and all tests, and build every release target
 2. THE repository SHALL include a validation suite that compares the analyses with the numbers of their reference tools, without including those tools
 3. THE validation suite SHALL run offline once its public inputs are cached, and weekly in continuous integration
+4. WHEN a version tag is pushed, THE release workflow SHALL check that the tag matches the application version, run the tests, and attach every release target with its SHA-256 checksum to a draft release
