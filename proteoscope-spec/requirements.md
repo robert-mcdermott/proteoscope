@@ -229,3 +229,340 @@ selection, distance measurement, and PNG export.
 3. WHEN documentation is provided, THE System SHALL explain release downloads, browser recommendations, PDB acquisition, controls, representations, measurement, and build instructions
 4. WHEN release binaries are provided, THE documentation SHALL explain macOS, Linux, and Windows run/unblock steps
 
+
+## Wave 1 Requirements
+
+### Requirement 16: Publication-Quality Rendering
+
+**User Story:** As a researcher preparing figures, I want correct, depth-rich molecular rendering, so that images read clearly in 3D and meet journal standards.
+
+#### Acceptance Criteria
+
+1. WHEN atoms and bonds are rendered, THE System SHALL ray-cast spheres and cylinders and write per-pixel depth so intersections are exact
+2. WHEN ambient occlusion, outlines or depth fog are enabled, THE System SHALL apply them as screen-space post-processing
+3. WHEN a lighting preset (Standard, Soft, Illustrative, Glossy, Neon, Flat) is chosen, THE System SHALL update material, occlusion, outline, fog and glow settings together
+4. WHEN clipping is adjusted, THE System SHALL clip in the shaders without rebuilding geometry
+5. WHEN an image is exported, THE System SHALL render off screen at 1× to 4× viewport resolution, with optional 2× supersampling, transparent background, legend and labels
+6. WHEN nothing changes, THE System SHALL NOT re-render frames
+
+### Requirement 17: Surfaces and Electrostatics
+
+**User Story:** As a structural biologist, I want molecular surfaces colored by chemistry, so that I can see pockets, interfaces and charge distribution.
+
+#### Acceptance Criteria
+
+1. WHEN a surface type (SES, SAS, Gaussian or van der Waals) is selected, THE System SHALL compute it in a background worker for the visible chains
+2. WHEN electrostatic coloring is selected, THE System SHALL color by Coulombic potential (formal charges, ε = 4r, 1.4 Å offset, ±10 kcal/mol·e) and show a legend describing the method
+3. WHEN surface opacity is below 100%, THE System SHALL render a single transparent layer over the underlying representation
+4. WHEN SASA is requested, THE System SHALL report per-chain totals, per-residue relative exposure and buried surface area
+
+### Requirement 18: Secondary Structure Assignment
+
+**User Story:** As a researcher working with predicted or modeled structures, I want secondary structure without file annotations, so that cartoons are correct for any input.
+
+#### Acceptance Criteria
+
+1. WHEN a structure lacks HELIX/SHEET or struct_conf annotations, THE System SHALL assign secondary structure with DSSP
+2. WHEN the user selects File, DSSP or Auto mode, THE System SHALL reassign secondary structure and rebuild the cartoon
+3. WHEN chains contain only C-alpha atoms, THE System SHALL fall back to a C-alpha geometry estimate and label the source
+
+### Requirement 19: Binding Sites and Interactions
+
+**User Story:** As a medicinal chemist, I want to focus a ligand and see its non-covalent contacts, so that I can reason about binding.
+
+#### Acceptance Criteria
+
+1. WHEN a residue or ligand is focused, THE System SHALL frame it, show side chains within 5 Å and detect interactions using PLIP criteria
+2. WHEN interactions are shown, THE System SHALL draw typed dashed lines and list each contact with its distance
+3. WHEN two chains are chosen, THE System SHALL analyze their interface and, if SASA is available, report buried surface area
+4. WHEN interactions are exported, THE System SHALL write a CSV table
+
+### Requirement 20: Sequence Panel
+
+**User Story:** As a researcher, I want a sequence view linked to 3D, so that I can navigate by sequence and see what is not modeled.
+
+#### Acceptance Criteria
+
+1. WHEN a polymer chain is shown, THE System SHALL display its full declared sequence with unmodeled residues marked and helices and strands underlined
+2. WHEN residues are clicked, shift-clicked or dragged, THE System SHALL update the 3D selection, and hovering SHALL highlight in both views
+3. WHEN UniProt cross-references exist, THE System SHALL map author numbering to UniProt numbering
+
+### Requirement 21: Remote Structures and Prediction Confidence
+
+**User Story:** As a researcher, I want to open structures by identifier and judge prediction confidence, so that I can work with PDB entries and AlphaFold models without manual downloads.
+
+#### Acceptance Criteria
+
+1. WHEN a PDB ID or UniProt accession is entered, THE System SHALL fetch the RCSB mmCIF or current AlphaFold DB model through the local server
+2. WHEN `--offline` is set, THE System SHALL refuse remote fetches and still serve cached entries
+3. WHEN a predicted model is loaded, THE System SHALL color by pLDDT with the AlphaFold DB scheme and summarize confidence
+4. WHEN a PAE matrix is available (AlphaFold DB, AlphaFold 3, ColabFold), THE System SHALL show an interactive heatmap whose rectangle selections highlight residues in 3D
+
+### Requirement 22: Proteomics Overlays
+
+**User Story:** As a proteomics researcher, I want to map my MS results onto structures locally, so that I can interpret coverage, modifications and cross-links in 3D without uploading unpublished data.
+
+#### Acceptance Criteria
+
+1. WHEN a protein chain is selected, THE System SHALL report ExPASy-ProtParam-equivalent sequence properties
+2. WHEN peptides are pasted in common proteomics notations, THE System SHALL parse modifications, map peptides to all chains (optionally treating I and L as equal), and color coverage
+3. WHEN sites or variants are entered, THE System SHALL locate them in structure or UniProt numbering and flag wild-type mismatches
+4. WHEN cross-links are entered, THE System SHALL measure Cα–Cα distances against the chosen cross-linker's maximum and color satisfied and violated links
+5. WHEN per-residue values are pasted, THE System SHALL color by them with a selectable colormap
+6. WHEN UniProt annotations are requested, THE System SHALL fetch UniProtKB features and map them onto the structure
+
+### Requirement 23: Scientific Correctness of Parsing
+
+**User Story:** As a structural biologist, I want residues, elements and bonds interpreted correctly, so that the visualization is trustworthy.
+
+#### Acceptance Criteria
+
+1. WHEN element columns are missing, THE System SHALL infer elements from PDB atom-name alignment (for example, alpha carbons are not calcium)
+2. WHEN modified residues carry a linked backbone, THE System SHALL keep them in the polymer
+3. WHEN `_struct_conn` records are read, THE System SHALL create bonds only for covalent, disulfide and metal-coordination records
+4. WHEN geometry indicates inter-chain disulfides or metal coordination, THE System SHALL add those bonds
+5. WHEN legacy PDB files define REMARK 350 assemblies, THE System SHALL offer them like mmCIF assemblies
+
+### Requirement 24: Structure Comparison
+
+**User Story:** As a structural biologist, I want to superpose structures and see where they differ, so that I can compare predictions with experiments, apo with holo forms, mutants with wild type, and the models of an ensemble.
+
+#### Acceptance Criteria
+
+1. WHEN the user opens a structure with *Add to the scene* ticked, drops several files, passes several command-line files or follows a `#fetch=ID,ID` link, THE System SHALL show all structures together, each with its own style, and let the user activate, hide or remove each one
+2. WHEN structures are superposed, THE System SHALL pair residues by sequence alignment (or UniProt numbering), fit principal atoms with iterative pruning of pairs beyond 2 Å, and report RMSD, TM-score, lDDT, identity and per-chain statistics
+3. WHEN the user fits on selected residues, THE System SHALL use only those pairs for the fit and report deviations for all pairs
+4. WHEN a comparison exists, THE System SHALL color either structure by Cα deviation or lDDT, show the deviation of a hovered residue, mirror selection, hover and focus onto aligned residues, and show the aligned sequence with substitutions marked
+5. WHEN the user compares an experimental entry with AlphaFold, THE System SHALL fetch the AlphaFold DB model for each UniProt accession, superpose it by UniProt numbering and trim it to the aligned span
+6. WHEN a multi-model entry is overlaid, THE System SHALL superpose all models on their shared core, display them together and report per-residue RMSF
+7. WHEN positions are reset or an assembly is changed, THE System SHALL restore the deposited coordinates
+
+### Requirement 25: Selection Language and Command Line
+
+**User Story:** As a structural biologist used to PyMOL or ChimeraX, I want to type selections and commands, so that I can select, style and compare precisely and repeat what I did.
+
+#### Acceptance Criteria
+
+1. WHEN a selection expression is typed, THE System SHALL preview the number of matching residues and atoms per structure and select and frame them on Enter
+2. WHEN a selection uses chain, residue number (with insertion codes), residue name, atom name, element, secondary structure, entity, UniProt numbering, structure index or name, ChimeraX atom specs, classes, Boolean logic, distance operators, residue or chain expansion, value comparisons or named sets, THE System SHALL evaluate it on every structure
+3. WHEN a selection or command is invalid, THE System SHALL explain the problem and name the offending word
+4. WHEN a command is run, THE System SHALL apply it (select, zoom, focus, show, hide, color, label, load, superpose, measure, rotate, save, export) and report the outcome
+5. WHEN residues are styled per selection, THE System SHALL draw them as sticks, spheres or hidden, and color them, on top of the structure's representation
+
+### Requirement 26: Sessions and Sharing
+
+**User Story:** As a researcher preparing figures, I want to save and reopen my workspace and share a view, so that I can revise figures later and colleagues can see exactly what I see.
+
+#### Acceptance Criteria
+
+1. WHEN a session is saved, THE System SHALL write a versioned JSON file recording every structure's source (embedding local files), styles, per-residue styling, transforms, comparisons, overlays, selections, focus, labels, proteomics overlays, measurements and the view
+2. WHEN a session file is opened, THE System SHALL rebuild the workspace, reporting any structure that could not be restored
+3. WHEN every structure was fetched or bundled, THE System SHALL offer a link that restores the session when opened
+4. WHEN MolViewSpec export is requested, THE System SHALL write an .mvsj file (remote structures) or an .mvsx archive (local structures) that Mol* can open, including representations, colors, labels, transforms, camera and background
+
+### Requirement 27: Remote Control
+
+**User Story:** As a computational biologist working in Jupyter, I want to drive the viewer from Python, so that I can script comparisons and figures.
+
+#### Acceptance Criteria
+
+1. WHEN Proteoscope is started with `--remote-control`, THE System SHALL accept commands at `POST /api/remote/command` and return the result of running them in the open page
+2. WHEN a command produces an image, a session, a link or MolViewSpec, THE System SHALL return the data instead of downloading a file
+3. WHEN no page is connected or the page does not answer, THE System SHALL return an error rather than hang
+4. WHEN remote control is off or a request comes from a web page on another origin, THE System SHALL refuse it
+
+### Requirement 28: Predicted Complexes
+
+**User Story:** As a researcher running AlphaFold 3, Boltz, Chai-1 or ColabFold, I want to open a whole prediction and compare its models' interface confidence, so that I can decide which predicted interactions to trust without uploading my data.
+
+#### Acceptance Criteria
+
+1. WHEN a prediction folder, an AlphaFold Server archive or a folder named on the command line is opened, THE System SHALL recognize AlphaFold 3 (including Zstandard-compressed output), AlphaFold Server, Boltz, Chai-1, ColabFold, Protenix and OpenFold3 layouts and list the models ranked by the tool's score
+2. WHEN a model has a PAE matrix, THE System SHALL report ipSAE, ipTM from PAE, pDockQ, pDockQ2 and LIS for every chain pair, following the reference definitions
+3. WHEN the predictor reports chain-pair ipTM, THE System SHALL show it as a chain-pair matrix, switchable to ipSAE and pDockQ2
+4. WHEN contact probabilities, per-atom ligand pLDDT or MSAs are present, THE System SHALL show them
+5. WHEN cross-links have been mapped, THE System SHALL report how many each model satisfies
+6. WHEN a PAE matrix is loaded, THE System SHALL cluster it into rigid domains on request
+
+### Requirement 29: Validation Reports
+
+**User Story:** As a structural biologist, I want to see a PDB entry's validation report on the structure, so that I can judge which regions and ligands are well supported by the data.
+
+#### Acceptance Criteria
+
+1. WHEN a validation report is requested for a PDB entry, THE System SHALL fetch the wwPDB report and show its summary metrics with percentiles
+2. WHEN the report is loaded, THE System SHALL color residues by the number of outlier criteria, draw clashes, color by fit to density (RSRZ or Q-score), and list ligand fit and the worst residues
+3. THE System SHALL classify residues on MolProbity Top8000 Ramachandran contours for any structure, using the report's classes when a report is loaded
+4. THE System SHALL expose outliers and per-residue fit values to the selection language
+
+### Requirement 30: Variant Effects
+
+**User Story:** As a researcher studying human variants, I want AlphaMissense predictions on the structure, so that I can relate substitutions to structural context.
+
+#### Acceptance Criteria
+
+1. WHEN AlphaMissense is requested for a structure of a human protein, THE System SHALL fetch the predictions and color residues by their mean pathogenicity, mapping through UniProt numbering and skipping wild-type mismatches
+2. WHEN substitutions are entered as sites, THE System SHALL show each one's AlphaMissense score and class
+3. THE System SHALL state that the predictions are for research, not clinical use
+
+### Requirement 31: Formats, Cache and Sessions
+
+**User Story:** As a user of Proteoscope, I want modern formats, fresh downloads and complete sessions, so that my data opens and my work reopens as I left it.
+
+#### Acceptance Criteria
+
+1. WHEN a BinaryCIF file is opened, THE System SHALL read it like PDBx/mmCIF
+2. WHEN a cached download is older than the maximum age, THE System SHALL fetch it again, and SHALL serve the cached copy if the fetch fails
+3. WHEN a session is saved, THE System SHALL include PAE matrices and contact probabilities opened by hand, prediction scores and MSA depth, and SHALL recompute SASA, PAE domains, validation and AlphaMissense on restore
+
+## Wave 5 Requirements
+
+### Requirement 32: Finding Structures
+
+**User Story:** As a researcher starting from a gene, I want to find every experimental structure and model of my protein, so that I can choose the best one to work with without visiting several websites.
+
+#### Acceptance Criteria
+
+1. WHEN a gene, protein name, UniProt accession, PDB ID, keywords or a sequence is searched, THE System SHALL query public services that need no account and list matching proteins, PDB entries or sequence hits
+2. WHEN a protein is chosen, THE System SHALL list its experimental structures with method, resolution, covered range and ligands, sortable, with a coverage track along the sequence, and its models from 3D-Beacons providers
+3. WHEN a listed structure or model is opened or added, THE System SHALL load it, superposing an added one onto the active structure
+4. THE System SHALL download models only from known provider hosts, cache search answers, and refuse to search when started offline
+
+### Requirement 33: Bundled Examples
+
+**User Story:** As a new user or teacher, I want curated examples that open with a view that shows their point, so that I can learn the tool and the biology offline.
+
+#### Acceptance Criteria
+
+1. THE System SHALL embed the examples as gzipped mmCIF and list them by category with a description and credit
+2. WHEN an example is opened, THE System SHALL run its opening view, starting from the default style
+3. WHEN the examples are compared (open and closed adenylate kinase, T and R hemoglobin), THE System SHALL set up the comparison offline
+
+### Requirement 34: Search-Engine Reports
+
+**User Story:** As a proteomics scientist, I want to open my search engine's report directly, so that my peptides, PTM sites and quantities appear on the structure without reformatting.
+
+#### Acceptance Criteria
+
+1. WHEN a MaxQuant, DIA-NN (TSV or Parquet), Spectronaut, FragPipe, mzTab or Proteome Discoverer report is opened, THE System SHALL recognize it, keep the rows of the structure's proteins and stream large files
+2. THE System SHALL read localization probabilities in each tool's notation, drop decoys and contaminants, and filter by q-value and localization thresholds
+3. THE System SHALL show coverage, counts, intensities or fold changes between sample groups on the structure, and list localized sites with CSV export
+4. WHEN public evidence is loaded, THE System SHALL mark each reported site as known or new
+
+### Requirement 35: Public Proteomics Evidence and Structural Context
+
+**User Story:** As a researcher interpreting PTM sites, I want public evidence and each site's structural context, so that I can judge whether a site is known, accessible and in an ordered region.
+
+#### Acceptance Criteria
+
+1. WHEN public evidence is requested, THE System SHALL fetch public peptides and modification sites for the structure's proteins and show coverage and sites by type
+2. WHEN exposure is computed, THE System SHALL report part-sphere exposure and disordered regions as StructureMap defines them, using the PAE when the model has one
+3. THE System SHALL expose exposure and disorder to coloring, the profile plot and the selection language
+
+### Requirement 36: Cross-Linking MS
+
+**User Story:** As a structural proteomics scientist, I want to open my cross-link search results and check them against the structure by the path a linker can take, so that I can tell real violations from artifacts of straight-line distances.
+
+#### Acceptance Criteria
+
+1. WHEN an export of xiFDR, xiVIEW, pLink, MeroX, XlinkX, MS Annika or MaxLynx is opened, THE System SHALL read unique residue pairs, leave out decoys and match proteins to chains
+2. WHEN surface distances are requested, THE System SHALL compute the solvent-accessible surface distance of every pair and report buried and out-of-range pairs
+3. THE System SHALL show the distance distribution against the cutoff and color links by it
+
+### Requirement 37: HDX-MS
+
+**User Story:** As an HDX-MS scientist, I want to open my uptake data and see significant differences on the structure, so that I can locate binding and conformational changes.
+
+#### Acceptance Criteria
+
+1. WHEN DynamX, HDExaminer or community-format HDX data is opened, THE System SHALL match peptides to the chain sequences and compute uptake per state and exposure
+2. WHEN two states are compared, THE System SHALL test each peptide's difference with the hybrid significance test when replicates are known, or with fixed thresholds otherwise
+3. THE System SHALL draw a Woods plot and color residues by the difference or uptake
+
+## Wave 6 Requirements
+
+### Requirement 38: Density Maps
+
+**User Story:** As a structural biologist, I want to see the experimental density around a ligand or residue and how well the model fits it, so that I can judge what the model claims before I rely on it.
+
+#### Acceptance Criteria
+
+1. WHEN the user loads the map of an X-ray entry, THE System SHALL fetch its 2Fo-Fc and Fo-Fc maps from the PDBe volume server (or RCSB's copy) and contour 2Fo-Fc at 1.5σ and Fo-Fc at ±3σ in distinct colors
+2. WHEN the user loads the map of a cryo-EM entry, THE System SHALL fetch the EMDB map named by the entry and contour it at EMDB's recommended level
+3. WHEN the user opens a CCP4 or MRC file, THE System SHALL read it on the user's computer, honoring its axis order, start indices, origin, data mode and byte order
+4. THE System SHALL draw the map as a mesh or a transparent surface around the focus, around the view center, or whole, and let the user change levels, region radius and a zone around the focused atoms
+5. WHEN the user asks for the map fit, THE System SHALL report atom inclusion at the contour and, per residue, the mean density in σ and the fraction of atoms inside, as a color scheme and a selection keyword
+
+### Requirement 39: Ligand Chemistry
+
+**User Story:** As a medicinal chemist, I want ligands drawn and typed with their real bond orders and charges, so that the pictures and the interactions I read from them are chemically right.
+
+#### Acceptance Criteria
+
+1. THE System SHALL take bond orders, aromaticity and formal charges from the Chemical Component Dictionary: from the file when it carries the dictionary tables, from a built-in table for standard residues, or fetched per ligand
+2. THE System SHALL apply a dictionary entry to a residue only when every heavy atom matches it by name and element
+3. THE System SHALL draw double, triple and aromatic bonds in stick representations, for ligands by default and optionally for all residues
+4. WHEN interactions are computed, THE System SHALL type donors, acceptors, aromatic rings and charged groups from the chemistry, protonating basic groups by rule
+
+### Requirement 40: Docking Poses
+
+**User Story:** As a computational chemist, I want to open my docking results in the receptor and compare the poses, so that I can choose poses by their interactions as well as their scores.
+
+#### Acceptance Criteria
+
+1. WHEN an SDF, MOL2 or PDBQT file is opened with a structure active, THE System SHALL place its molecules as poses in that structure and list them with their scores
+2. THE System SHALL read the scores of common docking tools (SD properties, DOCK comments, Vina remarks, DiffDock file names) and sort poses by any of them
+3. WHEN a pose is shown, THE System SHALL compute its interactions with the receptor without bonding it to other ligands
+4. WHEN fingerprints are requested, THE System SHALL tabulate each pose's interactions with the receptor residues and export them as CSV
+
+### Requirement 41: Structure-Only Alignment
+
+**User Story:** As a structural biologist, I want to superpose proteins that share a fold but little sequence, so that I can compare remote homologs and different complexes.
+
+#### Acceptance Criteria
+
+1. WHEN the user chooses structure-based pairing, THE System SHALL align chains with TM-align and complexes with MM-align, as US-align does
+2. THE System SHALL report both TM-scores, RMSD, aligned length and identity, and support the same coloring, sequence view and sessions as sequence-based superposition
+3. THE System SHALL reproduce US-align's scores on the same inputs
+
+### Requirement 42: Differential Statistics
+
+**User Story:** As a proteomics scientist, I want to test which peptides and sites change between my conditions, so that the structure shows significant changes rather than raw fold changes.
+
+#### Acceptance Criteria
+
+1. WHEN the user tests group B against group A, THE System SHALL run a moderated t-test (limma's empirical Bayes) on every feature of the report, with Benjamini–Hochberg q-values
+2. THE System SHALL offer median normalization, a minimum number of values per group and Perseus-style imputation
+3. WHERE a report has PTM sites and unmodified peptides, THE System SHALL adjust site changes for their protein's change as MSstatsPTM does
+4. THE System SHALL show a volcano plot linked to the structure, color sites by significant changes and include the statistics in exports
+5. THE System SHALL reproduce limma's and MSstatsPTM's results on the same inputs
+
+### Requirement 43: Conservation
+
+**User Story:** As a researcher, I want residue conservation from an alignment on the structure, so that I can see which surfaces and sites evolution has kept.
+
+#### Acceptance Criteria
+
+1. WHEN the user opens an A3M, aligned FASTA, Stockholm or Clustal alignment, or a prediction with an MSA, THE System SHALL score each residue by Jensen–Shannon divergence or entropy as Capra and Singh define them
+2. THE System SHALL map the scores to chains by sequence and show them in ConSurf's nine colors, in tooltips, in the profile plot and in the selection language
+
+### Requirement 44: Methods and Citation
+
+**User Story:** As an author, I want a methods paragraph and references for what I did in a session, so that my paper states the data versions, methods and parameters correctly.
+
+#### Acceptance Criteria
+
+1. WHEN the user asks for methods, THE System SHALL write a paragraph naming the data sources with their IDs, versions and dates, each analysis with its parameters, and the Proteoscope version
+2. THE System SHALL list numbered references with DOIs and offer them as BibTeX
+3. THE repository SHALL describe how to cite Proteoscope in `CITATION.cff`
+
+### Requirement 45: Continuous Integration and Validation
+
+**User Story:** As a maintainer and as a user who publishes with Proteoscope, I want every change tested and the analyses checked against their reference tools, so that errors are caught before they reach results.
+
+#### Acceptance Criteria
+
+1. WHEN a change is pushed or proposed, THE continuous integration SHALL check formatting, run static analysis and all tests, and build every release target
+2. THE repository SHALL include a validation suite that compares the analyses with the numbers of their reference tools, without including those tools
+3. THE validation suite SHALL run offline once its public inputs are cached, and weekly in continuous integration
+4. WHEN a version tag is pushed, THE release workflow SHALL check that the tag matches the application version, run the tests, and attach every release target with its SHA-256 checksum to a draft release

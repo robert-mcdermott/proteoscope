@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use Proteoscope in your research, please cite it as below. The Methods button in the Session panel writes a methods paragraph with the references for the analyses you used."
+title: "Proteoscope"
+abstract: "A 3D viewer and analysis workbench for protein and nucleic-acid structures, predicted complexes, density maps and structural proteomics data. It runs locally, without installation, and keeps the user's files on their computer."
+type: software
+authors:
+  - family-names: McDermott
+    given-names: Robert
+repository-code: "https://github.com/robert-mcdermott/proteoscope"
+license: Apache-2.0
+version: 0.6.0
+date-released: "2026-09-23"
+keywords:
+  - structural biology
+  - protein structure
+  - molecular visualization
+  - structural proteomics
+  - AlphaFold
+  - cryo-EM
+  - WebGPU

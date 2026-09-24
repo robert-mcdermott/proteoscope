@@ -6,141 +6,749 @@
     <meta name="theme-color" content="#050708" />
     <title>Proteoscope</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=assembly" />
+    <link rel="stylesheet" href="/styles.css?v=0.6.0" />
   </head>
   <body>
-    <main id="app">
+    <main id="app" class="left-open right-open sequence-open">
       <canvas id="viewport" aria-label="Interactive 3D molecular structure viewport"></canvas>
+      <div id="label-layer" class="label-layer" aria-hidden="true"></div>
 
-      <section class="panel title-panel" aria-label="Structure summary">
-        <div class="brand-row">
-          <div>
-            <p class="eyebrow">Proteoscope</p>
-            <h1 id="structure-title">Loading structure</h1>
-          </div>
-          <span id="gpu-badge" class="status-badge">WebGPU</span>
+      <header class="topbar">
+        <button id="left-toggle" class="icon-button" type="button" title="Toggle left panel" aria-label="Toggle left panel">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16" /></svg>
+        </button>
+        <div class="brand">
+          <img src="/favicon.svg" alt="" width="22" height="22" />
+          <span>Proteoscope</span>
         </div>
-        <dl class="structure-meta">
-          <div><dt>Format</dt><dd id="meta-format">...</dd></div>
-          <div><dt>Method</dt><dd id="meta-method">...</dd></div>
-          <div><dt>Resolution</dt><dd id="meta-resolution">...</dd></div>
-          <div><dt>Entry</dt><dd id="meta-entry">...</dd></div>
-          <div><dt>Assembly</dt><dd id="meta-assembly">Asymmetric unit</dd></div>
-        </dl>
-        <label class="field">
-          <span>Bundled structure</span>
-          <select id="sample-select"></select>
-        </label>
-        <label id="assembly-field" class="field" hidden>
-          <span>Biological assembly</span>
-          <select id="assembly-select"></select>
-        </label>
-        <label class="upload-zone" for="file-input">
-          <input id="file-input" type="file" accept=".pdb,.cif,.mmcif,chemical/x-pdb,chemical/x-cif,text/plain" />
-          <span class="upload-icon" aria-hidden="true">+</span>
-          <span>
-            <strong>Open local structure</strong>
-            <small>Choose .pdb, .cif, or .mmcif</small>
-          </span>
-        </label>
-        <dl class="metrics">
-          <div><dt id="metric-atoms-label">Atoms</dt><dd id="metric-atoms">...</dd></div>
-          <div><dt>Total atoms</dt><dd id="metric-total-atoms">...</dd></div>
-          <div><dt>Residues</dt><dd id="metric-residues">...</dd></div>
-          <div><dt>Chains</dt><dd id="metric-chains">...</dd></div>
-          <div><dt>Models</dt><dd id="metric-models">...</dd></div>
-        </dl>
-      </section>
+        <div class="title-block">
+          <h1 id="structure-title">Loading structure</h1>
+          <span id="structure-subtitle"></span>
+        </div>
+        <div class="search-wrap">
+          <label class="search-box">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" /></svg>
+            <input id="search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Find a residue, or type a selection or command (help)  ( / )" />
+          </label>
+          <div id="search-results" class="search-results" role="listbox"></div>
+        </div>
+        <span id="gpu-badge" class="status-badge" title="Renderer">WebGPU</span>
+        <button id="right-toggle" class="icon-button" type="button" title="Toggle right panel" aria-label="Toggle right panel">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M14.5 4.5v15" /></svg>
+        </button>
+      </header>
 
-      <section class="panel search-panel" aria-label="Search atoms and residues">
-        <label class="search-box">
-          <span aria-hidden="true">⌕</span>
-          <input id="search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Find residue, ligand, chain, atom..." />
-        </label>
-        <div id="search-results" class="search-results"></div>
-      </section>
+      <aside id="left-panel" class="sidebar left" aria-label="Structure, style, analysis and proteomics tools">
+        <nav class="tabs" role="tablist">
+          <button type="button" role="tab" data-tab="structure" class="is-active">Structure</button>
+          <button type="button" role="tab" data-tab="style">Style</button>
+          <button type="button" role="tab" data-tab="analysis">Analysis</button>
+          <button type="button" role="tab" data-tab="proteomics">Proteomics</button>
+        </nav>
 
-      <section class="panel controls-panel" aria-label="Rendering controls">
-        <div class="segmented" role="group" aria-label="Representation">
-          <button class="is-active" type="button" data-representation="ball-stick">Ball + Stick</button>
-          <button type="button" data-representation="spacefill">Spacefill</button>
-          <button type="button" data-representation="backbone">Backbone</button>
-          <button type="button" data-representation="cartoon">Cartoon</button>
-        </div>
-        <div class="segmented" role="group" aria-label="Coloring">
-          <button class="is-active" type="button" data-color-scheme="chain">Chain</button>
-          <button type="button" data-color-scheme="element">Element</button>
-          <button type="button" data-color-scheme="bfactor">B-factor</button>
-          <button type="button" data-color-scheme="residue">Residue</button>
-          <button type="button" data-color-scheme="secondary">Sec Struct</button>
-        </div>
-        <div class="control-grid">
-          <label>
-            <span>Atom scale</span>
-            <input id="atom-scale" type="range" min="0.32" max="1.65" value="0.72" step="0.01" />
-          </label>
-          <label>
-            <span>Bond scale</span>
-            <input id="bond-scale" type="range" min="0.14" max="1.4" value="0.52" step="0.01" />
-          </label>
-          <label>
-            <span>Ribbon</span>
-            <input id="cartoon-width" type="range" min="0.55" max="1.8" value="1" step="0.01" />
-          </label>
-          <label>
-            <span>Quality</span>
-            <input id="cartoon-quality" type="range" min="2" max="9" value="5" step="1" />
-          </label>
-          <label>
-            <span>Glow</span>
-            <input id="glow-scale" type="range" min="0" max="1" value="0.36" step="0.01" />
-          </label>
-          <label>
-            <span>Clip</span>
-            <input id="clip-depth" type="range" min="0" max="1" value="1" step="0.01" />
-          </label>
-        </div>
-        <div class="toggles">
-          <label><input id="show-hetero" type="checkbox" checked /> Ligands</label>
-          <label><input id="show-water" type="checkbox" /> Water</label>
-          <label><input id="show-hydrogen" type="checkbox" /> H</label>
-          <label><input id="auto-rotate" type="checkbox" checked /> Motion</label>
-        </div>
-      </section>
+        <div class="tab-body">
+          <section data-panel="structure" class="panel-section">
+            <div class="group">
+              <h3>Open structure</h3>
+              <form id="fetch-form" class="inline-form">
+                <input id="fetch-input" type="text" autocomplete="off" spellcheck="false" placeholder="PDB ID or UniProt accession" aria-label="PDB ID or UniProt accession" />
+                <button type="submit" class="primary">Fetch</button>
+              </form>
+              <label class="check add-toggle" title="Keep the structures already open and add the next one to the scene, for example to superpose them">
+                <input id="add-mode" type="checkbox" /> Add to the scene instead of replacing
+              </label>
+              <p class="hint">RCSB PDB (e.g. <button type="button" class="link" data-fetch="4HHB">4HHB</button>, <button type="button" class="link" data-fetch="6OIM">6OIM</button>) or AlphaFold DB (e.g. <button type="button" class="link" data-fetch="P04637">P04637</button>).</p>
+              <label class="field">
+                <span>Bundled examples</span>
+                <select id="sample-select"></select>
+              </label>
+              <div id="sample-info" class="sample-info" hidden></div>
+              <label class="upload-zone" for="file-input">
+                <input id="file-input" type="file" accept=".pdb,.ent,.cif,.mmcif,.bcif,.gz,.zst,.json,.zip,.npz,.npy,.a3m,.a2m,.fasta,.fa,.faa,.afa,.sto,.stockholm,.aln,.clustal,.csv,.sdf,.sd,.mol,.mol2,.pdbqt,.mrc,.map,.ccp4,chemical/x-pdb,chemical/x-cif,chemical/x-mdl-sdfile,chemical/x-mol2,text/plain" multiple />
+                <span class="upload-icon" aria-hidden="true">+</span>
+                <span>
+                  <strong>Open local file</strong>
+                  <small>.pdb, .cif, .bcif (optionally .gz or .zst), a PAE .json, or an AlphaFold Server .zip. Drop several files to compare them, or a prediction folder. Docking poses (.sdf, .mol2, .pdbqt), maps (.map, .mrc) and alignments (.a3m, .fasta, .sto, .aln) open in the active structure. Files stay on this computer.</small>
+                </span>
+              </label>
+              <label class="folder-button" for="folder-input" title="Open an AlphaFold 3, Boltz, Chai-1 or ColabFold output folder">
+                <input id="folder-input" type="file" webkitdirectory multiple />
+                Open prediction folder…
+              </label>
+            </div>
 
-      <aside class="panel chain-panel" aria-label="Chains">
-        <div class="panel-heading">
-          <span>Chains</span>
-          <button id="isolate-clear" type="button" title="Show all chains">All</button>
+            <div class="group" id="discover-group">
+              <h3>Find structures</h3>
+              <form id="discover-form" class="inline-form">
+                <input id="discover-input" type="search" autocomplete="off" spellcheck="false" placeholder="Gene, protein, UniProt, keywords or a sequence" aria-label="Search public structure databases" />
+                <button type="submit" class="primary">Search</button>
+              </form>
+              <div class="inline-form compact discover-options">
+                <select id="discover-organism" aria-label="Organism for gene and protein names" title="Organism for gene and protein names">
+                  <option value="9606">Human</option>
+                  <option value="10090">Mouse</option>
+                  <option value="10116">Rat</option>
+                  <option value="7955">Zebrafish</option>
+                  <option value="7227">Fruit fly</option>
+                  <option value="6239">C. elegans</option>
+                  <option value="559292">Yeast</option>
+                  <option value="83333">E. coli K-12</option>
+                  <option value="3702">Arabidopsis</option>
+                  <option value="">Any organism</option>
+                </select>
+                <button id="discover-protein" type="button" title="Experimental structures and models of the active structure's protein (through its UniProt reference)">This protein</button>
+                <button id="discover-similar" type="button" title="PDB entries with sequences similar to the chain shown in the sequence panel (RCSB sequence search; the sequence is sent to RCSB)">Similar</button>
+              </div>
+              <p class="hint">Searches RCSB PDB, UniProt, PDBe and 3D-Beacons, which need no account. The query, or a pasted sequence, is sent to those services.</p>
+              <div id="discover-result" class="discover-result" hidden></div>
+            </div>
+
+            <div class="group" id="prediction-group" hidden>
+              <h3>Prediction <span id="prediction-count" class="count-badge"></span></h3>
+              <p id="prediction-title" class="hint"></p>
+              <div id="prediction-models" class="prediction-models"></div>
+              <div class="segmented three" role="group" aria-label="Chain-pair score">
+                <button type="button" data-pair-metric="iptm" class="is-active" title="ipTM for each chain pair, as reported by the predictor">ipTM</button>
+                <button type="button" data-pair-metric="ipsae" title="ipSAE (Dunbrack 2025): interface pTM restricted to confidently aligned residue pairs">ipSAE</button>
+                <button type="button" data-pair-metric="pdockq2" title="pDockQ2 (Zhu et al. 2023): interface pLDDT and PAE">pDockQ2</button>
+              </div>
+              <div id="prediction-pairs" class="prediction-pairs"></div>
+              <div id="prediction-detail" class="result-box"></div>
+              <div class="button-row">
+                <button id="prediction-superpose" type="button" title="Load every model and superpose them on the top-ranked one">Superpose all models</button>
+                <button id="prediction-export" type="button" title="Download the ranking and interface scores as CSV">Export CSV</button>
+              </div>
+            </div>
+
+            <div class="group" id="docking-group" hidden>
+              <h3>Docking poses <span id="docking-count" class="count-badge"></span></h3>
+              <p id="docking-title" class="hint"></p>
+              <div id="docking-poses" class="prediction-models"></div>
+              <div id="docking-detail" class="result-box"></div>
+              <div id="docking-fingerprint" class="fingerprint-box"></div>
+              <div class="button-row">
+                <button id="docking-fingerprints" type="button" title="Interactions of every pose with the receptor residues within 9 Å, as a pose × residue table">Interaction fingerprints</button>
+                <button id="docking-export" type="button" title="Download the poses with their scores and interactions as CSV">Export CSV</button>
+                <button id="docking-clear" type="button" title="Remove the poses from the structure">Remove poses</button>
+              </div>
+            </div>
+
+            <div class="group" id="structures-group" hidden>
+              <h3>Structures in scene <span id="structure-count" class="count-badge"></span></h3>
+              <div id="structure-list" class="structure-list"></div>
+              <p class="hint">Click a structure to make it active: the panels and the sequence follow it. Superpose structures in the Analysis tab.</p>
+            </div>
+
+            <div class="group">
+              <h3>Session</h3>
+              <div class="button-row">
+                <button id="session-save" type="button" title="Save structures, styles, superpositions, selections and the camera as a .proteoscope.json file">Save session</button>
+                <button id="session-link" type="button" title="Copy a link that reopens this view (fetched structures and bundled examples only)">Copy link</button>
+                <button id="session-mvs" type="button" title="Export this view as MolViewSpec (.mvsj or .mvsx) to open in Mol*">MolViewSpec</button>
+                <button id="session-methods" type="button" title="A methods paragraph for what this session used (data sources with versions, analyses and parameters) with references and BibTeX">Methods</button>
+              </div>
+              <p class="hint">Open a saved session like any file. Local files are embedded in the session; links carry only fetched structures and bundled examples.</p>
+            </div>
+
+            <div class="group">
+              <h3>Entry</h3>
+              <dl class="meta-grid">
+                <div><dt>Method</dt><dd id="meta-method">…</dd></div>
+                <div><dt>Resolution</dt><dd id="meta-resolution">…</dd></div>
+                <div><dt>R-free</dt><dd id="meta-rfree">…</dd></div>
+                <div><dt>Entry</dt><dd id="meta-entry">…</dd></div>
+                <div class="wide"><dt>Organism</dt><dd id="meta-organism">…</dd></div>
+                <div><dt>Format</dt><dd id="meta-format">…</dd></div>
+                <div><dt>Deposited</dt><dd id="meta-date">…</dd></div>
+                <div class="wide"><dt>Assembly</dt><dd id="meta-assembly">Asymmetric unit</dd></div>
+              </dl>
+              <div id="confidence-summary" class="confidence-summary" hidden></div>
+              <label id="assembly-field" class="field" hidden>
+                <span>Biological assembly</span>
+                <select id="assembly-select"></select>
+              </label>
+            </div>
+
+            <div class="group">
+              <h3>Composition</h3>
+              <dl class="metrics">
+                <div><dt id="metric-atoms-label">Atoms</dt><dd id="metric-atoms">…</dd></div>
+                <div><dt>Residues</dt><dd id="metric-residues">…</dd></div>
+                <div><dt>Chains</dt><dd id="metric-chains">…</dd></div>
+                <div><dt>Models</dt><dd id="metric-models">…</dd></div>
+              </dl>
+              <div id="entity-list" class="entity-list"></div>
+            </div>
+
+            <div class="group">
+              <h3>Secondary structure</h3>
+              <div class="segmented three" role="group" aria-label="Secondary structure source">
+                <button type="button" data-ss-mode="auto" class="is-active" title="File annotation when present, otherwise DSSP">Auto</button>
+                <button type="button" data-ss-mode="file" title="HELIX/SHEET or struct_conf annotations only">File</button>
+                <button type="button" data-ss-mode="dssp" title="Recompute with DSSP (Kabsch &amp; Sander)">DSSP</button>
+              </div>
+              <p id="ss-summary" class="hint"></p>
+            </div>
+          </section>
+
+          <section data-panel="style" class="panel-section" hidden>
+            <div id="style-scope" class="group style-scope" hidden>
+              <h3>Apply style to</h3>
+              <div class="segmented two" role="group" aria-label="Apply style changes to">
+                <button type="button" data-style-scope="all" class="is-active">All structures</button>
+                <button type="button" data-style-scope="active">Only active</button>
+              </div>
+            </div>
+            <div class="group">
+              <h3>Representation</h3>
+              <div class="segmented three" role="group" aria-label="Representation preset">
+                <button type="button" data-preset="cartoon" class="is-active">Cartoon</button>
+                <button type="button" data-preset="ball-stick">Ball &amp; stick</button>
+                <button type="button" data-preset="sticks">Sticks</button>
+                <button type="button" data-preset="spacefill">Spacefill</button>
+                <button type="button" data-preset="trace">Trace</button>
+                <button type="button" data-preset="surface">Surface</button>
+              </div>
+              <div class="field-grid">
+                <label class="field"><span>Polymer</span>
+                  <select id="polymer-rep">
+                    <option value="cartoon">Cartoon</option>
+                    <option value="trace">Trace</option>
+                    <option value="ball-stick">Ball &amp; stick</option>
+                    <option value="sticks">Sticks</option>
+                    <option value="spacefill">Spacefill</option>
+                    <option value="none">Hidden</option>
+                  </select>
+                </label>
+                <label class="field"><span>Ligands &amp; ions</span>
+                  <select id="ligand-rep">
+                    <option value="ball-stick">Ball &amp; stick</option>
+                    <option value="sticks">Sticks</option>
+                    <option value="spacefill">Spacefill</option>
+                    <option value="none">Hidden</option>
+                  </select>
+                </label>
+                <label class="field"><span>Side chains</span>
+                  <select id="sidechain-mode">
+                    <option value="focus">Around focus</option>
+                    <option value="all">All</option>
+                    <option value="none">None</option>
+                  </select>
+                </label>
+                <label class="field" title="Double, triple and aromatic bonds in sticks, from the Chemical Component Dictionary or the file"><span>Bond orders</span>
+                  <select id="bond-orders">
+                    <option value="ligands">Ligands</option>
+                    <option value="all">All residues</option>
+                    <option value="off">Off</option>
+                  </select>
+                </label>
+                <div class="toggles">
+                  <label><input id="show-water" type="checkbox" /> Water</label>
+                  <label><input id="show-hydrogen" type="checkbox" /> Hydrogens</label>
+                </div>
+              </div>
+            </div>
+
+            <div class="group">
+              <h3>Surface</h3>
+              <div class="field-grid">
+                <label class="field"><span>Type</span>
+                  <select id="surface-kind">
+                    <option value="off">Off</option>
+                    <option value="ses">Molecular (SES)</option>
+                    <option value="sas">Solvent accessible (SAS)</option>
+                    <option value="gaussian">Gaussian (smooth)</option>
+                    <option value="vdw">van der Waals</option>
+                  </select>
+                </label>
+                <label class="field"><span>Surface color</span>
+                  <select id="surface-color">
+                    <option value="scheme">Match color scheme</option>
+                    <option value="electrostatic">Electrostatics (Coulombic)</option>
+                    <option value="hydrophobicity">Hydrophobicity</option>
+                    <option value="uniform">Uniform white</option>
+                  </select>
+                </label>
+                <label class="field wide"><span>Opacity <output id="surface-opacity-value">100%</output></span>
+                  <input id="surface-opacity" type="range" min="0.1" max="1" step="0.05" value="1" />
+                </label>
+              </div>
+              <p id="surface-status" class="hint"></p>
+            </div>
+
+            <div class="group">
+              <h3>Color</h3>
+              <label class="field"><span>Scheme</span><select id="color-scheme"></select></label>
+              <div class="field-grid">
+                <label class="field" id="palette-field"><span>Palette</span><select id="chain-palette"></select></label>
+                <label class="field" id="colormap-field" hidden><span>Color map</span><select id="colormap"></select></label>
+                <label class="field" id="uniform-field" hidden><span>Color</span><input id="uniform-color" type="color" value="#b8c4d0" /></label>
+              </div>
+              <div class="toggles">
+                <label title="Color N, O, S and other non-carbon atoms by element in structural schemes"><input id="hetero-element" type="checkbox" checked /> Heteroatoms by element</label>
+              </div>
+            </div>
+
+            <div class="group">
+              <h3>Size</h3>
+              <div class="control-grid">
+                <label><span>Atoms <output id="atom-scale-value">1.00</output></span><input id="atom-scale" type="range" min="0.3" max="2" step="0.01" value="1" /></label>
+                <label><span>Bonds <output id="bond-scale-value">1.00</output></span><input id="bond-scale" type="range" min="0.3" max="2.5" step="0.01" value="1" /></label>
+                <label><span>Cartoon width <output id="cartoon-width-value">1.00</output></span><input id="cartoon-width" type="range" min="0.4" max="2" step="0.01" value="1" /></label>
+                <label><span>Cartoon detail <output id="cartoon-quality-value">6</output></span><input id="cartoon-quality" type="range" min="2" max="12" step="1" value="6" /></label>
+              </div>
+            </div>
+
+            <div class="group">
+              <h3>Lighting &amp; effects</h3>
+              <div class="segmented three" role="group" aria-label="Lighting style">
+                <button type="button" data-lighting="standard" class="is-active">Standard</button>
+                <button type="button" data-lighting="soft">Soft</button>
+                <button type="button" data-lighting="illustrative">Illustrative</button>
+                <button type="button" data-lighting="glossy">Glossy</button>
+                <button type="button" data-lighting="neon">Neon</button>
+                <button type="button" data-lighting="flat">Flat</button>
+              </div>
+              <div class="control-grid">
+                <label><span>Ambient occlusion <output id="ao-strength-value"></output></span><input id="ao-strength" type="range" min="0" max="1" step="0.01" value="0.75" /></label>
+                <label><span>Outline <output id="outline-strength-value"></output></span><input id="outline-strength" type="range" min="0" max="1" step="0.01" value="0" /></label>
+                <label><span>Depth fog <output id="fog-strength-value"></output></span><input id="fog-strength" type="range" min="0" max="1" step="0.01" value="0.45" /></label>
+                <label><span>Glow <output id="glow-scale-value"></output></span><input id="glow-scale" type="range" min="0" max="1" step="0.01" value="0" /></label>
+                <label><span>Specular <output id="specular-value"></output></span><input id="specular" type="range" min="0" max="1" step="0.01" value="0.22" /></label>
+                <label><span>AO radius <output id="ao-radius-value"></output></span><input id="ao-radius" type="range" min="1" max="12" step="0.5" value="5" /></label>
+              </div>
+            </div>
+
+            <div class="group">
+              <h3>Scene</h3>
+              <div class="segmented four" role="group" aria-label="Background">
+                <button type="button" data-background="dark" class="is-active">Dark</button>
+                <button type="button" data-background="black">Black</button>
+                <button type="button" data-background="gray">Gray</button>
+                <button type="button" data-background="white">White</button>
+              </div>
+              <div class="segmented two" role="group" aria-label="Projection">
+                <button type="button" data-projection="perspective" class="is-active">Perspective</button>
+                <button type="button" data-projection="orthographic">Orthographic</button>
+              </div>
+              <div class="control-grid">
+                <label><span>Front clip <output id="clip-near-value"></output></span><input id="clip-near" type="range" min="0" max="1" step="0.005" value="0" /></label>
+                <label><span>Back clip <output id="clip-far-value"></output></span><input id="clip-far" type="range" min="0" max="1" step="0.005" value="1" /></label>
+              </div>
+            </div>
+          </section>
+
+          <section data-panel="analysis" class="panel-section" hidden>
+            <div class="group" id="compare-group">
+              <h3>Compare structures</h3>
+              <p id="compare-hint" class="hint">Tick <em>Add to the scene</em> in the Structure tab and open a second structure to superpose it, or compare an experimental structure with its AlphaFold model.</p>
+              <div id="compare-controls" class="field-grid" hidden>
+                <label class="field"><span>Reference (fixed)</span><select id="compare-reference"></select></label>
+                <label class="field"><span>Moving</span><select id="compare-mobile"></select></label>
+                <label class="field"><span>Reference chain</span><select id="compare-ref-chain"></select></label>
+                <label class="field"><span>Moving chain</span><select id="compare-mob-chain"></select></label>
+                <label class="field" title="Sequence: residues paired by sequence alignment, fitted with outlier pruning (as ChimeraX matchmaker). Structure: residues paired by structure alone with TM-align (MM-align for complexes), for remote homologs"><span>Pair residues by</span>
+                  <select id="compare-method">
+                    <option value="sequence">Sequence</option>
+                    <option value="structure">Structure (TM-align)</option>
+                  </select>
+                </label>
+              </div>
+              <div class="toggles" hidden>
+                <label title="Fit only on the residues selected in the reference, for example one domain or a binding site, so a hinge motion elsewhere shows up as deviation"><input id="compare-fit-selection" type="checkbox" /> Fit on selected residues</label>
+              </div>
+              <div class="button-row">
+                <button id="compare-run" type="button" class="primary" hidden>Superpose</button>
+                <button id="compare-reset" type="button" hidden>Reset positions</button>
+                <button id="compare-alphafold" type="button" disabled>Compare with AlphaFold</button>
+                <button id="compare-models" type="button" disabled>Overlay models</button>
+              </div>
+              <div id="compare-result" class="result-box" hidden></div>
+            </div>
+
+            <div class="group" id="density-group">
+              <h3>Density map</h3>
+              <p class="hint">The 2Fo-Fc and Fo-Fc maps of an X-ray entry or the map of a cryo-EM entry, from the PDBe volume server (network); or a CCP4/MRC map file, read on this computer.</p>
+              <div class="button-row">
+                <button id="density-load" type="button">Load map</button>
+                <button id="density-remove" type="button" disabled>Remove</button>
+              </div>
+              <label class="folder-button" for="density-file" title="A CCP4 or MRC map (.map, .mrc, .ccp4, optionally gzipped) of the active structure">
+                <input id="density-file" type="file" accept=".map,.mrc,.ccp4,.gz" />
+                Open a map file…
+              </label>
+              <div id="density-controls" hidden>
+                <div id="density-channels" class="map-channels"></div>
+                <div class="field-grid">
+                  <label class="field"><span>Region</span>
+                    <select id="density-region">
+                      <option value="focus">Around the focus</option>
+                      <option value="view">Follow the view</option>
+                      <option value="all">Whole map</option>
+                    </select>
+                  </label>
+                  <label class="field"><span>Radius <output id="density-radius-value"></output></span><input id="density-radius" type="range" min="4" max="30" step="1" value="10" /></label>
+                  <label class="field"><span>Style</span>
+                    <select id="density-style">
+                      <option value="mesh">Mesh</option>
+                      <option value="surface">Surface</option>
+                    </select>
+                  </label>
+                  <label class="field" title="Show the map only near the focused or selected atoms (or all atoms when nothing is focused), for figures"><span>Near atoms</span>
+                    <select id="density-zone">
+                      <option value="0">Everywhere</option>
+                      <option value="1.6">Within 1.6 Å</option>
+                      <option value="2">Within 2 Å</option>
+                      <option value="3">Within 3 Å</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="button-row">
+                  <button id="density-fit" type="button" title="Map values at every atom: atom inclusion at the contour (cryo-EM) or mean 2Fo-Fc density in σ (X-ray), per residue">Map fit</button>
+                </div>
+              </div>
+              <div id="density-result" class="result-box" hidden></div>
+            </div>
+
+            <div class="group" id="validation-group">
+              <h3>Validation</h3>
+              <p class="hint">The wwPDB validation report of a PDB entry: clashes, geometry, Ramachandran and rotamer outliers, and fit to the density. Requires network access.</p>
+              <div class="button-row">
+                <button id="validation-load" type="button">Load report</button>
+                <button id="validation-color" type="button" disabled>Color outliers</button>
+                <button id="validation-fit" type="button" disabled>Color density fit</button>
+              </div>
+              <label class="check"><input id="validation-clashes" type="checkbox" disabled /> Show clashes</label>
+              <div id="validation-result" class="result-box" hidden></div>
+            </div>
+
+            <div class="group">
+              <h3>Interactions</h3>
+              <p class="hint">Double-click a ligand or residue (or select it and press <kbd>F</kbd>) to focus it. Non-covalent contacts to its surroundings are detected and drawn.</p>
+              <div id="interaction-types" class="chip-toggles"></div>
+              <div class="field-grid">
+                <label class="field"><span>Interface chain A</span><select id="interface-a"></select></label>
+                <label class="field"><span>Interface chain B</span><select id="interface-b"></select></label>
+              </div>
+              <div class="button-row">
+                <button id="interface-run" type="button">Analyze interface</button>
+                <button id="interactions-clear" type="button">Clear</button>
+                <button id="interactions-export" type="button">Export CSV</button>
+              </div>
+              <div id="interface-result" class="result-box" hidden></div>
+            </div>
+
+            <div class="group">
+              <h3>Solvent accessibility</h3>
+              <p class="hint">Shrake-Rupley SASA (1.4 Å probe). Also enables the solvent-exposure color scheme and buried surface area for chain pairs.</p>
+              <div class="button-row">
+                <button id="sasa-run" type="button">Compute SASA</button>
+                <button id="sasa-color" type="button" disabled>Color by exposure</button>
+              </div>
+              <div id="sasa-result" class="result-box" hidden></div>
+              <div class="button-row">
+                <button id="ppse-run" type="button" title="Part-sphere exposure and disorder as in StructureMap (Bludau et al. 2022): Cα neighbors within 12 Å in a 70° cone along Cα→Cβ, discounted by PAE when the model has one">Part-sphere exposure (pPSE)</button>
+              </div>
+              <div id="ppse-result" class="result-box" hidden></div>
+            </div>
+
+            <div class="group">
+              <h3>Ramachandran plot</h3>
+              <div class="field-grid">
+                <label class="field"><span>Chain</span><select id="rama-chain"></select></label>
+                <label class="field"><span>Residues</span>
+                  <select id="rama-category">
+                    <option value="all">All (general contours)</option>
+                    <option value="general">General</option>
+                    <option value="glycine">Glycine</option>
+                    <option value="transPro">trans-Proline</option>
+                    <option value="cisPro">cis-Proline</option>
+                    <option value="prePro">Pre-proline</option>
+                    <option value="ileVal">Ile / Val</option>
+                  </select>
+                </label>
+              </div>
+              <canvas id="rama-canvas" class="plot square" width="600" height="600"></canvas>
+              <p id="rama-summary" class="hint"></p>
+            </div>
+
+            <div class="group">
+              <h3>Per-residue profile</h3>
+              <div class="field-grid">
+                <label class="field"><span>Chain</span><select id="profile-chain"></select></label>
+                <label class="field"><span>Metric</span>
+                  <select id="profile-metric">
+                    <option value="bfactor">B-factor / pLDDT</option>
+                    <option value="sasa">Relative SASA</option>
+                    <option value="ppse">Part-sphere exposure (pPSE)</option>
+                    <option value="hydrophobicity">Hydrophobicity (9-residue window)</option>
+                    <option value="missense">AlphaMissense (mean pathogenicity)</option>
+                    <option value="msa">MSA depth</option>
+                    <option value="conservation">Conservation</option>
+                    <option value="mapfit">Fit to the loaded map</option>
+                    <option value="densityfit">Fit to density (RSRZ / Q-score)</option>
+                    <option value="data">Custom data</option>
+                  </select>
+                </label>
+              </div>
+              <canvas id="profile-canvas" class="plot wide" width="640" height="220"></canvas>
+            </div>
+
+            <div class="group" id="conservation-group">
+              <h3>Conservation</h3>
+              <p class="hint">Residue conservation from a multiple sequence alignment: the MSA of an opened prediction, or an alignment file whose first sequence is the protein (A3M, aligned FASTA, Stockholm or Clustal). Jensen–Shannon divergence (Capra &amp; Singh 2007) in ConSurf-style grades.</p>
+              <div class="button-row">
+                <button id="conservation-run" type="button">Compute conservation</button>
+              </div>
+              <label class="folder-button" for="conservation-file">
+                <input id="conservation-file" type="file" accept=".a3m,.a2m,.fasta,.fa,.afa,.sto,.stockholm,.aln,.clustal,.msa,.gz" multiple />
+                Open an alignment…
+              </label>
+              <div id="conservation-result" class="result-box" hidden></div>
+            </div>
+
+            <div class="group" id="pae-group">
+              <h3>Predicted aligned error</h3>
+              <p id="pae-hint" class="hint">Fetch an AlphaFold DB entry, open a PAE JSON (AlphaFold DB, AlphaFold 3, ColabFold) or a prediction folder to see the PAE matrix. Drag on the plot to highlight residue ranges.</p>
+              <div id="pae-view" class="segmented two" role="group" aria-label="Matrix" hidden>
+                <button type="button" data-pae-view="pae" class="is-active">PAE</button>
+                <button type="button" data-pae-view="contacts" title="AlphaFold 3 contact probabilities (8 Å)">Contact probability</button>
+              </div>
+              <canvas id="pae-canvas" class="plot square" width="600" height="600" hidden></canvas>
+              <p id="pae-summary" class="hint"></p>
+              <div class="button-row">
+                <button id="pae-domains" type="button" disabled title="Cluster residues into rigid domains from the PAE (as ChimeraX's alphafold pae colorDomains)">Find domains</button>
+                <button id="msa-depth" type="button" disabled title="Color by the number of aligned sequences per residue (AlphaFold DB models, prediction folders, or a dropped .a3m)">MSA depth</button>
+              </div>
+              <div id="pae-domain-result" class="result-box" hidden></div>
+            </div>
+          </section>
+
+          <section data-panel="proteomics" class="panel-section" hidden>
+            <p class="privacy-note">Everything here runs locally in your browser. Proteomics data is never uploaded.</p>
+            <div class="group" id="report-group">
+              <h3>Search results</h3>
+              <label class="upload-zone compact" for="report-input">
+                <input id="report-input" type="file" accept=".txt,.tsv,.csv,.parquet,.mztab,.gz,.xls" />
+                <span class="upload-icon" aria-hidden="true">+</span>
+                <span>
+                  <strong>Open a search report</strong>
+                  <small>MaxQuant (evidence, peptides, site tables), DIA-NN (.tsv or .parquet), Spectronaut, FragPipe, mzTab or Proteome Discoverer. Only this structure's proteins are kept; large files are streamed.</small>
+                </span>
+              </label>
+              <div id="report-result" class="result-box report-result" hidden></div>
+            </div>
+
+            <div class="group" id="evidence-group">
+              <h3>Public evidence</h3>
+              <p class="hint">Peptides observed in PeptideAtlas, ProteomicsDB and other resources, and modification sites from reprocessed PRIDE datasets (EBI Proteins API, PTMeXchange). Requires network access.</p>
+              <div class="button-row">
+                <button id="evidence-load" type="button">Load public peptides and PTMs</button>
+              </div>
+              <div id="evidence-result" class="result-box" hidden></div>
+            </div>
+
+            <div class="group">
+              <h3>Sequence properties</h3>
+              <label class="field"><span>Chain</span><select id="protparam-chain"></select></label>
+              <dl id="protparam" class="prop-grid"></dl>
+              <p class="hint">ExPASy ProtParam conventions: average masses, Bjellqvist pK set, Pace extinction coefficients.</p>
+            </div>
+
+            <div class="group">
+              <h3>UniProt annotations</h3>
+              <p class="hint">Curated domains, sites, PTMs and variants from UniProtKB, mapped to this structure through its UniProt cross-reference (SIFTS/DBREF). Requires network access.</p>
+              <div class="inline-form compact">
+                <select id="uniprot-chain" aria-label="Chain"></select>
+                <button id="uniprot-load" type="button">Load features</button>
+              </div>
+              <div id="uniprot-result" class="result-box" hidden></div>
+            </div>
+
+            <div class="group">
+              <h3>Peptide coverage</h3>
+              <textarea id="peptide-input" rows="5" spellcheck="false" placeholder="One peptide per line, optionally followed by a value (tab, comma or space).&#10;MaxQuant, DIA-NN, Spectronaut, ProForma and Comet notations are understood.&#10;e.g. _AAGLAT(ph)PEK_  1.8"></textarea>
+              <div class="button-row">
+                <label class="check"><input id="peptide-il" type="checkbox" checked /> Treat I and L as equal</label>
+                <button id="peptide-map" type="button" class="primary">Map peptides</button>
+              </div>
+              <div class="inline-form compact">
+                <select id="digest-enzyme" aria-label="Protease"></select>
+                <label class="mini">Missed <input id="digest-missed" type="number" min="0" max="3" value="1" /></label>
+                <button id="digest-run" type="button">In-silico digest</button>
+              </div>
+              <div id="peptide-result" class="result-box" hidden></div>
+            </div>
+
+            <div class="group">
+              <h3>Sites &amp; variants</h3>
+              <textarea id="site-input" rows="3" spellcheck="false" placeholder="R175H, p.Arg248Gln, pS15, A:K120ac, Y1068 …"></textarea>
+              <div class="button-row">
+                <select id="site-numbering" aria-label="Residue numbering">
+                  <option value="auto">Auto numbering</option>
+                  <option value="author">Structure (author) numbering</option>
+                  <option value="uniprot">UniProt numbering</option>
+                </select>
+                <button id="site-map" type="button" class="primary">Show sites</button>
+              </div>
+              <div class="button-row">
+                <button id="missense-load" type="button" title="AlphaMissense pathogenicity of every substitution (human proteins, from AlphaFold DB)">AlphaMissense</button>
+              </div>
+              <div id="site-result" class="result-box" hidden></div>
+              <div id="missense-result" class="result-box" hidden></div>
+            </div>
+
+            <div class="group">
+              <h3>Cross-links (XL-MS)</h3>
+              <p class="hint">Enter links, or open a xiFDR, xiVIEW, pLink, MeroX, XlinkX, MS Annika or MaxLynx export (or drop it on the window); proteins are matched by chain, UniProt accession or name.</p>
+              <textarea id="xl-input" rows="3" spellcheck="false" placeholder="A:K123-B:K45 (one per line), or CSV with Protein1, Residue1, Protein2, Residue2"></textarea>
+              <div class="inline-form compact">
+                <select id="xl-crosslinker" aria-label="Cross-linker"></select>
+                <label class="mini">Max Cα–Cα <input id="xl-max" type="number" min="1" max="80" step="0.5" value="30" /> Å</label>
+                <button id="xl-map" type="button" class="primary">Map</button>
+              </div>
+              <label class="folder-button" for="xl-file">
+                <input id="xl-file" type="file" accept=".csv,.tsv,.txt" />
+                Open a cross-link report…
+              </label>
+              <div id="xl-result" class="result-box" hidden></div>
+            </div>
+
+            <div class="group" id="hdx-group">
+              <h3>HDX-MS</h3>
+              <p class="hint">DynamX (state or cluster data), HDExaminer (all results or uptake summary) or an HDX data table (Masson et al. 2019). Peptides are matched to the chain sequences; differences are tested with the hybrid test when replicates are known.</p>
+              <label class="folder-button" for="hdx-file">
+                <input id="hdx-file" type="file" accept=".csv,.tsv,.txt" />
+                Open HDX-MS data…
+              </label>
+              <div id="hdx-result" class="result-box hdx-result" hidden></div>
+            </div>
+
+            <div class="group">
+              <h3>Custom residue data</h3>
+              <textarea id="data-input" rows="3" spellcheck="false" placeholder="chain,residue,value  (e.g. HDX uptake, conservation, DMS fitness)&#10;A,175,0.82"></textarea>
+              <div class="inline-form compact">
+                <select id="data-colormap" aria-label="Color map"></select>
+                <label class="check"><input id="data-symmetric" type="checkbox" /> Center on 0</label>
+                <button id="data-apply" type="button" class="primary">Color</button>
+              </div>
+              <div id="data-result" class="result-box" hidden></div>
+            </div>
+          </section>
         </div>
-        <div id="chain-list" class="chain-list"></div>
       </aside>
 
-      <section class="panel detail-panel" aria-label="Selection details">
-        <p class="eyebrow">Selection</p>
-        <h2 id="selection-title">None</h2>
-        <p id="selection-meta">Click an atom or search for a residue.</p>
-        <div id="selection-actions" class="action-row">
-          <button id="frame-selection" type="button">Frame</button>
-          <button id="measure-reset" type="button">Clear measure</button>
-        </div>
-        <div id="measurement-list" class="measurement-list"></div>
-      </section>
+      <aside id="right-panel" class="sidebar right" aria-label="Chains, selection and measurements">
+        <section class="card" id="chains-card">
+          <header>
+            <span id="chains-title">Chains</span>
+            <div class="card-actions">
+              <button id="chains-all" type="button" title="Show all chains">All</button>
+              <button id="chains-invert" type="button" title="Invert chain visibility">Invert</button>
+            </div>
+          </header>
+          <div id="chain-list" class="chain-list"></div>
+        </section>
 
-      <nav class="toolbar" aria-label="View controls">
-        <button id="reset-view" type="button" title="Reset view" aria-label="Reset view">↺</button>
-        <button id="screenshot" type="button" title="Export PNG" aria-label="Export PNG">▣</button>
+        <section class="card" id="selection-card">
+          <header>
+            <span>Selection</span>
+            <div class="card-actions">
+              <button id="selection-clear" type="button" title="Clear selection (Esc)">Clear</button>
+            </div>
+          </header>
+          <h2 id="selection-title">Nothing selected</h2>
+          <p id="selection-hint" class="hint">Click to select a residue, Shift-click to add, double-click to focus.</p>
+          <dl id="selection-details" class="detail-grid"></dl>
+          <div class="button-row">
+            <button id="focus-selection" type="button" title="Focus (F)">Focus</button>
+            <button id="label-selection" type="button" title="Toggle 3D label (L)">Label</button>
+            <button id="isolate-selection" type="button" title="Show only these chains">Isolate chain</button>
+          </div>
+          <div class="button-row selection-style">
+            <button id="selection-sticks" type="button" title="Show the selected residues as sticks (again to remove)">Sticks</button>
+            <label class="color-chip" title="Color the selected residues"><input id="selection-color" type="color" value="#ff66cc" aria-label="Color the selected residues" /><span>Color</span></label>
+            <button id="selection-hide" type="button" title="Hide the selected residues">Hide</button>
+            <button id="selection-reset-style" type="button" title="Remove custom styles and colors from the selected residues">Reset</button>
+          </div>
+        </section>
+
+        <section class="card" id="interactions-card" hidden>
+          <header>
+            <span>Interactions <small id="interaction-count"></small></span>
+          </header>
+          <div id="interaction-summary" class="chip-row"></div>
+          <div id="interaction-list" class="list"></div>
+        </section>
+
+        <section class="card" id="measure-card">
+          <header>
+            <span>Measurements</span>
+            <div class="card-actions">
+              <button id="measure-clear" type="button">Clear</button>
+            </div>
+          </header>
+          <div id="measurement-list" class="list"></div>
+          <p id="measure-hint" class="hint">Pick a ruler in the toolbar (<kbd>D</kbd> distance, <kbd>A</kbd> angle, <kbd>T</kbd> torsion), then click atoms.</p>
+        </section>
+      </aside>
+
+      <nav id="toolbar" class="toolbar" aria-label="View tools">
+        <button id="reset-view" type="button" title="Reset view (R)" aria-label="Reset view">
+          <svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" /><path d="M4.5 4.5v4h4" /></svg>
+        </button>
+        <button id="focus-button" type="button" title="Focus selection (F)" aria-label="Focus selection">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /></svg>
+        </button>
+        <span class="toolbar-divider"></span>
+        <button type="button" data-measure="distance" title="Measure distance (D)" aria-label="Measure distance">
+          <svg viewBox="0 0 24 24"><circle cx="5.5" cy="18.5" r="2" /><circle cx="18.5" cy="5.5" r="2" /><path d="M7 17L17 7" stroke-dasharray="2 2" /></svg>
+        </button>
+        <button type="button" data-measure="angle" title="Measure angle (A)" aria-label="Measure angle">
+          <svg viewBox="0 0 24 24"><path d="M4 19h16M4 19L15 5" /><path d="M10 19a6 6 0 0 0-2-4.5" /></svg>
+        </button>
+        <button type="button" data-measure="dihedral" title="Measure torsion / dihedral (T)" aria-label="Measure dihedral">
+          <svg viewBox="0 0 24 24"><path d="M4 17l5-8 6 8 5-8" /></svg>
+        </button>
+        <span class="toolbar-divider"></span>
+        <button id="spin-toggle" type="button" title="Spin (S)" aria-label="Toggle spin">
+          <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-3-6.2" /><path d="M20 4v5h-5" /></svg>
+        </button>
+        <button id="screenshot" type="button" title="Export image (P)" aria-label="Export image">
+          <svg viewBox="0 0 24 24"><rect x="3.5" y="6.5" width="17" height="13" rx="2" /><circle cx="12" cy="13" r="3.5" /><path d="M8.5 6.5l1.5-2.5h4l1.5 2.5" /></svg>
+        </button>
+        <button id="fullscreen" type="button" title="Full screen" aria-label="Full screen">
+          <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
+        </button>
+        <button id="help-button" type="button" title="Keyboard shortcuts (?)" aria-label="Help">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" /><path d="M9.8 9.5a2.3 2.3 0 1 1 3.3 2.1c-.7.4-1.1.9-1.1 1.7v.4" /><circle cx="12" cy="16.8" r=".6" /></svg>
+        </button>
       </nav>
 
+      <div id="legend" class="legend" hidden></div>
+      <div id="mode-banner" class="mode-banner" hidden></div>
+
       <div id="model-strip" class="model-strip" aria-label="Model controls">
-        <label>
-          <span>Model</span>
-          <input id="model-slider" type="range" min="1" max="1" value="1" step="1" />
-          <strong id="model-label">1 / 1</strong>
-        </label>
+        <button id="model-play" type="button" class="icon-button small" title="Play models" aria-label="Play models">▶</button>
+        <span>Model</span>
+        <input id="model-slider" type="range" min="1" max="1" value="1" step="1" aria-label="Model" />
+        <strong id="model-label">1 / 1</strong>
       </div>
 
+      <section id="sequence-panel" class="sequence-panel" aria-label="Sequence">
+        <header>
+          <button id="sequence-toggle" type="button" class="sequence-toggle" aria-expanded="true">Sequence</button>
+          <select id="sequence-chain" aria-label="Sequence chain"></select>
+          <select id="sequence-partner" aria-label="Show the aligned sequence of another structure" title="Show the aligned residues of a superposed structure under this sequence" hidden></select>
+          <span id="sequence-info" class="sequence-info"></span>
+        </header>
+        <div id="sequence-track" class="sequence-track"></div>
+      </section>
+
       <div id="tooltip" class="tooltip" role="status"></div>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <div id="drop-overlay" class="drop-overlay" hidden><div>Drop structures, a prediction folder or .zip, a PAE file or a session to open</div></div>
+
       <div id="loading" class="loading">
         <div class="loading-mark"></div>
         <div>
@@ -148,7 +756,90 @@
           <span id="loading-status">Starting renderer</span>
         </div>
       </div>
+
+      <dialog id="export-dialog" class="dialog">
+        <form method="dialog">
+          <h2>Export image</h2>
+          <label class="field"><span>Resolution</span>
+            <select id="export-size">
+              <option value="1">Viewport size (1×)</option>
+              <option value="2" selected>High (2×)</option>
+              <option value="3">Very high (3×)</option>
+              <option value="4">Poster (4×)</option>
+            </select>
+          </label>
+          <div class="toggles vertical">
+            <label><input id="export-supersample" type="checkbox" checked /> Supersample (smoother edges)</label>
+            <label><input id="export-transparent" type="checkbox" /> Transparent background</label>
+            <label><input id="export-legend" type="checkbox" checked /> Include color legend</label>
+            <label><input id="export-labels" type="checkbox" checked /> Include labels and measurements</label>
+          </div>
+          <p id="export-info" class="hint"></p>
+          <menu>
+            <button value="cancel" type="submit">Cancel</button>
+            <button id="export-copy" type="button">Copy</button>
+            <button id="export-movie" type="button" title="Record one full rotation as a WebM video">Spin video</button>
+            <button id="export-confirm" value="png" type="submit" class="primary">Save PNG</button>
+          </menu>
+        </form>
+      </dialog>
+
+      <dialog id="methods-dialog" class="dialog wide">
+        <form method="dialog">
+          <h2>Methods and references</h2>
+          <p class="hint">A draft for a methods section, written from what this session used: data sources with their IDs, versions and revision dates, and each analysis with its parameters. Check it against what you did and edit it to fit.</p>
+          <textarea id="methods-text" class="methods-text" rows="10" aria-label="Methods paragraph"></textarea>
+          <h3>References</h3>
+          <ol id="methods-references" class="methods-references"></ol>
+          <p id="methods-status" class="hint" aria-live="polite"></p>
+          <menu>
+            <button value="close" type="submit">Close</button>
+            <button id="methods-copy-references" type="button">Copy references</button>
+            <button id="methods-bibtex" type="button">Download BibTeX</button>
+            <button id="methods-copy" type="button" class="primary">Copy methods</button>
+          </menu>
+        </form>
+      </dialog>
+
+      <dialog id="help-dialog" class="dialog wide">
+        <form method="dialog">
+          <h2>Mouse &amp; keyboard</h2>
+          <div class="help-grid">
+            <div>
+              <h3>Mouse</h3>
+              <dl class="shortcut-list">
+                <div><dt>Drag</dt><dd>Rotate (free trackball)</dd></div>
+                <div><dt>Shift / right drag</dt><dd>Pan</dd></div>
+                <div><dt>Alt drag</dt><dd>Roll</dd></div>
+                <div><dt>Wheel / pinch</dt><dd>Zoom</dd></div>
+                <div><dt>Click</dt><dd>Select residue</dd></div>
+                <div><dt>Shift-click</dt><dd>Add to selection</dd></div>
+                <div><dt>Double-click</dt><dd>Focus residue or ligand</dd></div>
+                <div><dt>Click another structure</dt><dd>Make it the active structure</dd></div>
+              </dl>
+            </div>
+            <div>
+              <h3>Keys</h3>
+              <dl class="shortcut-list">
+                <div><dt>R</dt><dd>Reset view</dd></div>
+                <div><dt>F</dt><dd>Focus selection</dd></div>
+                <div><dt>D / A / T</dt><dd>Distance / angle / torsion ruler</dd></div>
+                <div><dt>L</dt><dd>Label selection</dd></div>
+                <div><dt>S</dt><dd>Spin</dd></div>
+                <div><dt>P</dt><dd>Export image</dd></div>
+                <div><dt>1–6</dt><dd>Cartoon, ball &amp; stick, sticks, spacefill, trace, surface</dd></div>
+                <div><dt>O</dt><dd>Orthographic / perspective</dd></div>
+                <div><dt>W / H</dt><dd>Water / hydrogens</dd></div>
+                <div><dt>/</dt><dd>Search</dd></div>
+                <div><dt>Esc</dt><dd>Clear selection, focus and ruler</dd></div>
+              </dl>
+            </div>
+          </div>
+          <div id="help-commands" class="help-commands"></div>
+          <menu><button type="submit" class="primary">Close</button></menu>
+        </form>
+      </dialog>
     </main>
-    <script type="module" src="/app.js?v=assembly"></script>
+    <script type="module" src="/app.js?v=0.6.0"></script>
   </body>
 </html>

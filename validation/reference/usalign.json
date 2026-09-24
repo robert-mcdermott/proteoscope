@@ -1,0 +1,342 @@
+{
+ "source": "US-align 20260920; complexes marked \"patched\" come from the same source passing the transposed chain-score matrix",
+ "note": "TM-scores are printed to 5 decimals, RMSD to 2 and identity to 3; tm lists the scores normalized by the first and by the second structure.",
+ "single": [
+  {
+   "name": "1UBQ vs itself",
+   "mobile": {"pdb":"1UBQ","chain":"A"},
+   "reference": {"pdb":"1UBQ","chain":"A"},
+   "tm": [1,1],
+   "rmsd": 0,
+   "alignedLength": 76,
+   "identity": 1,
+   "rows": ["MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQKESTLHLVLRLRGG","MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQKESTLHLVLRLRGG"]
+  },
+  {
+   "name": "1UBQ vs a moved copy",
+   "mobile": {"pdb":"1UBQ","chain":"A"},
+   "reference": {"pdb":"1UBQ","chain":"A","move":17},
+   "tm": [1,1],
+   "rmsd": 0,
+   "alignedLength": 76,
+   "identity": 1,
+   "rows": ["MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQKESTLHLVLRLRGG","MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQKESTLHLVLRLRGG"]
+  },
+  {
+   "name": "1AKE:A vs 4AKE:A (hinge)",
+   "mobile": {"pdb":"1AKE","chain":"A"},
+   "reference": {"pdb":"4AKE","chain":"A"},
+   "tm": [0.68184,0.68184],
+   "rmsd": 3.57,
+   "alignedLength": 179,
+   "identity": 0.86,
+   "rows": ["MRIILLGAPGAGKGTQAQFIMEKYGIPQISTGDMLRAAV-KSG-----SE-LG-KQAKDIMDAGKLVTDELVIALVKERIAQEDCRNGFLLDGFPRTIPQADAMKEAGINVDYVLEFDVPDELIVDRIV-GR-RVHAPSGRVY------HVK-FNPPKVEGKDDVTGEELTTR-----------------KDDQE-ETVRKRLVEYHQMTAPLIGYYSKEAEAGNTKYAKVDGTKPVAEVRADLEKILG","MRIILLGAPGAGKGTQAQFIMEKYGIPQISTGDML-RA-AVK-SGSELGKQAKDIMDAGK-----LVTDELVIALVKERIAQEDCRNGFLLDGFPRTIPQADAMKEAGINVDYVLEFDVPDELIVDRIVGR-RV---------HAPSGRVYHVKFN-----------------PPKVEGKDDVTGEELTTRKDDQEETVRKRLVEYHQMTAPLIGYYSKEAEAGNTKYAKVDGTKPVAEVRADLEKILG"]
+  },
+  {
+   "name": "4HHB:A vs 4HHB:B (α/β globin)",
+   "mobile": {"pdb":"4HHB","chain":"A"},
+   "reference": {"pdb":"4HHB","chain":"B"},
+   "tm": [0.90418,0.87558],
+   "rmsd": 1.41,
+   "alignedLength": 139,
+   "identity": 0.432,
+   "rows": ["VLSP-ADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFD-L----S-HGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR","VHLTPEEKSAVTALWGKV--NVDEVGGEALGRLLVVYPWTQRFFESFGDLSTPDAVMGNPKVKAHGKKVLGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVLVCVLAHHFGKEFTPPVQAAYQKVVAGVANALAHKYH"]
+  },
+  {
+   "name": "1MBN vs 1CPC:A (globin / phycocyanin)",
+   "mobile": {"pdb":"1MBN","chain":"A"},
+   "reference": {"pdb":"1CPC","chain":"A"},
+   "tm": [0.56456,0.54149],
+   "rmsd": 3.82,
+   "alignedLength": 128,
+   "identity": 0.086,
+   "rows": ["--VL------------------------SE-GEWQLVLHVWAKVEADVAGHGQDILIRLFKSHPETL-E-KFDRFKHLKTEAEMKA--SEDLKKHGVTVLTALGAILKK-KGHH-EAE-LKPLAQSHATKHKIPIKYLEFISEAIIHVLHSRHPGDFGADAQGAMNKALELFRKDIAAKYKELGYQG","MKTPLTEAVAAADSQGRFLSSTEIQTAFGRFRQASASLAAAKALTEKASSLASGAANAVYSKFPYTTSQNGPNFASTQ--------TGKDKCVRDIGYYLRMVTYCLVVGGTGPLDDYLIGGIAEINRTFDLSP-SWYVEALKYIKANHG------LSGDPAVEANSYIDYAIN-AL--------S-"]
+  },
+  {
+   "name": "1UBQ vs 1A5R (ubiquitin / SUMO-1)",
+   "mobile": {"pdb":"1UBQ","chain":"A"},
+   "reference": {"pdb":"1A5R","chain":"A"},
+   "tm": [0.65351,0.52397],
+   "rmsd": 2.36,
+   "alignedLength": 71,
+   "identity": 0.155,
+   "rows": ["-----------------------MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPD-QQRLIFAGKQLEDGRTLSDY-NIQKESTLHLVLRLRGG-------","GSMSDQEAKPSTEDLGDKKEGEYIKLKVIGQDSSEIHFKVKMTTHLKKLKESYCQR-QGVPMNSLRFLFEGQRIADNHT-PKELGMEEEDVIEVYQEQ---TGGHSTV"]
+  },
+  {
+   "name": "1TIM:A vs 1IGS (TIM barrels)",
+   "mobile": {"pdb":"1TIM","chain":"A"},
+   "reference": {"pdb":"1IGS","chain":"A"},
+   "tm": [0.6203,0.6203],
+   "rmsd": 3.37,
+   "alignedLength": 191,
+   "identity": 0.115,
+   "rows": ["------------------------------------APRK----FFVGGNWKMN-----GKRKSLGELIHTLDGAKLSADTEVVCGAP--------SIYLDFARQKLDAKIGVAAQN-CYKVPKGAFTGEISPAMIKDIGAAWVILGHSERRHVFGESDELIGQKVAHALAEGLGVIACIGEKLDEREAGITEKVVFQETKAIADNVKDWSKVVLAYEPVWA-IGTGKTATPQQAQEVHEKLRGWLKTHVSDAVAVQSRIIYGGSVTGGNCKELASQHDVDGFLVGGASL-KPEFVDIINAKH","PRYLKGWLKDVVQLSLRRPSFRASRQRPIISLNERILEFNKRNITAIIAEYKRKSPSGLDVERDPIEYSKFME--RYA---VGLSILTEEKYFNGSYETLRKIASS-VS-IPILMKDFIVKE--------SQIDDAYNLGADTVLLIV---K---ILTERELESLLEYARSYGMEPLIEIND----------E-NDLDIALRIG--A-----RFIGINSRDLETLEIN-KE--NQRKLISMIP-----------SN-VVKVAESGISERNEIEELRKLGVNAFLIGSSLMRNPEKIKEFIL--"]
+  },
+  {
+   "name": "1TEN vs 1TIT (FN3 / Ig I27)",
+   "mobile": {"pdb":"1TEN","chain":"A"},
+   "reference": {"pdb":"1TIT","chain":"A"},
+   "tm": [0.58343,0.58343],
+   "rmsd": 2.94,
+   "alignedLength": 78,
+   "identity": 0.141,
+   "rows": ["-LDAPSQIEVKDVTDT-TALITWFKPLAEIDGIELTYGIKDVPGDRTTI-----D-LTEDENQYSIGNLKPDTEYEVSLISRRGDMSSNPAKETFTT---","LIEVEKPLYGVEVFVGETAHFEI-EL-SEPDVHGQWKL-K--G-QPLTASPDCEIIEDGKKHILILHNCQLGMTGEVSFQA-----ANAKSAANLKVKEL"]
+  },
+  {
+   "name": "3CHY vs 1RCF (CheY / flavodoxin)",
+   "mobile": {"pdb":"3CHY","chain":"A"},
+   "reference": {"pdb":"1RCF","chain":"A"},
+   "tm": [0.59092,0.48349],
+   "rmsd": 4.03,
+   "alignedLength": 120,
+   "identity": 0.1,
+   "rows": ["ADK-ELKFLVVDDF-STMRRIVRNLLKELG-FNNVEEAEDGVDALNKLQAGGYGFVISDW------NMPNMDGLELLKTIRADGAMSALPVLMVTAEA-----KKENIIAAAQA--G-----AS----------------------GYVVKP---F--TAATLEEKLNKIFEKLGM-","---SKKIGLFYGTQTGKTESVAEIIRDEFGNDVVTLHDVS-QAEVTDLN-DYQYLIIGCPTWNIGELQSDWEGLYS-ELD-DVDFNGKLVAYFGTGDQIGYADNFQDAIGILEEKISQRGGKTVGYWSTDGYDFNDSKALRNGKFVGLALDEDNQSDLTDDRIKSWVAQLKS-EFGL"]
+  },
+  {
+   "name": "1ENH vs 1BDD (three-helix bundles)",
+   "mobile": {"pdb":"1ENH","chain":"A"},
+   "reference": {"pdb":"1BDD","chain":"A"},
+   "tm": [0.33701,0.31928],
+   "rmsd": 2.98,
+   "alignedLength": 32,
+   "identity": 0,
+   "rows": ["RP---------------R--TAFSSEQLARLKRE-FNEN-R--Y--LTERRRQQLSSELGLNEAQIKIWFQNKRAKI-----","--TADNKFNKEQQNAFYEILHLPN-LNEEQRNGFIQ--SLKDDPSQS-ANLLAEAKKLNDA----------------QAPKA"]
+  },
+  {
+   "name": "2GB1 vs 1HZ6:A (protein G / L)",
+   "mobile": {"pdb":"2GB1","chain":"A"},
+   "reference": {"pdb":"1HZ6","chain":"A"},
+   "tm": [0.67363,0.59422],
+   "rmsd": 2.26,
+   "alignedLength": 54,
+   "identity": 0.13,
+   "rows": ["------MTYKLILNGKT-LKGETTTEAVDAAT-AEKVFKQYANDNG--V-DGEWTYDDATKTFTVTE--","HHAMEEVTIKANLIFANGSTQTAEFKGTF-EKAT-SEAYAYADTLKKDNGEWTVDVADKGYTLNIKFAG"]
+  },
+  {
+   "name": "1SBT vs 1CSE:E (subtilisins)",
+   "mobile": {"pdb":"1SBT","chain":"A"},
+   "reference": {"pdb":"1CSE","chain":"E"},
+   "tm": [0.98006,0.98359],
+   "rmsd": 0.81,
+   "alignedLength": 274,
+   "identity": 0.693,
+   "rows": ["AQSVPYGVSQIKAPALHSQGYTGSNVKVAVIDSGIDSSHPDLKVAGGASMVPSETPNFQDDNSHGTHVAGTVAALNNSIGVLGVAPSSALYAVKVLGDAGSGQYSWIINGIEWAIANNMDVINMSLGGPSGSAALKAAVDKAVASGVVVVAAAGNEGSTGSSSTVGYPGKYPSVIAVGAVDSSNQRASFSSVGPELDVMAPGVSIQSTLPGNKYGAYNGTSMASPHVAGAAALILSKHPNWTNTQVRSSLQNTTTKLGDSFYYGKGLINVQAAAQ","AQTVPYGIPLIKADKVQAQGFKGANVKVAVLDTGIQASHPDLNVVGGASFVAGE-AYNTDGNGHGTHVAGTVAALDNTTGVLGVAPSVSLYAVKVLNSSGSGSYSGIVSGIEWATTNGMDVINMSLGGASGSTAMKQAVDNAYARGVVVVAAAGNSGNSGSTNTIGYPAKYDSVIAVGAVDSNSNRASFSSVGAELEVMAPGAGVYSTYPTNTYATLNGTSMASPHVAGAAALILSKHPNLSASQVRNRLSSTATYLGSSFYYGKGLINVEAAAQ"]
+  },
+  {
+   "name": "1UBQ vs 1MBN (unrelated)",
+   "mobile": {"pdb":"1UBQ","chain":"A"},
+   "reference": {"pdb":"1MBN","chain":"A"},
+   "tm": [0.34579,0.21235],
+   "rmsd": 3.24,
+   "alignedLength": 44,
+   "identity": 0.068,
+   "rows": ["MQIFVK-------------TLT-GK-T--IT--LE--V------E-----------------------------------------------------------PS-DTIENVKAKIQDKEG------I----PPDQQ--RLIFAGK-QLEDGRTLS--DYNIQKESTLHLVLRLRGG-------","------VLSEGEWQLVLHVWAKVEADVAGHGQDILIRLFKSHPETLEKFDRFKHLKTEAEMKASEDLKKHGVTVLTALGAILKKKGHHEAELKPLAQSHATKHKIPIKYLEFISEAIIHVLHSRHPGDFGADAQ-GAMNKAL-----ELFRKDIA--AKY------------------KELGYQG"]
+  },
+  {
+   "name": "1TEN vs 1HHO:A (unrelated)",
+   "mobile": {"pdb":"1TEN","chain":"A"},
+   "reference": {"pdb":"1HHO","chain":"A"},
+   "tm": [0.34233,0.26129],
+   "rmsd": 4.82,
+   "alignedLength": 65,
+   "identity": 0.077,
+   "rows": ["LDAP----SQIEVKDVTDTTALIT-WFK-PLAEIDG-I---EL-TY--GI---KDVPG-DR--------------TT--IDLTED--ENQ---------YS--I-GNLKP--D-TE-YE--VS--L--ISRRGDMSS---N----P---A--KE--TF--T--T-","----VLSPADK-------------TNVKAAWGKVGAHAGEYGAEALERM-FLSFPTTKTYFPHFDLSHGSAQVKGHGKKVAD---ALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLA---AHLPAEFTPAVHASLDKFLASVSTVLTSKYR"]
+  },
+  {
+   "name": "2PTC:I vs 1ENH (unrelated)",
+   "mobile": {"pdb":"2PTC","chain":"I"},
+   "reference": {"pdb":"1ENH","chain":"A"},
+   "tm": [0.2925,0.30099],
+   "rmsd": 3.92,
+   "alignedLength": 36,
+   "identity": 0.056,
+   "rows": ["R----------PDFC-LEPPYTGPCKARIIRYFYNAKAGLCQT-FV-YGG-CRAKRNNFK-SAEDC-MRTCG--GA","-RPRTAFSSEQLARLKR----------------EFNEN-RYLTERRRQQ-LSSELGLNEAQIK-IWFQN--KRAKI"]
+  },
+  {
+   "name": "1EHZ vs 1FIR (tRNAs)",
+   "mobile": {"pdb":"1EHZ","chain":"A"},
+   "reference": {"pdb":"1FIR","chain":"A"},
+   "tm": [0.69472,0.7013],
+   "rmsd": 1.67,
+   "alignedLength": 57,
+   "identity": 0.614,
+   "rows": ["gcggauuuacucag-gggagagcccaga-uaaa-uggagucugugcguccacagaauucgcacca-","gcccg-auacucagcgg-agagcacagacuuuacugagg--agggcagucccuguucgggcgcc-a"]
+  },
+  {
+   "name": "1EHZ vs 1Y26 (tRNA / riboswitch)",
+   "mobile": {"pdb":"1EHZ","chain":"A"},
+   "reference": {"pdb":"1Y26","chain":"X"},
+   "tm": [0.27356,0.25989],
+   "rmsd": 3.53,
+   "alignedLength": 34,
+   "identity": 0.176,
+   "rows": ["---gcggauuuacucagg---ggagagcccagauaaaugga--------------g--------ucugug--------cguc-cacagaauucgcacca","cgcuucauau--------aauccu-----------------aaugauaugguuugggaguuucuaccaagagccuuaaac--ucuugauuaugaagu-g"]
+  }
+ ],
+ "complexes": [
+  {
+   "name": "4HHB vs 1HHO (hemoglobin T vs R)",
+   "mobile": {"pdb":"4HHB"},
+   "reference": {"pdb":"1HHO"},
+   "tm": [0.4946,0.98126],
+   "rmsd": 0.91,
+   "alignedLength": 287,
+   "identity": 1,
+   "assignment": "CA DB",
+   "build": "patched"
+  },
+  {
+   "name": "1HHO vs 4HHB (reverse)",
+   "mobile": {"pdb":"1HHO"},
+   "reference": {"pdb":"4HHB"},
+   "tm": [0.98126,0.4946],
+   "rmsd": 0.91,
+   "alignedLength": 287,
+   "identity": 1,
+   "assignment": "AC BD"
+  },
+  {
+   "name": "1AKE vs 4AKE (both chains)",
+   "mobile": {"pdb":"1AKE"},
+   "reference": {"pdb":"4AKE"},
+   "tm": [0.36958,0.36958],
+   "rmsd": 3.92,
+   "alignedLength": 185,
+   "identity": 0.87,
+   "assignment": "BB"
+  },
+  {
+   "name": "2PTC vs 1TGS (protease–inhibitor)",
+   "mobile": {"pdb":"2PTC"},
+   "reference": {"pdb":"1TGS"},
+   "tm": [0.85247,0.85247],
+   "rmsd": 2.85,
+   "alignedLength": 263,
+   "identity": 0.867,
+   "assignment": "EZ II"
+  },
+  {
+   "name": "1CSE vs 2PTC (subtilisin–eglin / trypsin–BPTI)",
+   "mobile": {"pdb":"1CSE"},
+   "reference": {"pdb":"2PTC"},
+   "tm": [0.26748,0.3044],
+   "rmsd": 6.56,
+   "alignedLength": 149,
+   "identity": 0.081,
+   "assignment": "EE II"
+  },
+  {
+   "name": "4HHB vs 1A3N (tetramers)",
+   "mobile": {"pdb":"4HHB"},
+   "reference": {"pdb":"1A3N"},
+   "tm": [0.99475,0.99822],
+   "rmsd": 0.36,
+   "alignedLength": 572,
+   "identity": 1,
+   "assignment": "AC BD CA DB"
+  },
+  {
+   "name": "4HHB vs a moved, relabeled copy",
+   "mobile": {"pdb":"4HHB"},
+   "reference": {"pdb":"4HHB","move":99,"relabel":[["C","W"],["A","X"],["D","Y"],["B","Z"]]},
+   "tm": [1,1],
+   "rmsd": 0,
+   "alignedLength": 574,
+   "identity": 1,
+   "assignment": "AX BZ CW DY"
+  },
+  {
+   "name": "1CPC vs 4HHB (unrelated tetramers)",
+   "mobile": {"pdb":"1CPC"},
+   "reference": {"pdb":"4HHB"},
+   "tm": [0.22839,0.25984],
+   "rmsd": 4.93,
+   "alignedLength": 187,
+   "identity": 0.091,
+   "assignment": "BC KA"
+  },
+  {
+   "name": "1URN vs 1DRZ (U1A–RNA / U1A–ribozyme)",
+   "mobile": {"pdb":"1URN"},
+   "reference": {"pdb":"1DRZ"},
+   "tm": [0.30979,0.64762],
+   "rmsd": 0.89,
+   "alignedLength": 108,
+   "identity": 0.944,
+   "assignment": "PB AA",
+   "build": "patched"
+  },
+  {
+   "name": "1DRZ vs 1URN (reverse)",
+   "mobile": {"pdb":"1DRZ"},
+   "reference": {"pdb":"1URN"},
+   "tm": [0.64762,0.30979],
+   "rmsd": 0.89,
+   "alignedLength": 108,
+   "identity": 0.944,
+   "assignment": "BP AA"
+  },
+  {
+   "name": "1TNF vs 1A8M (TNF trimers)",
+   "mobile": {"pdb":"1TNF"},
+   "reference": {"pdb":"1A8M"},
+   "tm": [0.98827,0.98827],
+   "rmsd": 0.89,
+   "alignedLength": 456,
+   "identity": 0.987,
+   "assignment": "AA BB CC"
+  },
+  {
+   "name": "1ASY vs 1C0A (AspRS–tRNA)",
+   "mobile": {"pdb":"1ASY"},
+   "reference": {"pdb":"1C0A"},
+   "tm": [0.41348,0.69098],
+   "rmsd": 2.87,
+   "alignedLength": 485,
+   "identity": 0.285,
+   "assignment": "SB BA",
+   "build": "patched"
+  },
+  {
+   "name": "1C0A vs 1ASY (reverse)",
+   "mobile": {"pdb":"1C0A"},
+   "reference": {"pdb":"1ASY"},
+   "tm": [0.69098,0.41348],
+   "rmsd": 2.87,
+   "alignedLength": 485,
+   "identity": 0.285,
+   "assignment": "BS AB"
+  },
+  {
+   "name": "1ZDI vs 1ZDH (MS2 coat–RNA)",
+   "mobile": {"pdb":"1ZDI"},
+   "reference": {"pdb":"1ZDH"},
+   "tm": [0.99253,0.99974],
+   "rmsd": 0.12,
+   "alignedLength": 413,
+   "identity": 0.995,
+   "assignment": "RR SS AA BB CC"
+  },
+  {
+   "name": "1A3N vs 4HHB:ABC (4 vs 3 chains)",
+   "mobile": {"pdb":"1A3N"},
+   "reference": {"pdb":"4HHB","chains":"ABC"},
+   "tm": [0.74533,0.99567],
+   "rmsd": 0.34,
+   "alignedLength": 427,
+   "identity": 1,
+   "assignment": "AC CA DB",
+   "build": "patched"
+  },
+  {
+   "name": "4HHB:ABC vs 1A3N (3 vs 4 chains)",
+   "mobile": {"pdb":"4HHB","chains":"ABC"},
+   "reference": {"pdb":"1A3N"},
+   "tm": [0.99567,0.74533],
+   "rmsd": 0.34,
+   "alignedLength": 427,
+   "identity": 1,
+   "assignment": "AC BD CA"
+  }
+ ]
+}

@@ -229,3 +229,188 @@ the completed v0.1 application.
   - Verify representative workflows: sample switch, NMR model slider, heme
     search, ligand selection, and measurement-ready selection panel
   - _Requirements: 1.5, 2.3, 3.3, 11.5, 12.1, 13.1, 14.1, 14.2, 15.4_
+
+## Wave 1 (branch `wave1`)
+
+- [x] 21. Modularize the browser client into testable ES modules under `web/lib/`
+  - Parse, structure, DSSP, cartoon, scene, coloring, renderer, camera, plots and sequence view
+  - Port the existing tests and add regression tests over all bundled structures
+  - _Requirements: 18, 23_
+
+- [x] 22. Replace the renderer
+  - Ray-cast sphere and cylinder impostors with `frag_depth`, and indexed meshes
+  - G-buffer, SSAO with depth-aware blur, composite (outlines, fog, background), FXAA
+  - Reversed-Z depth, shader clipping with caps, transparent surfaces, GPU picking with tolerance
+  - On-demand rendering, supersampled and transparent capture, canvas fallback with depth cueing
+  - _Requirements: 14, 16_
+
+- [x] 23. Replace the camera with a quaternion trackball, principal-axes framing, orthographic mode and a panel-aware projection offset
+  - _Requirements: 6_
+
+- [x] 24. Fix parsing correctness issues and extend metadata
+  - Element inference; modified-residue promotion; `_struct_conn` bond filtering; SSBOND; CIF quoting; case-sensitive chain order
+  - R-free, organism, entities, SEQRES, `entity_poly_seq`, DBREF, `struct_ref_seq`, HETNAM, `chem_comp`, ModelCIF pLDDT, REMARK 350
+  - _Requirements: 4, 21, 23_
+
+- [x] 25. DSSP secondary structure with Auto, File and DSSP modes
+  - _Requirements: 18_
+
+- [x] 26. Cartoon rewrite: superellipse cross-sections, carbonyl-guided ribbons, sheet arrowheads, nucleic-acid tube and base slabs
+  - _Requirements: 7_
+
+- [x] 27. Per-component representations, 15 color schemes with legends, colorblind-safe palettes, lighting presets
+  - _Requirements: 7, 8, 16_
+
+- [x] 28. Surfaces, SASA and Coulombic electrostatics in a Web Worker
+  - _Requirements: 17_
+
+- [x] 29. Focus mode, PLIP-style interactions, interface analysis, CSV export
+  - _Requirements: 19_
+
+- [x] 30. Sequence panel, selection model, labels, distance, angle and torsion measurements
+  - _Requirements: 12, 20_
+
+- [x] 31. Go fetch proxy with cache and `--offline`, command-line files, security hardening, `--dev`
+  - _Requirements: 1, 21_
+
+- [x] 32. AlphaFold confidence: pLDDT coloring and summary, PAE heatmap linked to 3D
+  - _Requirements: 21_
+
+- [x] 33. Analysis plots: Ramachandran, per-residue profile
+  - _Requirements: 16, 21_
+
+- [x] 34. Proteomics toolkit: sequence properties, peptides, sites and variants, cross-links, custom data, UniProt annotations
+  - _Requirements: 22_
+
+- [x] 35. Documentation: README, design, requirements, review and roadmap
+  - _Requirements: 15_
+
+## Wave 2, first slice: structure comparison
+
+- [x] 36. Multiple structures per scene: entries with per-structure state, add-to-scene loading, structures list, style scope, shared atom buffers with per-mesh offsets, cross-structure picking and measurements
+  - _Requirements: 24_
+
+- [x] 37. Sequence alignment (BLOSUM62 + secondary structure, affine and free end gaps) and chain pairing for complexes and homo-oligomers
+  - _Requirements: 24_
+
+- [x] 38. Least-squares superposition with pruning, TM-score search, lDDT, RMSF, per-chain statistics, and tests on synthetic and real structures
+  - _Requirements: 24_
+
+- [x] 39. Comparison views: deviation, lDDT, structure and RMSF color schemes; mirrored selection, hover and focus; aligned sequence row; trimming to the aligned span
+  - _Requirements: 24_
+
+- [x] 40. Compare with AlphaFold (UniProt numbering) and ensemble overlay
+  - _Requirements: 21, 24_
+
+- [x] 41. Documentation: README comparison section, design, roadmap, screenshots
+  - _Requirements: 15, 24_
+
+## Wave 3: selections, commands, sessions and scripting
+
+- [x] 42. Selection language: parser, evaluator across structures, distance and expansion operators, value predicates, tests
+  - _Requirements: 25_
+
+- [x] 43. Command parser and executor; search box with live previews, history and completion; help reference
+  - _Requirements: 25_
+
+- [x] 44. Per-residue sticks, spheres, hiding, colors and surface restriction in the scene; selection card buttons
+  - _Requirements: 25_
+
+- [x] 45. Session files, restore, `#session=` links, and restoring in background tabs
+  - _Requirements: 26_
+
+- [x] 46. MolViewSpec export (.mvsj and .mvsx) with a ZIP writer, checked in the Mol* viewer
+  - _Requirements: 26_
+
+- [x] 47. Remote control API (`--remote-control`) with Server-Sent Events and Go tests
+  - _Requirements: 27_
+
+- [x] 48. Documentation: README sections for selections, commands, sessions and scripting; design, requirements, roadmap
+  - _Requirements: 15, 25, 26, 27_
+
+## Wave 4: predicted complexes, validation and variants
+
+- [x] 49. Prediction folders: AlphaFold 3, AlphaFold Server, Boltz, Chai-1 and ColabFold detection and parsing; ZIP (central directory) and NumPy readers; folder drops, folder picker and command-line folders
+  - _Requirements: 28_
+
+- [x] 50. Interface scores (ipSAE, ipTM from PAE, pDockQ, pDockQ2, LIS) with AlphaFold 3 tokenization; ranking table, chain-pair matrix, interface selection, superpose all, CSV export, `ranking` command
+  - _Requirements: 28_
+
+- [x] 51. Contact probabilities, per-atom ligand pLDDT, PAE domains (ChimeraX algorithm), MSA depth (prediction folders, AlphaFold DB, dropped alignments), cross-link satisfaction per model
+  - _Requirements: 28_
+
+- [x] 52. wwPDB validation reports: Go XML reducer and route, outlier and density-fit coloring, clashes, ligand and worst-residue lists, selection keywords, `validate` command
+  - _Requirements: 29_
+
+- [x] 53. MolProbity Top8000 Ramachandran contours and classification for any structure
+  - _Requirements: 29_
+
+- [x] 54. AlphaMissense: route, mapping, coloring, per-variant scores, `missense` command
+  - _Requirements: 30_
+
+- [x] 55. BinaryCIF, cache expiry and refresh, session completeness, AlphaFold DB field renames
+  - _Requirements: 31_
+
+- [x] 56. Documentation: README sections and screenshots, design, requirements, roadmap (wave 4, examples review, keyless databases)
+  - _Requirements: 15, 28, 29, 30, 31_
+
+## Wave 5: bring your data, find public data
+
+- [x] 57. Bundled examples: 27 gzipped mmCIF entries, manifest with descriptions and opening views, gzip passthrough, grouped menu, `example` command, test data helper
+  - _Requirements: 33_
+
+- [x] 58. Discovery: RCSB text and sequence search, UniProt search, PDBe best structures and 3D-Beacons routes; Find structures panel with coverage track, sorting, Open and Add; model downloads from known providers; `search` command
+  - _Requirements: 32_
+
+- [x] 59. Search-report importers for MaxQuant, DIA-NN, Spectronaut, FragPipe, mzTab and Proteome Discoverer; Parquet, Zstandard and Snappy decoders; streaming; summaries, quantification modes and site table
+  - _Requirements: 34_
+
+- [x] 60. Public evidence route and panel (EBI Proteins API); known and new sites in reports; `evidence` command
+  - _Requirements: 34, 35_
+
+- [x] 61. Part-sphere exposure and disorder (StructureMap), PAE-aware; `ppse` scheme, profile and selection keywords; `exposure` command
+  - _Requirements: 35_
+
+- [x] 62. Cross-link importers for seven tools; solvent-accessible surface distances; distance histogram
+  - _Requirements: 36_
+
+- [x] 63. HDX-MS importers (DynamX, HDExaminer, community format), hybrid significance test, residue values, Woods plot
+  - _Requirements: 37_
+
+- [x] 64. Protenix and OpenFold3 prediction layouts, Zstandard-compressed AlphaFold 3 output, prediction folders' bookkeeping files, PDB-format prediction models; interface scores checked against `ipsae.py` on real outputs
+  - _Requirements: 28_
+
+- [x] 65. Documentation: README sections and screenshots, design, requirements, roadmap (wave 5)
+  - _Requirements: 15, 32, 33, 34, 35, 36, 37_
+
+## Wave 6: maps, ligand chemistry and statistics
+
+- [x] 66. Density maps: volume-server header, box and cell routes with RCSB fallback, EMDB metadata route; CCP4/MRC and volume-server BinaryCIF parsing; Surface Nets contouring in a worker; regions around the focus or view, zones; screen-space line pipeline; map fit with `mapfit` scheme and keyword; `map` command; sessions
+  - _Requirements: 38_
+
+- [x] 67. Ligand chemistry: CCD tables from mmCIF, built-in standard residues, fetched components (`/api/fetch/ccd/{id}`), CONECT bond orders; bond orders and aromatic rings in sticks; chemistry-aware interaction typing and protonation rules
+  - _Requirements: 39_
+
+- [x] 68. Docking poses: SDF, MOL2 and PDBQT readers; poses in the receptor with scores, sorting and stepping; interaction fingerprints and CSV export; `pose` command; sessions
+  - _Requirements: 40_
+
+- [x] 69. Structure-only alignment: TM-align and MM-align port in the surface worker; *Pair residues by* option; `tmalign` command; console API and sessions
+  - _Requirements: 41_
+
+- [x] 70. Differential statistics: moderated t-test, normalization, imputation, BH q-values and MSstatsPTM adjustment on the whole report; volcano plot; significant-change coloring and CSV columns
+  - _Requirements: 42_
+
+- [x] 71. Conservation: alignment parsers, Jensen–Shannon divergence and entropy, grades and colors, mapping to chains, `conservation` command and keywords
+  - _Requirements: 43_
+
+- [x] 72. Methods paragraph, references with DOIs and BibTeX, `CITATION.cff`, application version in sessions
+  - _Requirements: 44_
+
+- [x] 73. Continuous integration (Go and browser-module jobs, weekly validation) and the validation suite against limma, MSstatsPTM, US-align, Capra & Singh, EMDB and MolProbity
+  - _Requirements: 41, 42, 43, 45_
+
+- [x] 74. Documentation: README sections and screenshots, design, requirements, roadmap (wave 6)
+  - _Requirements: 15, 38, 39, 40, 41, 42, 43, 44, 45_
+
+- [x] 75. Release 0.6.0: version in `main.go` and `CITATION.cff`, `CHANGELOG.md`, release workflow with six binaries and checksums, README downloads; residues sharing a number keep file order; FragPipe PSMs count once per precursor and run
+  - _Requirements: 44, 45_
