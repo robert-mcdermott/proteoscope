@@ -1,0 +1,2 @@
+# The installers are served from the repository as they are stored.
+*.sh text eol=lf
