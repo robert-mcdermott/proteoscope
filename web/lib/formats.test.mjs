@@ -64,7 +64,9 @@ test('NumPy arrays and archives decode, including float16 and Fortran order', as
   assert.ok(Math.abs(halfValues[2] - 0.333) < 0.001);
 
   const fortran = writeNpy(Int32Array.from([1, 4, 2, 5, 3, 6]), [2, 3], '<i4');
-  const header = new TextDecoder('latin1').decode(fortran).replace("'fortran_order': False", "'fortran_order': True ");
+  // One character per byte. TextDecoder('latin1') would not do: the Encoding standard maps it to
+  // windows-1252, which turns the magic byte 0x93 into U+201C.
+  const header = String.fromCharCode(...fortran).replace("'fortran_order': False", "'fortran_order': True ");
   const fortranBytes = Uint8Array.from(header, (char) => char.charCodeAt(0));
   assert.deepEqual(Array.from(readNpy(fortranBytes).data), [1, 2, 3, 4, 5, 6]);
 
