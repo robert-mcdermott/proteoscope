@@ -1080,20 +1080,60 @@ Wave 6 delivered density maps, ligand chemistry, docking poses, structure-only
 alignment, differential statistics, conservation, the methods paragraph,
 continuous integration and the validation suite (section 8).
 
-### Next: follow-ups to wave 6
+Proteoscope's lead is breadth in one private session: prediction triage,
+experimental validation, density, docking and structural proteomics with
+statistics, each checked against its reference tool. The plan keeps building
+on that, and adds what it lacks: WebGPU is used only to render, surfaces and
+isosurfaces are computed on the CPU, and scenes stop at 300,000 atoms per
+model.
 
+### Next: prediction-era workflows
+
+- **Agents (MCP).** An MCP server that exposes the command language, and
+  returns structured results rather than only images: scores, selections,
+  validation outliers, interaction tables. It would build on
+  `--remote-control` and follow its rules: off unless asked for, and only for
+  programs on this computer. Tools at the level of the analyses ("rank these
+  models by ipSAE", "which residues are outliers near the ligand") make this
+  more than a remote viewer.
+- **Batch triage.** Design campaigns produce hundreds of models, more than
+  anyone opens one by one. Open many prediction folders at once, rank every
+  model and interface in one table with CSV export and a gallery of the top
+  models, then run the same from the command line without a window.
 - **Predicted complexes to fetch.** AlphaFold DB complexes and ModelArchive
   entries with PAE, listed next to the 3D-Beacons models.
-- **Alignments on request.** AlphaFold DB no longer serves its MSAs, so
-  conservation needs a prediction's MSA or a dropped alignment. An opt-in
-  search on the ColabFold MMseqs2 server would close the gap, behind a notice
-  that the sequence leaves the computer.
-- **Maps.** Maps in MolViewSpec exports; Q-score for any model and map; a
-  list of difference-map peaks, for checking ligands and waters.
+- **Searches on request,** each opt-in and behind a notice that the sequence
+  or structure leaves the computer:
+  - an MMseqs2 search on the ColabFold server, for conservation of models
+    without an alignment (AlphaFold DB no longer serves its MSAs);
+  - a structure-similarity search (Foldseek) against the PDB and AlphaFold
+    DB, for remote homologs that sequence search misses.
+- **Maps.** Maps in MolViewSpec exports, and MolViewSpec import; Q-score for
+  any model and map; a list of difference-map peaks, for checking ligands and
+  waters.
 - **Ligands.** A ligand card with the CCD name, formula, identifiers and
-  links to PubChem and ChEMBL.
+  links to PubChem and ChEMBL, and a 2D diagram of the ligand's interactions
+  for figures.
 - **Statistics.** More than two groups, paired designs and protein-level
   summarization.
+
+### Then: WebGPU compute and scale
+
+- **Compute on the GPU.** Move the heavy grid and pairwise work to WebGPU
+  compute shaders, keeping the CPU code as the fallback and as the reference
+  in tests: Gaussian and molecular surfaces and map isosurfaces first, then
+  SASA, contact and distance matrices, Coulombic potentials and interface
+  scoring of many models.
+- **Large structures.**
+  - Instanced rendering of symmetric assemblies, so a capsid is one copy
+    drawn many times rather than 60 copies in memory; this lifts the
+    300,000-atom limit where it is most visible.
+  - Typed-array atom storage, level of detail and GPU culling, toward
+    millions of atoms.
+- **A public benchmark.** Frame rate, time to first frame and time to a
+  surface on a fixed set (a small protein, the 1VQ5 ribosome, a capsid, a
+  cryo-EM map), as a script anyone can rerun, with the results on the
+  website.
 
 ### Then: proteomics follow-ups
 
@@ -1111,17 +1151,36 @@ continuous integration and the validation suite (section 8).
 - **Molecular dynamics:** trajectory playback (DCD and XTC), RMSF coloring
   and contact persistence.
 - **Glycans:** SNFG symbols, for glycoproteomics.
+- **Clashscore without a report:** hydrogens added and contact dots counted
+  as Reduce and Probe do, for local and predicted models.
+- **Electrostatics:** a Poisson–Boltzmann solution as an option next to the
+  Coulombic map, once grid work runs on the GPU.
+- **Predictions on this computer:** run a local Boltz, Protenix or OpenFold3
+  installation from the page and open its output folder when it finishes.
 - **Undo and redo** for commands and styling.
 
-### Later: scale and reach
+### Later: rendering, reach and maintenance
 
-- **Large structures.**
-  - Typed-array atom storage.
-  - Level-of-detail rendering and GPU-computed Gaussian surfaces, to handle
-    ten million atoms.
+- **Browsers without WebGPU.** A WebGL2 renderer with surfaces to replace
+  the Canvas fallback, for Safari before macOS Tahoe, Firefox on Linux and
+  Intel Macs, and Linux GPUs without WebGPU; and regular testing in Safari 26
+  on Tahoe and in Firefox, not only in Chromium browsers.
+- **A figure mode with path tracing:** progressive soft shadows, global
+  illumination and depth of field on WebGPU compute, for still images.
+- **A hosted build.** A version on the website that needs no download:
+  parsing and analysis already run in the page, but the local server's jobs
+  (searches, the fetch cache, validation-report reduction, map requests)
+  would move into the page wherever the services allow cross-origin requests.
+  The binary remains the way to work offline and to script Proteoscope.
+- **Embedding.** A web component and a Jupyter widget, so notebooks and web
+  pages can show a Proteoscope view.
 - **Export.** glTF, OBJ, and STL for 3D printing and AR; MP4 via WebCodecs;
   scripted figure batches.
 - **Other.** WebXR, localization, and accessibility audits.
+- **Maintenance.** Split `web/app.js` (about 10,700 lines) into modules by
+  panel, with JSDoc types, before outside contributions start.
+- **Publication.** A software paper (an application note or JOSS), a Zenodo
+  DOI for each release, and short videos of the main workflows.
 
 ## 12. Known limitations
 
