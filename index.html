@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Proteoscope: explore, check and explain protein structures</title>
-  <meta name="description" content="A 3D viewer and analysis workbench for protein and nucleic-acid structures, predicted complexes, density maps and structural proteomics data. Runs on your own computer with nothing to install; your files stay on your machine." />
+  <meta name="description" content="A 3D viewer and analysis workbench for protein and nucleic-acid structures, predicted complexes, density maps and structural proteomics data. A self-contained program for your own computer, installed with one command; your files stay on your machine." />
   <link rel="canonical" href="https://robert-mcdermott.github.io/proteoscope/" />
   <meta property="og:type" content="website" />
   <meta property="og:title" content="Proteoscope" />
@@ -50,7 +50,13 @@
       <div class="container hero-grid">
         <a class="eyebrow" href="https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.6.1"><span class="pill">v0.6.1</span> One-command installers, density maps, docking and more</a>
         <h1>Explore, check and explain <span class="accent">protein structures</span></h1>
-        <p class="lede">Proteoscope is a 3D viewer and analysis workbench for protein and nucleic-acid structures, predicted complexes, density maps and structural proteomics data. It runs on your own computer, with nothing to install and no account, and your files never leave your machine.</p>
+        <p class="lede">Proteoscope is a 3D viewer and analysis workbench for protein and nucleic-acid structures, predicted complexes, density maps and structural proteomics data. It runs on your own computer as one self-contained program, installed with a single command and needing nothing else: no Python, no packages, no account. Your files never leave your machine.</p>
+        <figure class="hero-shot">
+          <div class="shot shot-window" data-url="127.0.0.1:8765">
+            <img src="assets/img/workspace.webp" width="2000" height="1250" alt="The Proteoscope workspace showing the nucleosome with BRCA1–BARD1 (7LYB) as a cartoon, with the Structure panel, chain list and sequence panel" fetchpriority="high" />
+          </div>
+          <figcaption>The nucleosome with BRCA1–BARD1 and UbcH5c (7LYB), one of 27 bundled examples.</figcaption>
+        </figure>
         <div class="btn-row">
           <a class="btn btn-primary" href="install.html">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
@@ -75,12 +81,6 @@
         </div>
         <p class="hero-meta">Free and open source (Apache 2.0) · macOS, Linux and Windows · x64 and ARM64</p>
 
-        <figure class="hero-shot">
-          <div class="shot shot-window" data-url="127.0.0.1:8765">
-            <img src="assets/img/workspace.webp" width="2000" height="1250" alt="The Proteoscope workspace showing the nucleosome with BRCA1–BARD1 (7LYB) as a cartoon, with the Structure panel, chain list and sequence panel" fetchpriority="high" />
-          </div>
-          <figcaption>The nucleosome with BRCA1–BARD1 and UbcH5c (7LYB), one of 27 bundled examples.</figcaption>
-        </figure>
       </div>
     </section>
 
@@ -93,8 +93,8 @@
             <p>Files are read in your browser and never uploaded; searches send only what you search for. Only public databases are contacted, and <code>--offline</code> turns even that off.</p>
           </div>
           <div class="pillar">
-            <h3><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5Z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>Nothing to install</h3>
-            <p>One program for macOS, Linux and Windows. No account, no API key and no administrator rights.</p>
+            <h3><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5Z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>Self-contained</h3>
+            <p>One program for macOS, Linux and Windows, installed with one command. No Python, packages or other software to set up, and no account or administrator rights.</p>
           </div>
           <div class="pillar">
             <h3><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12l2 2 4-4"/><path d="M12 3l7 3v6c0 4.5-3 8-7 9-4-1-7-4.5-7-9V6Z"/></svg>Checked against the originals</h3>

@@ -436,7 +436,7 @@ kbd {
 }
 figure { margin: 0; }
 figcaption { margin-top: 12px; color: var(--text-faint); font-size: 0.88rem; line-height: 1.55; }
-.hero-shot { width: 100%; max-width: 1120px; margin-top: 24px; }
+.hero-shot { width: 100%; max-width: 1120px; margin: 12px 0 16px; }
 
 /* Sections */
 
