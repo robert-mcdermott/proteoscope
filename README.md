@@ -2,10 +2,11 @@
 
 ![proteoscope](proteoscope.png)
 
-Proteoscope is a local, single-binary 3D viewer and analysis workbench for
-protein and nucleic-acid structures. A small Go executable embeds the browser
-application and serves it on `localhost`. Parsing, rendering and analysis all
-happen in your browser, so local files never leave your computer.
+Proteoscope is a 3D viewer and analysis workbench for protein and
+nucleic-acid structures, predicted complexes, density maps and structural
+proteomics data. It runs on your own computer: download one file and start it,
+with no installation or account. Parsing, rendering and analysis all happen in
+your browser, so your files never leave your machine.
 
 It covers the everyday structural biology loop: find the structures and models
 of a protein by gene, name, accession or sequence, or open a file; style it;
@@ -134,8 +135,8 @@ Highlights:
 
 ## Quick Start: Download A Release
 
-Most users do not need Go installed. Download a prebuilt binary from the
-Proteoscope release page:
+Proteoscope is one file with nothing to install. Download the file for your
+computer from the release page:
 
 [https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.6.0](https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.6.0)
 

@@ -5,7 +5,7 @@
 // DOIs were checked against Crossref (September 2026).
 
 export const REFERENCES = {
-  proteoscope: { authors: 'McDermott R', year: 2026, title: 'Proteoscope: a local, single-binary viewer and analysis workbench for protein structures and structural proteomics', journal: 'Software', url: 'https://github.com/robert-mcdermott/proteoscope', type: 'software' },
+  proteoscope: { authors: 'McDermott R', year: 2026, title: 'Proteoscope: a viewer and analysis workbench for protein structures and structural proteomics', journal: 'Software', url: 'https://github.com/robert-mcdermott/proteoscope', type: 'software' },
   pdb: { authors: 'Berman HM, Westbrook J, Feng Z, Gilliland G, Bhat TN, Weissig H, Shindyalov IN, Bourne PE', year: 2000, title: 'The Protein Data Bank', journal: 'Nucleic Acids Res', volume: '28', pages: '235–242', doi: '10.1093/nar/28.1.235' },
   wwpdb: { authors: 'wwPDB consortium', year: 2019, title: 'Protein Data Bank: the single global archive for 3D macromolecular structure data', journal: 'Nucleic Acids Res', volume: '47', pages: 'D520–D528', doi: '10.1093/nar/gky949' },
   afdb: { authors: 'Varadi M, et al.', year: 2024, title: 'AlphaFold Protein Structure Database in 2024: providing structure coverage for over 214 million protein sequences', journal: 'Nucleic Acids Res', volume: '52', pages: 'D368–D375', doi: '10.1093/nar/gkad1011' },
