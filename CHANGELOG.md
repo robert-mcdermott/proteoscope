@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1 (2026-09-23) 
 
 - Installers for macOS and Linux (`install.sh`) and Windows (`install.ps1`).
   They download the release for the computer, verify its SHA-256 checksum and

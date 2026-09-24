@@ -148,3 +148,26 @@ func TestRemoteCommandsFromOtherSitesAreRefused(t *testing.T) {
 		t.Fatalf("cross-origin command: status %d, want 403", rec.Code)
 	}
 }
+
+// With --host 0.0.0.0 the page is served to the network, but remote control still only takes
+// requests from this computer.
+func TestRemoteControlRefusesOtherMachines(t *testing.T) {
+	h := protect(testHandler(t, &app{control: newRemoteHub()}), "0.0.0.0", 8765)
+	for _, path := range []string{"/api/remote/command", "/api/remote/result/1"} {
+		req := httptest.NewRequest(http.MethodPost, "http://192.168.1.20:8765"+path, strings.NewReader(`{"command":"help"}`))
+		req.RemoteAddr = "192.168.1.30:51234"
+		if rec := serve(h, req); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "this computer") {
+			t.Fatalf("%s from another machine: status %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	events := httptest.NewRequest(http.MethodGet, "http://192.168.1.20:8765/api/remote/events", nil)
+	events.RemoteAddr = "[fe80::1]:51234"
+	if rec := serve(h, events); rec.Code != http.StatusForbidden {
+		t.Fatalf("events from another machine: status %d", rec.Code)
+	}
+	local := httptest.NewRequest(http.MethodPost, "http://192.168.1.20:8765/api/remote/command", strings.NewReader(`{"command":"help"}`))
+	local.RemoteAddr = "[::1]:51234"
+	if rec := serve(h, local); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("local command: status %d, want 503 (no page connected)", rec.Code)
+	}
+}

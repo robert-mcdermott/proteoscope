@@ -1189,8 +1189,9 @@ continuous integration and the validation suite (section 8).
   only through UniProt numbering (SIFTS, DBREF or an AlphaFold DB model), and
   residues whose wild type differs are skipped.
 - **Canvas fallback** does not draw surfaces, ambient occlusion, or outlines.
-  WebGPU is still missing on Firefox for Linux and Intel Macs, and on Chrome
-  with AMD GPUs on Linux.
+  WebGPU is still missing in Safari before macOS Tahoe (26), even Safari 26 on
+  Sequoia; on Firefox for Linux and Intel Macs; and on Chrome with AMD GPUs on
+  Linux. Proteoscope is developed and tested in Chromium-based browsers.
 - **Sessions** store PAE matrices at 0.125 Å and contact probabilities at
   1/255 resolution. Links only work for fetched structures and bundled
   examples, and do not carry PAE.

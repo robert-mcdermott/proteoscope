@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,8 +16,9 @@ import (
 // Remote control, enabled with --remote-control: a script on this computer (for example a
 // Jupyter notebook) POSTs a command line to /api/remote/command. The open Proteoscope page
 // receives it over Server-Sent Events from /api/remote/events, runs it, and POSTs the outcome
-// to /api/remote/result/{id}, which the server returns to the waiting caller. The usual
-// protections apply: loopback Host headers only, and browsers on other origins are refused.
+// to /api/remote/result/{id}, which the server returns to the waiting caller. Only connections
+// from this computer are accepted, whatever --host the server listens on, and browsers on other
+// origins are refused.
 
 const (
 	maxRemoteCommandBytes = 64 << 10
@@ -53,9 +55,22 @@ func newRemoteHub() *remoteHub {
 }
 
 func (h *remoteHub) register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/remote/events", h.serveEvents)
-	mux.HandleFunc("POST /api/remote/command", h.serveCommand)
-	mux.HandleFunc("POST /api/remote/result/{id}", h.serveResult)
+	mux.HandleFunc("GET /api/remote/events", localOnly(h.serveEvents))
+	mux.HandleFunc("POST /api/remote/command", localOnly(h.serveCommand))
+	mux.HandleFunc("POST /api/remote/result/{id}", localOnly(h.serveResult))
+}
+
+// localOnly refuses connections from other machines. Remote control is for scripts on this
+// computer, also when --host serves the page to the network.
+func localOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
+			writeError(w, http.StatusForbidden, "Forbidden: remote control only accepts requests from this computer.")
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (h *remoteHub) connect() *remoteClient {
