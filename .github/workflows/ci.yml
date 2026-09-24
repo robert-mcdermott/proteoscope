@@ -56,3 +56,37 @@ jobs:
         run: node --test "web/lib/*.test.mjs"
       - name: Validation against reference tools (offline suites)
         run: node validation/run.mjs limma msstatsptm conservation
+
+  installers:
+    name: Installers (${{ matrix.os }})
+    # Installs the latest published release with this commit's installers.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: install.sh
+        if: runner.os != 'Windows'
+        run: |
+          sh -n install.sh
+          sh install.sh --install-dir "$RUNNER_TEMP/bin"
+          "$RUNNER_TEMP/bin/proteoscope" --version
+          # A second run replaces the installed copy.
+          PROTEOSCOPE_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
+      - name: install.ps1 as a file (Windows PowerShell)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\install.ps1 -InstallDir "$env:RUNNER_TEMP\bin" -NoPathUpdate
+          & "$env:RUNNER_TEMP\bin\proteoscope.exe" --version
+      - name: install.ps1 piped into Invoke-Expression (PowerShell 7)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PROTEOSCOPE_NO_PATH_UPDATE: '1'
+        run: |
+          $env:PROTEOSCOPE_INSTALL_DIR = "$env:RUNNER_TEMP\bin"
+          Get-Content -Raw .\install.ps1 | Invoke-Expression
+          & "$env:RUNNER_TEMP\bin\proteoscope.exe" --version

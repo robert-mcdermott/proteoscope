@@ -414,3 +414,6 @@ the completed v0.1 application.
 
 - [x] 75. Release 0.6.0: version in `main.go` and `CITATION.cff`, `CHANGELOG.md`, release workflow with six binaries and checksums, README downloads; residues sharing a number keep file order; FragPipe PSMs count once per precursor and run
   - _Requirements: 44, 45_
+
+- [x] 76. Installers: `install.sh` (macOS, Linux) and `install.ps1` (Windows) with checksum and version checks, `docs/INSTALLING.md`, and a CI job that runs them on all three systems
+  - _Requirements: 1, 45_

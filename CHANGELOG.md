@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Installers for macOS and Linux (`install.sh`) and Windows (`install.ps1`).
+  They download the release for the computer, verify its SHA-256 checksum and
+  version, and install it without administrator rights. Downloaded this way,
+  the program is not flagged by Gatekeeper or SmartScreen.
+  [docs/INSTALLING.md](docs/INSTALLING.md) covers versions, manual downloads,
+  upgrades and uninstalling.
+
 ## 0.6.0 (2026-09-23)
 
 The first release since 0.4. It collects six waves of work, described in

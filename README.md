@@ -133,118 +133,56 @@ Highlights:
 - **Private.** Local files are parsed in the browser; `--offline` disables
   all network access.
 
-## Quick Start: Download A Release
+## Install
 
-Proteoscope is one file with nothing to install. Download the file for your
-computer from the release page:
-
-[https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.6.0](https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.6.0)
-
-Choose the file for your operating system:
-
-| Platform | Download |
-| --- | --- |
-| macOS, Apple Silicon | [`proteoscope-darwin-arm64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.6.0/proteoscope-darwin-arm64) |
-| macOS, Intel | [`proteoscope-darwin-amd64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.6.0/proteoscope-darwin-amd64) |
-| Linux, x64 | [`proteoscope-linux-amd64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.6.0/proteoscope-linux-amd64) |
-| Linux, ARM64 | [`proteoscope-linux-arm64`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.6.0/proteoscope-linux-arm64) |
-| Windows, x64 | [`proteoscope-windows-amd64.exe`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.6.0/proteoscope-windows-amd64.exe) |
-| Windows, ARM64 | [`proteoscope-windows-arm64.exe`](https://github.com/robert-mcdermott/proteoscope/releases/download/v0.6.0/proteoscope-windows-arm64.exe) |
-
-`SHA256SUMS` on the release page lists each file's checksum. Check a download
-with `shasum -a 256 -c SHA256SUMS --ignore-missing` (macOS, Linux) or
-`Get-FileHash` (PowerShell). What changed in each release is in
-[CHANGELOG.md](CHANGELOG.md).
-
-When Proteoscope starts, it prints a local URL, usually:
-
-```text
-http://127.0.0.1:8765
-```
-
-It will also try to open that URL in your browser. Use a browser with WebGPU:
-Chrome, Edge or Brave on any desktop OS, Safari 26 or later on macOS, or
-Firefox 141 or later on Windows. Other browsers fall back to a simplified
-compatibility renderer.
-
-Release binaries can lag behind the main branch. To use the newest features,
-build from source (see [Development](#development)).
-
-### macOS
-
-Download the binary for your Mac (`arm64` for Apple Silicon, `amd64` for
-Intel), then open Terminal and run:
+### macOS and Linux
 
 ```sh
-chmod +x ./proteoscope-darwin-arm64
-./proteoscope-darwin-arm64
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://raw.githubusercontent.com/robert-mcdermott/proteoscope/main/install.sh | sh
 ```
 
-Because the binary is not signed with an Apple developer certificate, macOS may
-show a warning such as:
-
-```text
-Apple could not verify "proteoscope-darwin-arm64" is free of malware.
-```
-
-You can unblock it in either of these ways.
-
-Option 1, from System Settings:
-
-1. Try to open the app once and dismiss the warning.
-2. Open `System Settings`.
-3. Go to `Privacy & Security`.
-4. Scroll to the `Security` section.
-5. Click `Open Anyway` for Proteoscope.
-6. Confirm by clicking `Open`.
-
-Option 2, from Terminal:
-
-```sh
-cd ~/Downloads
-xattr -d com.apple.quarantine ./proteoscope-darwin-arm64
-chmod +x ./proteoscope-darwin-arm64
-./proteoscope-darwin-arm64
-```
-
-If `xattr` says the quarantine attribute was not found, continue with the
-`chmod` and run commands. Replace the filename with the Intel binary if needed.
-
-### Linux
-
-Download `proteoscope-linux-amd64`, then run:
-
-```sh
-cd ~/Downloads
-chmod +x ./proteoscope-linux-amd64
-./proteoscope-linux-amd64
-```
-
-If your browser does not open automatically, copy the printed localhost URL into
-Chrome, Edge, Brave, or another WebGPU-capable browser.
+This installs the latest release as `$HOME/.local/bin/proteoscope`. It checks
+the download's SHA-256 checksum and version, and replaces an existing copy only
+after both checks pass. It does not use `sudo` or change `PATH`; if
+`~/.local/bin` is not on your `PATH`, it prints the full path to run.
 
 ### Windows
 
-Download `proteoscope-windows-amd64.exe`, then double-click it.
-
-If Windows SmartScreen blocks the app:
-
-1. Click `More info`.
-2. Click `Run anyway`.
-
-If Windows marks the downloaded file as blocked:
-
-1. Right-click `proteoscope-windows-amd64.exe`.
-2. Choose `Properties`.
-3. On the `General` tab, check `Unblock` if it appears.
-4. Click `Apply`.
-5. Run the `.exe` again.
-
-You can also run it from PowerShell:
+Run in PowerShell:
 
 ```powershell
-.\proteoscope-windows-amd64.exe
+irm https://raw.githubusercontent.com/robert-mcdermott/proteoscope/main/install.ps1 | iex
 ```
+
+This installs to `%LocalAppData%\Programs\Proteoscope`, checks the checksum
+and version, and adds that folder to your user `PATH`. It needs neither
+administrator rights nor a change to the execution policy. Open a new terminal
+afterwards.
+
+Because the installers download with `curl` and PowerShell rather than a
+browser, the program does not get the quarantine flag (macOS) or mark of the
+web (Windows), so you are not asked to confirm an unsigned download. To pin a
+version, download the files yourself, verify them, upgrade or uninstall, see
+[Installing Proteoscope](docs/INSTALLING.md).
+
+### Start
+
+```sh
+proteoscope
+```
+
+Proteoscope prints a local URL, usually `http://127.0.0.1:8765`, and opens it
+in your browser; press Ctrl+C in the terminal to stop it. Files named on the
+command line open directly, for example `proteoscope 1abc.cif`.
+
+Use a browser with WebGPU: Chrome, Edge or Brave on any desktop OS, Safari 26
+or later on macOS, or Firefox 141 or later on Windows. Other browsers fall back
+to a simplified compatibility renderer.
+
+Releases can lag behind the main branch. To use the newest features, build
+from source (see [Development](#development)). [CHANGELOG.md](CHANGELOG.md)
+lists what changed in each release.
 
 ## Opening Structures
 
@@ -1237,7 +1175,9 @@ a tag such as `v0.6.0`. The release workflow
 (`.github/workflows/release.yml`) checks that the tag matches `main.go`, runs
 the tests, builds the six binaries with `-trimpath -ldflags "-s -w"`, and
 attaches them with `SHA256SUMS` to a draft release. Review the draft and
-publish it.
+publish it. The installers (`install.sh`, `install.ps1`) download the latest
+published release by these file names, so keep them when changing the
+workflow.
 
 ### Test
 
