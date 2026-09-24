@@ -219,9 +219,27 @@ export function perceiveRings(model, atomIndices) {
   return rings;
 }
 
+// The chemistry of some atoms (a ligand) as interaction detection sees it at pH 7: charged
+// groups, hydrogen-bond donors and acceptors, and aromatic rings.
+export function ligandChemistry(model, atomIndices) {
+  const context = modelContext(model);
+  const selected = indexMask(context.count, atomIndices);
+  const inside = (atoms) => atoms.every((index) => selected[index]);
+  const heavy = atomIndices.filter((index) => !(context.flags[index] & (HYDROGEN | METAL | WATER)));
+  return {
+    charges: context.charges.filter((group) => inside(group.atoms)).map((group) => ({ label: group.label, sign: group.sign, atoms: group.atoms.slice() })),
+    donors: heavy.filter((index) => context.flags[index] & DONOR),
+    acceptors: heavy.filter((index) => context.flags[index] & ACCEPTOR),
+    aromaticRings: context.rings.filter((ring) => ring.aromatic && inside(ring.atoms)).map((ring) => ring.atoms.slice()),
+  };
+}
+
 function modelContext(model) {
   const cached = contexts.get(model);
-  if (cached && cached.atoms === model.atoms && cached.bonds === model.bonds && cached.count === (model.atoms?.length ?? 0)) {
+  if (
+    cached && cached.atoms === model.atoms && cached.bonds === model.bonds &&
+    cached.count === (model.atoms?.length ?? 0) && cached.chemistryVersion === model.chemistryVersion
+  ) {
     return cached;
   }
   const context = buildContext(model);
@@ -235,6 +253,7 @@ function buildContext(model) {
   const context = {
     atoms: model.atoms,
     bonds: model.bonds,
+    chemistryVersion: model.chemistryVersion,
     count,
     positions: new Float64Array(count * 3),
     elements: new Array(count),
@@ -244,6 +263,12 @@ function buildContext(model) {
     aromatic: new Uint8Array(count),
     ringNitrogen: new Uint8Array(count),
     residueOf: new Int32Array(count),
+    // Chemistry from the dictionary or the file (chemistry.js): typed atoms know their
+    // hydrogens, and bonds between typed atoms their order.
+    typed: new Uint8Array(count),
+    hydrogenCount: new Int8Array(count),
+    formalCharge: new Int8Array(count),
+    orders: new Map(),
     residues: [],
     neighbors: new Array(count),
     hydrogens: new Array(count),
@@ -293,6 +318,11 @@ function indexAtoms(context, atoms) {
     const residue = context.residues[residueIndex];
     context.residueOf[index] = residueIndex;
     residue.atoms.push(index);
+    if (Number.isInteger(atom.hydrogens)) {
+      context.typed[index] = 1;
+      context.hydrogenCount[index] = atom.hydrogens;
+    }
+    if (Number.isInteger(atom.charge)) context.formalCharge[index] = Math.max(-4, Math.min(4, atom.charge));
     if (element === 'H' || element === 'D' || (!element && atom.isHydrogen)) {
       context.flags[index] = HYDROGEN;
       residue.hasHydrogens = true;
@@ -319,8 +349,30 @@ function linkBonds(context, bonds) {
     } else if (!((flags[a] | flags[b]) & WATER)) {
       addLink(context.neighbors, a, b);
       addLink(context.neighbors, b, a);
+      if (context.typed[a] && context.typed[b]) {
+        context.orders.set(a < b ? a * count + b : b * count + a, { order: bond.order ?? 1, aromatic: Boolean(bond.aromatic) });
+      }
     }
   }
+}
+
+// Order of a bond between two typed atoms (null when the chemistry is not known).
+function typedBond(context, a, b) {
+  return context.orders.get(a < b ? a * context.count + b : b * context.count + a) ?? null;
+}
+
+function hasMultipleBond(context, index) {
+  for (const neighbor of context.neighbors[index] ?? EMPTY) {
+    const bond = typedBond(context, index, neighbor);
+    if (bond && (bond.aromatic || bond.order > 1)) return true;
+  }
+  return false;
+}
+
+// Hydrogens on a typed atom: explicit ones in the model, otherwise the dictionary's.
+function hydrogensOf(context, index) {
+  const explicit = context.hydrogens[index]?.length ?? 0;
+  return explicit || context.hydrogenCount[index];
 }
 
 function linkMetals(context) {
@@ -405,7 +457,11 @@ function perceiveResidueRings(context, residue, residueIndex) {
   else if (template === 'generic') cycles = smallCycles(context, residue);
   for (const atoms of cycles) {
     const geometry = ringGeometry(context, atoms);
-    const aromatic = template !== 'generic' || (
+    // The dictionary's aromatic flags follow the MDL model, which leaves out lactam rings
+    // (pyridones, olaparib's phthalazinone) and half of a porphyrin's pyrroles; planar rings of
+    // sp2 atoms count too, as in PLIP (Open Babel perception).
+    const dictionary = atoms.every((index, position) => typedBond(context, index, atoms[(position + 1) % atoms.length])?.aromatic);
+    const aromatic = template !== 'generic' || dictionary || (
       geometry.deviation <= RING_PLANARITY_MAX && atoms.every((index) => isTrigonalRingAtom(context, residue, index))
     );
     context.rings.push({
@@ -436,6 +492,11 @@ function classifyRingNitrogens(context, atoms) {
   const { elements } = context;
   const nitrogens = atoms.filter((index) => elements[index] === 'N' && heavyDegree(context, index) === 2);
   if (!nitrogens.length) return;
+  if (nitrogens.every((index) => context.typed[index])) {
+    // With the hydrogens known, N–H is pyrrole-like (donor) and bare N pyridine-like (acceptor).
+    for (const index of nitrogens) context.ringNitrogen[index] = hydrogensOf(context, index) ? PYRROLE_TYPE : PYRIDINE_TYPE;
+    return;
+  }
   const carbonyls = atoms.filter((index) => elements[index] === 'C' && hasDoubleBondedChalcogen(context, index));
   const donors = atoms.filter((index) => (
     (elements[index] !== 'C' && elements[index] !== 'N') || (elements[index] === 'N' && heavyDegree(context, index) === 3)
@@ -454,6 +515,8 @@ function hasDoubleBondedChalcogen(context, carbon) {
   return (context.neighbors[carbon] ?? EMPTY).some((neighbor) => {
     if (heavyDegree(context, neighbor) !== 1) return false;
     const element = context.elements[neighbor];
+    const bond = typedBond(context, carbon, neighbor);
+    if (bond) return (element === 'O' || element === 'S') && bond.order === 2;
     const length = atomDistance(context, carbon, neighbor);
     return (element === 'O' && length < CARBONYL_MAX) || (element === 'S' && length < THIOCARBONYL_MAX);
   });
@@ -606,8 +669,10 @@ function nucleicRole(context, residue, index) {
   return BASE_ROLES[NUCLEOTIDE_CODES[residue.resName]]?.[name] ?? 0;
 }
 
-// Ligands and non-standard residues: element + heavy-atom environment (no hydrogens or bond orders needed).
+// Ligands and non-standard residues: from their chemistry when it is known, otherwise from the
+// element and the heavy-atom geometry.
 function genericRole(context, index) {
+  if (context.typed[index]) return typedRole(context, index);
   const element = context.elements[index];
   const neighbors = context.neighbors[index] ?? EMPTY;
   const degree = neighbors.length;
@@ -637,13 +702,40 @@ function genericRole(context, index) {
   return 0;
 }
 
+// Donors carry hydrogens; acceptors are oxygens, and nitrogens whose lone pair is free (not an
+// amide, sulfonamide, aniline or pyrrole nitrogen, not four-connected).
+function typedRole(context, index) {
+  const element = context.elements[index];
+  const neighbors = context.neighbors[index] ?? EMPTY;
+  const hydrogens = hydrogensOf(context, index);
+  const donor = hydrogens > 0 ? DONOR : 0;
+  if (element === 'N') {
+    // A cationic nitrogen (ammonium, pyridinium, the N of a nitro group) has no lone pair.
+    if (neighbors.length + hydrogens >= 4 || context.formalCharge[index] > 0) return donor;
+    if (context.aromatic[index]) return context.ringNitrogen[index] === PYRROLE_TYPE || neighbors.length === 3 ? donor : ACCEPTOR | donor;
+    if (hasMultipleBond(context, index)) return ACCEPTOR | donor;
+    const conjugated = neighbors.some((neighbor) => isUnsaturated(context, neighbor) || isAcylLike(context, neighbor));
+    return conjugated ? donor : ACCEPTOR | donor;
+  }
+  if (element === 'O') return neighbors.length > 2 ? 0 : ACCEPTOR | donor;
+  if (element === 'S') {
+    if (hydrogens > 0) return DONOR;
+    return neighbors.length === 1 && typedBond(context, index, neighbors[0])?.order === 2 ? ACCEPTOR : 0;
+  }
+  if (!neighbors.length && HALIDES.has(element)) return ACCEPTOR;
+  return 0;
+}
+
 function applyChargeRoles(context, group) {
   if (group.histidine) return;
   for (const index of group.atoms) {
     if (group.sign < 0) {
       context.flags[index] = (context.flags[index] & ~DONOR) | ACCEPTOR;
     } else {
-      context.flags[index] = (context.flags[index] & ~ACCEPTOR) | DONOR;
+      // A quaternary ammonium, or a permanent cation without hydrogens (N-alkyl pyridinium), has
+      // no hydrogen to donate; a protonated amine gains one.
+      const donates = heavyDegree(context, index) < 4 && !(group.label === 'cation' && hydrogensOf(context, index) === 0);
+      context.flags[index] = (context.flags[index] & ~(ACCEPTOR | DONOR)) | (donates ? DONOR : 0);
       context.capacity[index] = Math.max(1, (group.atoms.length === 1 ? 4 : 3) - heavyDegree(context, index));
     }
   }
@@ -686,18 +778,25 @@ function nucleicChargeGroups(context, residue, residueIndex) {
   return atoms.length >= 2 ? [chargeGroup(context, atoms, -1, residueIndex, 'phosphate')] : [];
 }
 
-// Ionisable groups at pH ~7, following PLIP's ligand functional-group rules (plus amidines).
+// Ionisable groups at pH ~7, following PLIP's ligand functional-group rules, plus amidines,
+// tetrazoles and acylsulfonamides, permanent charges the chemistry records (N-alkyl pyridinium),
+// and one protonated nitrogen per group of nearby amines (piperazine, ethylenediamine).
 function genericChargeGroups(context, residue, residueIndex) {
   const groups = [];
+  const amines = [];
   for (const index of residue.atoms) {
     if (context.flags[index] & (HYDROGEN | METAL)) continue;
     const element = context.elements[index];
     const neighbors = context.neighbors[index] ?? EMPTY;
     if (element === 'N') {
+      if (isAcylSulfonamide(context, index)) {
+        groups.push(chargeGroup(context, [index], -1, residueIndex, 'acylsulfonamide'));
+        continue;
+      }
       if (!isBasicAmine(context, index)) continue;
       const group = chargeGroup(context, [index], 1, residueIndex, neighbors.length === 4 ? 'ammonium' : 'amine');
       if (neighbors.length === 3) group.axis = planeNormal(context, neighbors);
-      groups.push(group);
+      amines.push(group);
     } else if (element === 'C') {
       const oxygens = terminalOxygens(context, neighbors);
       // Two-connected carboxylates are formate (or a carboxylate whose C–C bond was not inferred); linear O=C=O is CO2.
@@ -717,7 +816,67 @@ function genericChargeGroups(context, residue, residueIndex) {
       }
     }
   }
+  groups.push(...protonatedAmines(context, amines));
+  for (const ring of context.rings) {
+    if (ring.residue !== residueIndex || !ring.aromatic || ring.atoms.length !== 5) continue;
+    const nitrogens = ring.atoms.filter((index) => context.elements[index] === 'N');
+    // Only a tetrazole without an N-substituent (1H-tetrazole) is acidic.
+    if (nitrogens.length === 4 && nitrogens.every((index) => heavyDegree(context, index) === 2)) groups.push(chargeGroup(context, nitrogens, -1, residueIndex, 'tetrazole'));
+  }
+  const grouped = new Set(groups.flatMap((group) => group.atoms));
+  for (const index of residue.atoms) {
+    if (grouped.has(index) || !context.typed[index]) continue;
+    const charge = context.formalCharge[index];
+    if (!charge || (context.neighbors[index] ?? EMPTY).some((neighbor) => Math.sign(context.formalCharge[neighbor]) === -Math.sign(charge))) continue;
+    const element = context.elements[index];
+    // Four-connected or aromatic nitrogen cations keep their charge at any pH; so do O⁻ and S⁻.
+    const permanent = charge > 0 ? element === 'N' && (heavyDegree(context, index) === 4 || context.aromatic[index]) : element === 'O' || element === 'S';
+    if (permanent) groups.push(chargeGroup(context, [index], Math.sign(charge), residueIndex, charge > 0 ? 'cation' : 'anion'));
+  }
   return groups;
+}
+
+// Amines within three bonds of each other (piperazine, ethylenediamine) repel a second proton,
+// so only the most basic one of such a group is charged: the one with the fewest α-carbons
+// next to an unsaturated atom (a benzylic CH2 lowers the pKa by about one unit), then the first.
+function protonatedAmines(context, amines) {
+  if (amines.length < 2) return amines;
+  const kept = [];
+  const assigned = new Set();
+  for (const amine of amines) {
+    if (assigned.has(amine)) continue;
+    const cluster = [amine];
+    assigned.add(amine);
+    for (let cursor = 0; cursor < cluster.length; cursor += 1) {
+      for (const other of amines) {
+        if (!assigned.has(other) && withinBonds(context, cluster[cursor].atoms[0], other.atoms[0], 3)) {
+          assigned.add(other);
+          cluster.push(other);
+        }
+      }
+    }
+    let best = cluster[0];
+    for (const candidate of cluster) if (basicityPenalty(context, candidate.atoms[0]) < basicityPenalty(context, best.atoms[0])) best = candidate;
+    kept.push(best);
+  }
+  return kept;
+}
+
+function basicityPenalty(context, nitrogen) {
+  let penalty = 0;
+  for (const carbon of context.neighbors[nitrogen] ?? EMPTY) {
+    if ((context.neighbors[carbon] ?? EMPTY).some((neighbor) => neighbor !== nitrogen && isUnsaturated(context, neighbor))) penalty += 1;
+  }
+  return penalty;
+}
+
+// R–C(=O)–NH–SO2–R' is as acidic as a carboxylic acid (pKa about 4.5).
+function isAcylSulfonamide(context, nitrogen) {
+  const neighbors = context.neighbors[nitrogen] ?? EMPTY;
+  if (neighbors.length !== 2) return false;
+  const sulfonyl = neighbors.some((neighbor) => context.elements[neighbor] === 'S' && terminalOxygens(context, context.neighbors[neighbor] ?? EMPTY).length >= 2);
+  const acyl = neighbors.some((neighbor) => context.elements[neighbor] === 'C' && hasDoubleBondedChalcogen(context, neighbor));
+  return sulfonyl && acyl;
 }
 
 function chargeGroup(context, atoms, sign, residue, label) {
@@ -762,6 +921,7 @@ function amidiniumNitrogens(context, carbon) {
 
 function isUnsaturated(context, index) {
   if (context.aromatic[index]) return true;
+  if (context.typed[index]) return hasMultipleBond(context, index);
   const neighbors = context.neighbors[index] ?? EMPTY;
   const residue = context.residues[context.residueOf[index]];
   if (residue.hasHydrogens) return neighbors.length + (context.hydrogens[index]?.length ?? 0) < 4;
@@ -780,6 +940,10 @@ function isAcylLike(context, index) {
 function isPlanarCenter(context, index) {
   const neighbors = context.neighbors[index] ?? EMPTY;
   if (neighbors.length !== 3) return false;
+  if (context.typed[index]) {
+    // sp2: a multiple bond, or a nitrogen conjugated with one (amide, aniline, enamine).
+    return hasMultipleBond(context, index) || (context.elements[index] === 'N' && neighbors.some((neighbor) => hasMultipleBond(context, neighbor)));
+  }
   const [a, b, c] = neighbors;
   return angleAt(context, index, a, b) + angleAt(context, index, a, c) + angleAt(context, index, b, c) > 350;
 }

@@ -10,13 +10,16 @@ happen in your browser, so local files never leave your computer.
 It covers the everyday structural biology loop: find the structures and models
 of a protein by gene, name, accession or sequence, or open a file; style it;
 find and focus a ligand or residue; see its interactions, surface and
-electrostatics; judge model quality (the wwPDB validation report, B-factors,
-AlphaFold pLDDT and PAE, MolProbity-style Ramachandran); triage the models of
-AlphaFold 3, Boltz, Chai-1, ColabFold, Protenix and OpenFold3 runs; compare it
-with other structures or its AlphaFold prediction; interpret variants with
-AlphaMissense; bring in your own mass spectrometry results (search reports,
-cross-links, HDX-MS) and public proteomics evidence; and export a
-publication-ready figure.
+electrostatics; judge model quality (the wwPDB validation report, the density
+map, B-factors, AlphaFold pLDDT and PAE, MolProbity-style Ramachandran);
+triage the models of AlphaFold 3, Boltz, Chai-1, ColabFold, Protenix and
+OpenFold3 runs, or the poses of a docking run; compare it with other
+structures, by sequence or by structure alone, or with its AlphaFold
+prediction; see which residues evolution conserves; interpret variants with
+AlphaMissense; bring in your own mass spectrometry results (search reports
+with differential statistics, cross-links, HDX-MS) and public proteomics
+evidence; and export a publication-ready figure with a methods paragraph to
+go with it.
 
 Highlights:
 
@@ -30,11 +33,25 @@ Highlights:
     sticks, spacefill and trace.
   - Molecular, solvent-accessible and Gaussian surfaces with Coulombic
     electrostatics.
+  - Double, triple and aromatic bonds from the wwPDB Chemical Component
+    Dictionary.
+- **Density maps.** The 2Fo-Fc and Fo-Fc maps of X-ray entries and the
+  cryo-EM maps of EMDB, through the PDBe volume server, or your own CCP4/MRC
+  files: meshes or surfaces around the focus, levels in σ, and the model's
+  fit (atom inclusion and per-residue density).
+- **Ligands and docking.**
+  - Bond orders, aromaticity and charges from the Chemical Component
+    Dictionary, used to draw ligands and to type their interactions.
+  - Docking poses from AutoDock Vina, smina, GNINA, Glide, GOLD, DOCK, rDock
+    or DiffDock (SDF, MOL2 or PDBQT) in the receptor, with their scores and
+    interaction fingerprints.
 - **Analysis.**
   - DSSP secondary structure.
   - Ligand and interface interactions (PLIP criteria).
   - SASA and buried surface area.
   - Ramachandran plot and per-residue profiles.
+  - Conservation from an alignment (Jensen–Shannon divergence, ConSurf
+    colors).
   - Distance, angle and torsion rulers.
 - **Find structures.** Search by gene, protein name, UniProt accession,
   keywords or a pasted sequence: the protein's experimental structures ranked
@@ -67,6 +84,8 @@ Highlights:
   - Several structures in one scene, each with its own style.
   - Superposition by sequence alignment with outlier pruning, reporting RMSD,
     TM-score and lDDT, overall and per chain.
+  - Structure-only alignment with TM-align and MM-align, matching US-align,
+    for remote homologs and complexes.
   - Color by deviation or local agreement; aligned sequences with
     substitutions marked.
   - One-click comparison of an experimental structure with its AlphaFold
@@ -76,6 +95,10 @@ Highlights:
     FragPipe, mzTab and Proteome Discoverer: coverage, localized PTM sites,
     intensities and fold changes on the structure, filtered by q-value and
     localization probability. Large reports are streamed.
+  - Differential statistics across the whole report: limma's moderated
+    t-test with normalization and imputation, Benjamini–Hochberg q-values, a
+    volcano plot, and MSstatsPTM's adjustment of PTM sites for protein
+    changes.
   - Public peptides and PTM sites (PeptideAtlas, ProteomicsDB, PRIDE,
     PTMeXchange) to compare your sites with what is already known.
   - Structural context of every site: part-sphere exposure (pPSE) and
@@ -99,6 +122,13 @@ Highlights:
   notebook.
 - **Figures.** Supersampled PNG up to 4× with transparent background and
   legend; clipboard copy; spin videos.
+- **Methods and citations.** A methods paragraph for what a session used:
+  data sources with versions and dates, analyses with their parameters, and
+  numbered references with DOIs, also as BibTeX.
+- **Validated.** A validation suite checks the analyses against their
+  reference tools (limma, MSstatsPTM, US-align, Capra and Singh's scorer,
+  EMDB and MolProbity) and runs in continuous integration; see
+  [validation/](validation/README.md).
 - **Private.** Local files are parsed in the browser; `--offline` disables
   all network access.
 
@@ -216,6 +246,8 @@ You can also run it from PowerShell:
 | **AlphaFold DB** | Type a UniProt accession (for example `P04637`). The current AlphaFold DB model and its predicted aligned error (PAE) matrix are downloaded. |
 | **Find structures** | Type a gene (`KRAS`), protein name, UniProt accession, keywords or a sequence under **Find structures**, or run `search …`. See [Finding Structures](#finding-structures). |
 | **Local file** | Click **Open local file** or drag files onto the window. Accepts `.pdb`, `.ent`, `.cif`, `.mmcif` and BinaryCIF `.bcif`, optionally compressed with gzip (`.gz`) or Zstandard (`.zst`). Several files open together. |
+| **Docking poses** | Open or drop `.sdf`, `.mol`, `.mol2` or `.pdbqt` files with the receptor active; the poses open in it. See [Docking Poses](#docking-poses). |
+| **Density map** | Open or drop a `.map`, `.mrc` or `.ccp4` file (optionally gzipped) with its structure active, or load the map of a PDB entry. See [Density Maps](#density-maps). |
 | **Prediction output** | Drop a prediction folder or an AlphaFold Server `.zip`, or click **Open prediction folder…**. AlphaFold 3, AlphaFold Server, Boltz-1/2, Chai-1, ColabFold, Protenix and OpenFold3 layouts are recognized; see [Predicted Complexes](#predicted-complexes). |
 | **Command line** | `proteoscope structure.cif model.pdb.gz af3_output/my_job/` opens every file and folder at startup; the first structure is active. |
 | **Examples** | **Bundled examples** opens one of 27 curated structures with its opening view; see [Bundled Examples](#bundled-examples). |
@@ -227,12 +259,14 @@ replacing** is ticked; see [Comparing Structures](#comparing-structures).
 Remote downloads go through the local Proteoscope server, which only contacts
 a fixed list of public services:
 
-- `files.rcsb.org` (structures and validation reports), `search.rcsb.org` and
-  `data.rcsb.org` (searches and entry summaries);
+- `files.rcsb.org` (structures, validation reports and chemical components),
+  `search.rcsb.org` and `data.rcsb.org` (searches and entry summaries), and
+  `maps.rcsb.org` (density maps, when PDBe's server is unavailable);
 - `alphafold.ebi.ac.uk` (models, PAE, MSAs and AlphaMissense);
 - `rest.uniprot.org` (proteins and annotations);
-- `www.ebi.ac.uk` (PDBe structure lists, 3D-Beacons model lists and the
-  Proteins API for public proteomics evidence);
+- `www.ebi.ac.uk` (PDBe structure lists, 3D-Beacons model lists, the
+  Proteins API for public proteomics evidence, the PDBe volume server for
+  density maps, and EMDB's map metadata);
 - for models listed by 3D-Beacons, the providers' own servers (SWISS-MODEL,
   ModelArchive, AlphaFill, PED, SASBDB, isoform.io and RCSB's model server).
 
@@ -243,8 +277,9 @@ refetched after 30 days (`--cache-max-age`; searches after a day); the
 to disable all network access; cached entries are still served.
 
 PAE files can also be dropped onto a loaded model: AlphaFold DB, AlphaFold 3
-and ColabFold `.json`, or Boltz `.npz`. An `.a3m` alignment colors the model by
-MSA depth.
+and ColabFold `.json`, or Boltz `.npz`. An alignment (`.a3m`, aligned
+`.fasta`, Stockholm `.sto` or Clustal `.aln`) gives MSA depth and
+[conservation](#analysis-tab).
 
 ## Finding Structures
 
@@ -452,8 +487,43 @@ rebuilding geometry; clipped atoms are capped.
   - Each type can be toggled in the Analysis tab.
   - **Analyze interface** lists the contacts between two chains.
   - **Export CSV** saves the interaction table.
+- **Ligand chemistry.** Bond orders, aromatic rings and formal charges come
+  from the wwPDB Chemical Component Dictionary:
+  - from the file, when its mmCIF carries the dictionary tables (RCSB's files
+    do);
+  - from a built-in table for standard residues;
+  - otherwise from one small dictionary file per ligand, downloaded and
+    cached.
+
+  A dictionary entry applies only when the ligand's atom names match it.
+  Sticks show double and triple bonds and aromatic rings (**Bond orders** in
+  the Style tab: ligands, all residues or off). Interactions use the
+  chemistry for donors, acceptors, aromatic rings and charged groups, with
+  basic groups protonated by rule: in imatinib only the methylpiperazine
+  nitrogen is charged.
 - **Labels.** **Label** (or `L`) adds 3D labels to the selected residues.
   **Isolate chain** hides the other chains.
+
+## Docking Poses
+
+![AutoDock Vina's tutorial poses of imatinib in ABL (1IEP): Vina scores, heavy-atom RMSD to pose 1, interaction summaries and the pose × residue fingerprint map, with pose 1's hydrogen bonds to Met318, Thr315, Glu286, Asp381 and Ile360](docs/images/docking-poses.jpg)
+
+Open an SDF (V2000 or V3000), MOL2 or PDBQT file with the receptor active,
+and its molecules become poses in the receptor.
+
+- **Scores** are read from SD properties (Vina, smina and GNINA affinities
+  and CNN scores, Glide, GOLD, rDock), DOCK's MOL2 comments, Vina's PDBQT
+  remarks and DiffDock's file names (`rank1_confidence-0.52.sdf`). The pose
+  table shows the main scores; click a header to sort.
+- **Poses.** Click a pose, press `[` and `]`, or run `pose 3`. The shown pose
+  is focused with its interactions, and the table gives each pose's
+  heavy-atom RMSD to pose 1.
+- **Interaction fingerprints** list every pose's interactions with the
+  receptor residues around it, as a pose × residue table, to find poses that
+  keep the interactions you trust (a hinge hydrogen bond, a salt bridge).
+  **Export CSV** saves the scores and fingerprints.
+- A pose never bonds to a crystal ligand in the same place, so poses can be
+  compared with the deposited ligand. Sessions keep the poses.
 
 ## Measurements
 
@@ -482,6 +552,8 @@ press Enter to select and frame it. Type a command and Enter runs it.
 | `superpose 1AKE onto 4AKE fit /A:1-29+60-121+160-214` | Fits on the adenylate kinase CORE domain |
 | `select deviation > 5` | Residues that moved more than 5 Å after superposing |
 | `focus resn HEM and chain A` · `label sele` · `zoom #2` | Focus a ligand, label the selection, frame a structure |
+| `tmalign 1A5R onto 1UBQ` | Superposes SUMO-1 on ubiquitin by structure alone |
+| `map load` · `map level 1.2` · `map fit` | Loads the density map, contours it at 1.2σ, fits the model |
 
 **Selection language.** PyMOL-style keywords with ChimeraX-style atom specs:
 
@@ -502,7 +574,9 @@ press Enter to select and frame it. Type a command and Enter runs it.
 - **Values:** `b > 60`, `q < 1`, `plddt < 70`, `deviation > 2`, `lddt < 0.7`,
   `rmsf > 2`, `rsa > 0.4` (after **Compute SASA**), `ppse < 6` (part-sphere
   exposure), `am > 0.564` (AlphaMissense), `msa < 30` (MSA depth), and
-  `rsrz > 2`, `rscc < 0.8` and `qscore < 0.4` (validation report).
+  `rsrz > 2`, `rscc < 0.8` and `qscore < 0.4` (validation report),
+  `conservation > 0.6` and `grade >= 8` (conservation), and `mapfit < 1` (map
+  fit).
 - **Sets:** `sele`, `focus`, `sites` (proteomics), `covered` (peptides),
   `aligned` (paired in a comparison), `outliers` (validation report), `idr`
   (disordered regions, after the pPSE analysis).
@@ -515,7 +589,8 @@ ball-stick, spheres, cartoon, surface, water, hydrogens, labels, everything),
 between two chains), `superpose`, `alphafold`, `overlay`, `ranking`,
 `domains`, `msa`, `validate` (with `clashes`, `fit`, `refresh` or `off`),
 `missense`, `exposure` (pPSE and disorder), `evidence` (public peptides and
-PTMs), `preset`, `lighting`, `bg`, `distance`, `turn`, `spin`, `reset`,
+PTMs), `tmalign`, `map`, `pose`, `conservation`, `preset`, `lighting`, `bg`,
+`distance`, `turn`, `spin`, `reset`,
 `save`, `link`, `mvs`, `png` and `help`. The help dialog (`?`) lists the
 syntax of each.
 
@@ -551,6 +626,12 @@ card shows hidden residues again.
   - The result reports RMSD of the fitted core and of all pairs, TM-score
     (normalized by the reference), lDDT, sequence identity and the number of
     pairs within 2 Å, with a per-chain table for complexes.
+- **Structure-only pairing.** For remote homologs, whose sequences align
+  poorly, set **Pair residues by** to *Structure (TM-align)* or run
+  `tmalign`. Residues are paired by structure alone with TM-align (MM-align
+  for complexes), ported from US-align and giving its scores. The report adds
+  the TM-score normalized by each structure and the aligned length; coloring,
+  the aligned sequences and sessions work as for sequence pairing.
 - **Seeing differences.**
   - Color by **deviation** (Cα distance after superposition) or **lDDT**, which
     compares local distances and needs no superposition, so a hinge motion
@@ -579,6 +660,7 @@ Checked against known cases:
 | Human α-globin vs β-globin (4HHB chains A and B) | 44.6% identity with the D-helix gap; 1.10 Å over 120 pairs; TM-score 0.89 |
 | EGFR (1M17) vs AlphaFold model P00533 | 0.78 Å over 249 of 312 pairs; TM-score 0.89; lDDT 0.92 |
 | Hemoglobin R state (1HHO assembly) onto T state (4HHB) | One αβ dimer fits within 1.1–1.5 Å, the other is rotated (2.7–4.5 Å) |
+| SUMO-1 (1A5R) onto ubiquitin (1UBQ), structure-only | 71 pairs at 2.36 Å, TM-score 0.654, as US-align gives; sequence pairing reaches 0.625 |
 
 ## Predicted Complexes
 
@@ -678,6 +760,38 @@ cis-proline, pre-proline, Ile/Val) and classifies every residue with
 MolProbity's criteria. That works for predicted models and local files too;
 with a report loaded, the report's classes are shown.
 
+## Density Maps
+
+![Erlotinib in EGFR (1M17) in its 2Fo-Fc electron density from the PDBe volume server, contoured at 1.0σ within 2 Å of the ligand, with the hinge hydrogen bond to Met769](docs/images/density-map.jpg)
+
+**Load map** (Analysis tab, or `map load`) shows the experimental density of
+the active PDB entry:
+
+- **X-ray entries** get the 2Fo-Fc map (blue, 1.5σ) and the Fo-Fc difference
+  map (green and red, ±3σ), from the PDBe volume server.
+- **Cryo-EM entries** get their EMDB map at EMDB's recommended contour level.
+- **Map files.** **Open a map file…** reads a CCP4 or MRC map on your
+  computer, for a model you are building or refining.
+
+The map is drawn **around the focus** (or the selection), **following the
+view** as you move, or **whole**, as a mesh or a transparent surface. For an
+X-ray entry, "whole" is the box around the model, since a crystal's unit cell
+need not contain it. Each channel has its own level in σ. **Near atoms** trims
+the map to within 1.6–3 Å of the focused atoms, for figures. The server sends
+a region at the finest sampling that fits the request, so a small region is
+sharper than the whole map. A downsampled view says so and keeps its level in
+σ.
+
+**Map fit** samples the full-resolution map at every atom (the server sends
+it in tiles):
+
+- Atom inclusion at the contour, as EMDB's validation reports it.
+- Per residue, the mean density in σ and the fraction of atoms inside.
+
+Color by **Fit to the loaded map**, plot it in the profile, or select poorly
+fitting residues with `mapfit < 1`. For 8GUB in EMD-34272, the atom inclusion
+is 0.8935 (EMDB reports 0.896).
+
 ## Analysis Tab
 
 ![AlphaFold DB model of p53 (P04637) colored by pLDDT, with the per-residue confidence profile and the predicted aligned error matrix](docs/images/alphafold-pae.jpg)
@@ -707,8 +821,25 @@ with a report loaded, the report's classes are shown.
   category to see its own contours. Glycine and proline are marked. Click a
   point to select the residue.
 - **Per-residue profile.** B-factor or pLDDT, relative SASA, pPSE,
-  hydrophobicity (9-residue window), AlphaMissense, MSA depth, fit to density
-  or custom data along the sequence. Click to select.
+  hydrophobicity (9-residue window), AlphaMissense, MSA depth, conservation,
+  fit to density or to a loaded map, or custom data along the sequence.
+  Click to select.
+- **Conservation.** **Compute conservation** scores each residue from a
+  multiple sequence alignment:
+  - The alignment can be the MSA of an opened prediction, or an alignment
+    file whose first sequence is the protein (A3M, aligned FASTA, Stockholm
+    or Clustal).
+  - The score is the Jensen–Shannon divergence of Capra and Singh (2007),
+    with sequence weighting, a gap penalty and a 3-residue window, or Shannon
+    entropy.
+  - Residues are colored in ConSurf's nine grades, from variable (turquoise)
+    to conserved (maroon), and graded by the protein's own score
+    distribution.
+  - Select with `conservation > 0.6` or `grade >= 8`.
+
+  For p53 on DNA (1TUP), with a UniRef90 alignment of the DNA-binding
+  domain, the most conserved residues are the zinc ligands C176, H179, C238
+  and C242, followed by S241, R175, and R248 and R273, which contact the DNA.
 - **Predicted aligned error.** The PAE heatmap for AlphaFold models and
   predictions. Drag a rectangle to select the residues of both ranges in 3D.
   - **Contact probability** switches the heatmap to AlphaFold 3's contact
@@ -721,6 +852,8 @@ with a report loaded, the report's classes are shown.
     models, prediction folders, or a dropped `.a3m`).
 
 ![The AlphaFold DB model of p53 (P04637) split into rigid domains from its PAE: the DNA-binding domain, the N-terminal transactivation region and the C-terminal region with the tetramerization helix](docs/images/pae-domains.jpg)
+
+![p53 bound to DNA (1TUP) colored by conservation from a UniRef90 alignment of the DNA-binding domain (1,384 sequences), in ConSurf's nine grades from variable (turquoise) to conserved (maroon)](docs/images/conservation.jpg)
 
 ## Proteomics Tab
 
@@ -754,6 +887,27 @@ Everything in this tab runs in the browser. Your data is never uploaded.
     part-sphere exposure and whether it lies in a disordered region; with
     public evidence loaded, it also says whether the site is already known.
     Click a site to focus it; export the table as CSV.
+  - **Differential statistics.** With two sample groups chosen, **Test B vs
+    A** runs a moderated t-test on every feature of the whole report, all
+    proteins included. The prior of limma's empirical Bayes needs many
+    features.
+    - Log2 intensities, with median normalization (optional) and a minimum
+      number of values per group.
+    - Optional imputation of missing values from a down-shifted normal
+      distribution, as Perseus does.
+    - Benjamini–Hochberg q-values.
+    - For PTM sites, the protein's change (the median of its unmodified
+      peptides) is subtracted, with Welch–Satterthwaite degrees of freedom,
+      as MSstatsPTM does.
+
+    A volcano plot shows the result; click a site's point to focus it. Sites
+    are colored by fold change only when significant. The sites CSV gains
+    each site's fold change, p, q and degrees of freedom, and for adjusted
+    sites the protein's change. The results match limma and MSstatsPTM on
+    the same data.
+
+![Ubiquitination after the PROTAC MZ1 on BRD4 (5T35), from the DIA-NN report of the MSstatsPTM example data: a moderated t-test of 38 GlyGly peptides with imputation, the volcano plot, and the significant sites K431 and K445 labeled on the structure](docs/images/differential-statistics.jpg)
+
 - **Public evidence.** **Load public peptides and PTMs** fetches the peptides
   observed for the structure's proteins in PeptideAtlas, ProteomicsDB and
   other resources, and the modification sites from reprocessed PRIDE datasets
@@ -848,7 +1002,8 @@ screen:
 - **Copy** puts the image on the clipboard.
 - **Spin video** records one full rotation as WebM.
 
-Interaction tables export as CSV.
+Interaction tables, docking scores and fingerprints, and sites with their
+statistics export as CSV.
 
 ## Sessions and Sharing
 
@@ -865,6 +1020,8 @@ Interaction tables export as CSV.
     steps), prediction scores, and MSA depth. Solvent accessibility, PAE
     domains, validation reports and AlphaMissense are recomputed or fetched
     again when the session opens; AlphaFold DB PAE matrices are fetched again.
+  - Docking poses (the files, embedded) and the density map's settings. Maps
+    from the server are fetched again; map files must be opened again.
 
   Open a session like any file, or drop it on the window.
 - **Copy link** (or `link`) puts the whole session in the URL
@@ -877,6 +1034,24 @@ Interaction tables export as CSV.
   colors, sticks, surfaces, labels, superposition transforms, the camera and
   the background; Proteoscope's lighting effects are not part of the format.
   Drop the file onto the Mol* viewer to open it.
+
+## Methods and Citation
+
+**Methods** (Structure tab, next to **Save session**) drafts a methods
+paragraph from what the session used:
+
+- each structure's source with its ID, experimental method, resolution and
+  revision date, or the model's database version;
+- each analysis with its method and parameters: superposition, interactions,
+  surfaces, density fit, conservation, statistics and others;
+- the Proteoscope version.
+
+Citations are numbered, with DOIs checked against Crossref. **Copy
+references** or **Download BibTeX** takes them to your manuscript. Check the
+text against what you did before using it.
+
+To cite Proteoscope itself, use [CITATION.cff](CITATION.cff) (GitHub offers
+it under *Cite this repository*).
 
 ## Biological Assemblies and Ensembles
 
@@ -913,6 +1088,8 @@ Interaction tables export as CSV.
   - `_refine`, `_reflns` and `_em_3d_reconstruction` for resolution and
     R-factors, plus the organism and deposition-date categories.
   - ModelCIF `_ma_qa_metric_local` for per-residue pLDDT.
+  - `_chem_comp_atom` and `_chem_comp_bond` for ligand bond orders,
+    aromaticity and charges.
 - **BinaryCIF** (`.bcif`, as served by RCSB's and PDBe's model servers) is
   decoded in the browser and read like PDBx/mmCIF.
 - **Predicted models** are recognized from ModelCIF records, the method and
@@ -929,7 +1106,12 @@ Interaction tables export as CSV.
 - **Alternate conformers.** The highest-occupancy conformer is kept.
 - **Bonds** come from explicit records plus geometry, using element covalent
   radii. The geometric step also finds inter-chain disulfides and metal
-  coordination.
+  coordination. Bond orders come from the Chemical Component Dictionary, and
+  from duplicated `CONECT` records in PDB files.
+- **Ligand files.** SDF and molfiles (V2000 and V3000), MOL2 and PDBQT, for
+  docking poses.
+- **Maps.** CCP4 and MRC 2014 (modes 0, 1, 2, 6 and 12; any axis order;
+  either byte order), and the PDBe volume server's BinaryCIF.
 
 ## Command-Line Options
 
@@ -1042,7 +1224,15 @@ GOOS=windows GOARCH=amd64 go build -o dist/proteoscope-windows-amd64.exe .
 ```sh
 go test ./...
 node --test "web/lib/*.test.mjs"
+node validation/run.mjs
 ```
+
+The last command compares Proteoscope's analyses with numbers from their
+reference tools (limma, MSstatsPTM, US-align, Capra and Singh's scorer, EMDB
+and MolProbity); see [validation/README.md](validation/README.md). GitHub
+Actions run gofmt, `go vet`, the Go tests with the race detector, the
+JavaScript tests, the offline validation suites and the cross-compilation on
+every push, and the whole validation suite weekly.
 
 ### Code Layout
 
@@ -1052,6 +1242,7 @@ node --test "web/lib/*.test.mjs"
 | `examples.go` | Bundled examples: the manifest, gzipped files served as they are |
 | `search.go`, `evidence.go` | Structure and model search (RCSB, UniProt, PDBe, 3D-Beacons), model downloads, public proteomics evidence |
 | `validation.go` | wwPDB validation reports, reduced from XML to per-residue JSON |
+| `ligands.go`, `maps.go` | Chemical Component Dictionary entries; density maps from the PDBe volume server (RCSB's copy as a fallback) and EMDB metadata |
 | `web/app.js` | Application state, UI wiring, render loop, analysis and proteomics panels |
 | `web/lib/parse.js`, `web/lib/bcif.js` | PDB, PDBx/mmCIF and BinaryCIF parsing, assemblies |
 | `web/lib/predictions.js`, `web/lib/interface-scores.js` | Prediction folders (AlphaFold 3, Boltz, Chai-1, ColabFold, Protenix, OpenFold3), tokens, ipSAE, pDockQ, pDockQ2, LIS |
@@ -1074,6 +1265,14 @@ node --test "web/lib/*.test.mjs"
 | `web/lib/camera.js`, `web/lib/math3d.js` | Trackball camera and math |
 | `web/lib/surface.js`, `web/lib/surface-worker.js`, `web/lib/electrostatics.js` | Surfaces, SASA, Coulombic potential |
 | `web/lib/interactions.js` | Non-covalent interaction detection |
+| `web/lib/chemistry.js`, `web/lib/molfile.js` | Ligand chemistry from the CCD (bond orders, aromaticity, charges, hydrogens); SDF, MOL2 and PDBQT docking poses |
+| `web/lib/volume.js`, `web/lib/volume-worker.js` | CCP4/MRC and volume-server maps, isosurfaces, map fit |
+| `web/lib/tmalign.js` | TM-align and MM-align, ported from US-align |
+| `web/lib/stats.js` | Moderated t-test, normalization, imputation, q-values, PTM adjustment |
+| `web/lib/conservation.js` | Alignment parsing and conservation scores |
+| `web/lib/provenance.js` | Methods paragraph, references and BibTeX |
+| `validation/` | Validation against reference tools (their numbers, not the tools) |
+| `.github/workflows/` | Continuous integration and the weekly validation run |
 | `web/lib/proteomics.js` | Sequence properties, peptide, site and cross-link parsing, digestion |
 | `web/lib/sequence-view.js`, `web/lib/plots.js` | Sequence panel, Ramachandran, profile and PAE plots |
 | `web/lib/residues.js`, `web/lib/elements.js`, `web/lib/colors.js` | Shared chemistry and color tables |
@@ -1108,8 +1307,9 @@ printed in the terminal.
 ### My downloaded file does not load
 
 Use a coordinate file ending in `.pdb`, `.ent`, `.cif`, `.mmcif` or `.bcif`,
-optionally compressed with gzip or Zstandard. Validation reports, sequence
-files and PDFs are not coordinate files. For a prediction, open the whole output folder (or the
+optionally compressed with gzip or Zstandard. Validation reports and PDFs are
+not coordinate files. Docking poses, maps and alignments open into the active
+structure, so open the receptor or model first. For a prediction, open the whole output folder (or the
 AlphaFold Server `.zip`) so the confidence files come along.
 
 ## License
@@ -1130,8 +1330,11 @@ for the full license text.
   Varadi et al., *Nucleic Acids Research* 2024). Each example's citation is in
   `data/examples.json`.
 - Searches use RCSB PDB, UniProt, PDBe and 3D-Beacons (Varadi et al.,
-  *Protein Science* 2022); models downloaded from a 3D-Beacons provider carry
+  *GigaScience* 2022); models downloaded from a 3D-Beacons provider carry
   that provider's terms.
+- Ligand chemistry comes from the wwPDB Chemical Component Dictionary
+  (Westbrook et al., *Bioinformatics* 2015; CC0). Density maps come from the
+  PDB and EMDB archives (CC0) through the PDBe volume server.
 - Public proteomics evidence comes from the EBI Proteins API (Nightingale et
   al., *Nucleic Acids Research* 2017), which collects PeptideAtlas,
   ProteomicsDB, PRIDE and PTMeXchange data.
@@ -1139,4 +1342,12 @@ for the full license text.
   disorder from StructureMap (Bludau et al., *PLOS Biology* 2022), surface
   distances after Jwalk (Bullock et al., *Molecular & Cellular Proteomics*
   2016), the HDX-MS hybrid significance test (Hageman & Weis,
-  *Analytical Chemistry* 2019), and ipSAE (Dunbrack, bioRxiv 2025).
+  *Analytical Chemistry* 2019), ipSAE (Dunbrack, bioRxiv 2025), TM-align and
+  MM-align as in US-align (Zhang & Skolnick, *Nucleic Acids Research* 2005;
+  Mukherjee & Zhang, *Nucleic Acids Research* 2009; Zhang et al., *Nature
+  Methods* 2022), limma's moderated t-test (Smyth, *Statistical Applications
+  in Genetics and Molecular Biology* 2004), MSstatsPTM (Kohler et al.,
+  *Molecular & Cellular Proteomics* 2023), conservation scores (Capra &
+  Singh, *Bioinformatics* 2007) in ConSurf's colors (Ashkenazy et al.,
+  *Nucleic Acids Research* 2016), and Surface Nets (Gibson, MICCAI 1998).
+  Full references are in the **Methods** dialog.

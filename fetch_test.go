@@ -48,7 +48,7 @@ func fetchApp(base, cacheDir string, offline bool) *app {
 	a := &app{
 		offline: offline,
 		remote: &upstream{client: newUpstreamClient(), rcsb: base, rcsbSearch: base, rcsbData: base, afdb: base, uniprot: base, ebi: base,
-			modelHosts: []string{base}, maxBytes: maxDownloadBytes},
+			rcsbMaps: base, modelHosts: []string{base}, maxBytes: maxDownloadBytes},
 	}
 	if cacheDir != "" {
 		a.cache = &diskCache{dir: cacheDir}
@@ -472,5 +472,26 @@ func TestFetchRefusesCrossHostRedirects(t *testing.T) {
 	rec := get(testHandler(t, fetchApp(remote.URL, "", false)), "/api/fetch/pdb/1ABC")
 	if rec.Code != http.StatusBadGateway || !strings.Contains(errorMessage(t, rec), "refusing redirect") {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAlphaFoldMSAForbidden(t *testing.T) {
+	var remote *fakeRemote
+	remote = newFakeRemote(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/prediction/P04637":
+			entry := alphaFoldTestEntry(remote.URL, "AF-P04637-F1")
+			entry["msaUrl"] = remote.URL + "/files/msa/AF-P04637-F1-msa_v6.a3m"
+			writeTestJSON(w, []any{entry})
+		case "/files/msa/AF-P04637-F1-msa_v6.a3m":
+			http.Error(w, "403 Forbidden", http.StatusForbidden)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	h := testHandler(t, fetchApp(remote.URL, t.TempDir(), false))
+	rec := get(h, "/api/fetch/afdb/P04637/msa")
+	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "refuses to send the MSA of P04637") {
+		t.Fatalf("status %d body %q", rec.Code, rec.Body.String())
 	}
 }

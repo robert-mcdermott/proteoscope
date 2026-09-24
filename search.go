@@ -899,7 +899,7 @@ func (u *upstream) send(ctx context.Context, method, source string, body []byte,
 	}
 	data, err := readLimited(reader, u.maxBytes)
 	if errors.Is(err, errTooLarge) {
-		return nil, resp.StatusCode, u.tooLarge(service)
+		return nil, resp.StatusCode, tooLarge(service, u.maxBytes)
 	}
 	if err != nil {
 		return nil, resp.StatusCode, upstreamFailure(service, err)

@@ -441,3 +441,85 @@ function wrapAngle(value) {
 function formatTick(value) {
   return Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(1);
 }
+
+// Volcano plot: log2 fold change against −log10 p for every tested feature (gray), the
+// structure's own features drawn larger (red up, blue down when significant); dashed lines at the
+// fold-change limit and at the p-value that corresponds to the q-value limit. Returns the screen
+// positions of the highlighted points for hit-testing.
+export function drawVolcano(canvas, points, options = {}) {
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  const left = width * 0.1;
+  const right = width * 0.03;
+  const top = height * 0.08;
+  const bottom = height * 0.16;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  ctx.clearRect(0, 0, width, height);
+  const finite = points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  if (!finite.length) return [];
+  // Loops rather than Math.max(...points): reports can have hundreds of thousands of features.
+  let span = 1.5;
+  let ceiling = 2;
+  for (const point of finite) {
+    span = Math.max(span, Math.abs(point.x));
+    ceiling = Math.max(ceiling, point.y);
+  }
+  span *= 1.05;
+  ceiling *= 1.05;
+  const sx = (x) => left + ((x + span) / (2 * span)) * plotWidth;
+  const sy = (y) => top + plotHeight - (Math.min(y, ceiling) / ceiling) * plotHeight;
+  const dot = Math.max(1.2, width / 420);
+  ctx.fillStyle = 'rgba(248,245,238,0.22)';
+  for (const point of finite) {
+    if (point.highlight) continue;
+    ctx.fillRect(sx(point.x) - dot / 2, sy(point.y) - dot / 2, dot, dot);
+  }
+  ctx.strokeStyle = 'rgba(255,209,102,0.7)';
+  ctx.setLineDash([4, 3]);
+  ctx.lineWidth = 1;
+  const fold = options.foldChange ?? 1;
+  for (const x of [-fold, fold]) {
+    ctx.beginPath();
+    ctx.moveTo(sx(x), top);
+    ctx.lineTo(sx(x), top + plotHeight);
+    ctx.stroke();
+  }
+  if (Number.isFinite(options.pLimit) && options.pLimit > 0) {
+    const y = sy(-Math.log10(options.pLimit));
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(left + plotWidth, y);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  const hits = [];
+  for (const point of finite) {
+    if (!point.highlight) continue;
+    const x = sx(point.x);
+    const y = sy(point.y);
+    ctx.fillStyle = point.significant ? (point.x > 0 ? '#ff6b6b' : '#4cc9f0') : 'rgba(248,245,238,0.75)';
+    ctx.beginPath();
+    ctx.arc(x, y, dot * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    hits.push({ x, y, point });
+  }
+  ctx.strokeStyle = 'rgba(248,245,238,0.25)';
+  ctx.strokeRect(left + 0.5, top + 0.5, plotWidth - 1, plotHeight - 1);
+  ctx.fillStyle = 'rgba(248,245,238,0.6)';
+  ctx.font = `${Math.round(height * 0.055)}px ui-sans-serif, system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  for (const value of [-Math.floor(span), 0, Math.floor(span)]) ctx.fillText(String(value), sx(value), height - bottom * 0.45);
+  ctx.fillText(options.xLabel ?? 'log2 fold change (B / A)', left + plotWidth / 2, height - bottom * 0.05);
+  ctx.textAlign = 'right';
+  ctx.fillText(String(Math.floor(ceiling)), left - 4, top + 8);
+  ctx.fillText('0', left - 4, top + plotHeight);
+  ctx.save();
+  ctx.translate(left * 0.35, top + plotHeight / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center';
+  ctx.fillText('−log10 p', 0, 0);
+  ctx.restore();
+  return hits;
+}

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createZip, isZip, listZip, readZip } from './zip.js';
 import { readNpy, readNpz, squareMatrix, writeNpy } from './npy.js';
 import { binaryCIFToText, decodeData, decodeMessagePack, isBinaryCIF } from './bcif.js';
+import { packMessagePack as pack } from './test-data.mjs';
 import { detectStructureFormat, parseStructure } from './parse.js';
 import { combineDepth, depthSummary, msaDepth } from './msa.js';
 import { greedyModularity, paeDomains } from './pae-domains.js';
@@ -74,64 +75,6 @@ test('NumPy arrays and archives decode, including float16 and Fortran order', as
   assert.equal(squareMatrix({ shape: [1, 2, 2], data: pae }).matrix[2], 12);
   assert.equal(squareMatrix({ shape: [3], data: pae }), null);
 });
-
-// Minimal MessagePack encoder for building BinaryCIF test files.
-function pack(value) {
-  const parts = [];
-  const push = (...bytes) => parts.push(Uint8Array.from(bytes));
-  const encode = (item) => {
-    if (item === null) return push(0xc0);
-    if (item instanceof Uint8Array) {
-      push(0xc6, (item.length >>> 24) & 255, (item.length >>> 16) & 255, (item.length >>> 8) & 255, item.length & 255);
-      parts.push(item);
-      return undefined;
-    }
-    if (typeof item === 'number') {
-      if (Number.isInteger(item) && item >= 0 && item < 128) return push(item);
-      if (Number.isInteger(item) && item < 0 && item >= -32) return push(item & 0xff);
-      if (Number.isInteger(item) && Math.abs(item) < 2 ** 31) {
-        const bytes = new Uint8Array(5);
-        bytes[0] = 0xd2;
-        new DataView(bytes.buffer).setInt32(1, item);
-        parts.push(bytes);
-        return undefined;
-      }
-      const bytes = new Uint8Array(9);
-      bytes[0] = 0xcb;
-      new DataView(bytes.buffer).setFloat64(1, item);
-      parts.push(bytes);
-      return undefined;
-    }
-    if (typeof item === 'boolean') return push(item ? 0xc3 : 0xc2);
-    if (typeof item === 'string') {
-      const bytes = new TextEncoder().encode(item);
-      push(0xdb, (bytes.length >>> 24) & 255, (bytes.length >>> 16) & 255, (bytes.length >>> 8) & 255, bytes.length & 255);
-      parts.push(bytes);
-      return undefined;
-    }
-    if (Array.isArray(item)) {
-      push(0xdd, (item.length >>> 24) & 255, (item.length >>> 16) & 255, (item.length >>> 8) & 255, item.length & 255);
-      for (const element of item) encode(element);
-      return undefined;
-    }
-    const keys = Object.keys(item);
-    push(0xdf, (keys.length >>> 24) & 255, (keys.length >>> 16) & 255, (keys.length >>> 8) & 255, keys.length & 255);
-    for (const key of keys) {
-      encode(key);
-      encode(item[key]);
-    }
-    return undefined;
-  };
-  encode(value);
-  const size = parts.reduce((sum, part) => sum + part.length, 0);
-  const out = new Uint8Array(size);
-  let offset = 0;
-  for (const part of parts) {
-    out.set(part, offset);
-    offset += part.length;
-  }
-  return out;
-}
 
 const bytesOf = (typed) => new Uint8Array(typed.buffer.slice(0));
 const int32Column = (name, values) => ({ name, data: { encoding: [{ kind: 'ByteArray', type: 3 }], data: bytesOf(Int32Array.from(values)) }, mask: null });

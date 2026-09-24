@@ -1264,6 +1264,15 @@ button:disabled {
   color: var(--text);
 }
 
+.folder-button:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.report-sites .q {
+  white-space: nowrap;
+}
+
 .folder-button input {
   position: absolute;
   opacity: 0;
@@ -2589,4 +2598,117 @@ button:disabled {
     grid-template-columns: minmax(0, 1fr);
     gap: 1px;
   }
+}
+
+/* Docking poses: interaction fingerprint (poses × residues). */
+.fingerprint-box {
+  overflow-x: auto;
+}
+
+.fingerprint {
+  border-collapse: separate;
+  border-spacing: 1px;
+  font-size: 10px;
+}
+
+.fingerprint th {
+  font-weight: 500;
+  color: var(--text-dim);
+  padding: 0 2px;
+}
+
+.fingerprint thead th {
+  height: 44px;
+  vertical-align: bottom;
+}
+
+.fingerprint thead th span {
+  display: inline-block;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  white-space: nowrap;
+}
+
+.fingerprint td {
+  width: 10px;
+  height: 10px;
+  min-width: 10px;
+  background: var(--line);
+  border-radius: 2px;
+}
+
+.fingerprint tbody tr {
+  cursor: pointer;
+}
+
+.fingerprint tbody tr.is-active th {
+  color: var(--accent);
+}
+
+.prediction-table th.sortable {
+  cursor: pointer;
+}
+
+.prediction-table th.is-sorted {
+  color: var(--accent);
+}
+
+/* Density maps: one row per channel (visibility, contour level). */
+.map-channels {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.map-channel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.map-channel .check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.map-channel .swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.map-channel output {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Methods and references dialog. */
+.methods-text {
+  width: 100%;
+  font: 13px/1.5 ui-sans-serif, system-ui, sans-serif;
+  color: var(--text);
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  resize: vertical;
+}
+
+.methods-references {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0 0 12px;
+  padding-left: 22px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.methods-references li {
+  margin-bottom: 4px;
 }

@@ -9,6 +9,10 @@ import { transformPoint } from './superpose.js';
 
 export const DATA_DIR = new URL('../../data/', import.meta.url);
 
+// Wall-clock limits in performance tests are multiplied by PROTEOSCOPE_TIME_SCALE (for example 5 on
+// shared CI runners, which are several times slower than a developer's machine).
+export const TIME_SCALE = Math.max(1, Number(process.env.PROTEOSCOPE_TIME_SCALE) || 1);
+
 export function exampleFiles() {
   return readdirSync(DATA_DIR).filter((name) => /\.(pdb|cif)(\.gz)?$/i.test(name)).sort();
 }
@@ -165,4 +169,62 @@ export function editCIF(text, { transform = null, chains = null, renumber = 0, o
     output.push(line);
   }
   return output.join('\n');
+}
+
+// Minimal MessagePack encoder for building BinaryCIF test files.
+export function packMessagePack(value) {
+  const parts = [];
+  const push = (...bytes) => parts.push(Uint8Array.from(bytes));
+  const encode = (item) => {
+    if (item === null) return push(0xc0);
+    if (item instanceof Uint8Array) {
+      push(0xc6, (item.length >>> 24) & 255, (item.length >>> 16) & 255, (item.length >>> 8) & 255, item.length & 255);
+      parts.push(item);
+      return undefined;
+    }
+    if (typeof item === 'number') {
+      if (Number.isInteger(item) && item >= 0 && item < 128) return push(item);
+      if (Number.isInteger(item) && item < 0 && item >= -32) return push(item & 0xff);
+      if (Number.isInteger(item) && Math.abs(item) < 2 ** 31) {
+        const bytes = new Uint8Array(5);
+        bytes[0] = 0xd2;
+        new DataView(bytes.buffer).setInt32(1, item);
+        parts.push(bytes);
+        return undefined;
+      }
+      const bytes = new Uint8Array(9);
+      bytes[0] = 0xcb;
+      new DataView(bytes.buffer).setFloat64(1, item);
+      parts.push(bytes);
+      return undefined;
+    }
+    if (typeof item === 'boolean') return push(item ? 0xc3 : 0xc2);
+    if (typeof item === 'string') {
+      const bytes = new TextEncoder().encode(item);
+      push(0xdb, (bytes.length >>> 24) & 255, (bytes.length >>> 16) & 255, (bytes.length >>> 8) & 255, bytes.length & 255);
+      parts.push(bytes);
+      return undefined;
+    }
+    if (Array.isArray(item)) {
+      push(0xdd, (item.length >>> 24) & 255, (item.length >>> 16) & 255, (item.length >>> 8) & 255, item.length & 255);
+      for (const element of item) encode(element);
+      return undefined;
+    }
+    const keys = Object.keys(item);
+    push(0xdf, (keys.length >>> 24) & 255, (keys.length >>> 16) & 255, (keys.length >>> 8) & 255, keys.length & 255);
+    for (const key of keys) {
+      encode(key);
+      encode(item[key]);
+    }
+    return undefined;
+  };
+  encode(value);
+  const size = parts.reduce((sum, part) => sum + part.length, 0);
+  const out = new Uint8Array(size);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
 }

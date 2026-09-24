@@ -10,7 +10,10 @@ export function createCanvasRenderer(canvas) {
     cylinders: null,
     cylinderCount: 0,
     shapes: [],
+    lines: new Map(),
   };
+  // Map meshes can have hundreds of thousands of segments; the 2D fallback draws a subset.
+  const MAX_CANVAS_SEGMENTS = 40000;
   let lastView = null;
   let projected = [];
 
@@ -83,6 +86,17 @@ export function createCanvasRenderer(canvas) {
       if (!a || !b || clipped(view, (a.depth + b.depth) / 2, settings)) continue;
       items.push({ kind: 'line', depth: (a.depth + b.depth) / 2, a, b, radius: shape.width, color: atomColor(shape.atom) });
     }
+    for (const lines of scene.lines.values()) {
+      const count = lines.segments.length / 6;
+      const step = Math.max(1, Math.ceil(count / MAX_CANVAS_SEGMENTS));
+      for (let index = 0; index < count; index += step) {
+        const offset = index * 6;
+        const a = project(view, [lines.segments[offset], lines.segments[offset + 1], lines.segments[offset + 2]]);
+        const b = project(view, [lines.segments[offset + 3], lines.segments[offset + 4], lines.segments[offset + 5]]);
+        if (!a || !b || clipped(view, (a.depth + b.depth) / 2, settings)) continue;
+        items.push({ kind: 'segment', depth: (a.depth + b.depth) / 2, a, b, width: lines.width ?? 1, color: lines.color ?? [1, 1, 1], opacity: lines.opacity ?? 1 });
+      }
+    }
     if (scene.cylinders) {
       const { floats, uints } = scene.cylinders;
       for (let index = 0; index < scene.cylinderCount; index += 1) {
@@ -128,7 +142,17 @@ export function createCanvasRenderer(canvas) {
       const fade = ((item.depth - nearest) / span) * fogStrength * 0.8;
       item.color = mix(item.color, backgroundColor, fade);
       if (item.colorB) item.colorB = mix(item.colorB, backgroundColor, fade);
-      if (item.kind === 'line') {
+      if (item.kind === 'segment') {
+        ctx.lineWidth = item.width * (settings.lineScale ?? settings.pixelRatio ?? 1);
+        ctx.setLineDash([]);
+        ctx.globalAlpha = item.opacity;
+        ctx.strokeStyle = css(item.color);
+        ctx.beginPath();
+        ctx.moveTo(item.a.x, item.a.y);
+        ctx.lineTo(item.b.x, item.b.y);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      } else if (item.kind === 'line') {
         const widthPx = Math.max(1, item.radius * 2 * item.a.scale);
         ctx.lineWidth = widthPx;
         ctx.setLineDash(item.dashed ? [widthPx * 1.5, widthPx * 1.5] : []);
@@ -209,6 +233,14 @@ export function createCanvasRenderer(canvas) {
     setMeshAtomOffset() {},
     meshIds() {
       return [];
+    },
+    setLines(id, lines) {
+      if (lines?.segments?.length) scene.lines.set(id, { ...lines });
+      else scene.lines.delete(id);
+    },
+    setLineStyle(id, style) {
+      const lines = scene.lines.get(id);
+      if (lines) Object.assign(lines, style);
     },
     setCanvasShapes,
     render,

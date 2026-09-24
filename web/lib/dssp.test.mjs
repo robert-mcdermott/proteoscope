@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { DSSP_CARTOON, assignDSSP, dsspSummary } from './dssp.js';
 import { residueKindFromName } from './residues.js';
-import { exampleFiles, examplePDB } from './test-data.mjs';
+import { TIME_SCALE, exampleFiles, examplePDB } from './test-data.mjs';
 
 const ALPHA = [-57, -47];
 const BACKBONE_NAMES = new Set(['N', 'CA', 'C', 'O']);
@@ -95,7 +95,7 @@ test('performance on the largest bundled structure and a tiled 10,000-residue as
   const timing = timeAssignment(tiled);
   t.diagnostic(`tiled ${largest.name}: ${countProtein(tiled)} protein residues, first run ${timing.first.toFixed(1)} ms, best ${timing.best.toFixed(1)} ms`);
   assert.ok(countProtein(tiled) >= 10000);
-  assert.ok(timing.best < 150, `10k residues took ${timing.best} ms`);
+  assert.ok(timing.best < 150 * TIME_SCALE, `10k residues took ${timing.best} ms`);
 });
 
 function repeat(code, count) {

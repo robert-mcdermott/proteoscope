@@ -16,6 +16,17 @@ export function decodeBinaryCIF(bytes) {
   const file = decodeMessagePack(bytes);
   const block = file?.dataBlocks?.[0];
   if (!block) throw new Error('This BinaryCIF file has no data blocks.');
+  return { ...decodeBlock(block), encoder: file.encoder ?? '', version: file.version ?? '' };
+}
+
+// Every data block, for files with several (the volume server sends one per map channel).
+export function decodeBinaryCIFBlocks(bytes) {
+  const file = decodeMessagePack(bytes);
+  if (!file?.dataBlocks?.length) throw new Error('This BinaryCIF file has no data blocks.');
+  return file.dataBlocks.map(decodeBlock);
+}
+
+function decodeBlock(block) {
   const categories = [];
   for (const category of block.categories ?? []) {
     const columns = [];
@@ -26,7 +37,7 @@ export function decodeBinaryCIF(bytes) {
     }
     categories.push({ name: String(category.name).replace(/^_/, ''), rowCount: category.rowCount, columns });
   }
-  return { header: block.header ?? '', categories, encoder: file.encoder ?? '', version: file.version ?? '' };
+  return { header: block.header ?? '', categories };
 }
 
 export function binaryCIFToText(bytes) {

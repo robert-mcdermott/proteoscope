@@ -64,6 +64,9 @@ const NUMERIC_KEYWORDS = {
   am: 'am', missense: 'am', alphamissense: 'am',
   msa: 'msa', depth: 'msa',
   ppse: 'ppse', pse: 'ppse',
+  conservation: 'conservation', cons: 'conservation',
+  grade: 'grade',
+  mapfit: 'mapfit',
 };
 
 const DISTANCE_KEYWORDS = { within: 'within', around: 'around', beyond: 'beyond' };
@@ -311,7 +314,7 @@ function parseSpec(token) {
 
 // targets: [{ id, index (1-based), name, model, structure, context }] where context may hold
 //   selected, focus, sites, covered, aligned, outliers, idr: Set of residue keys
-//   values: { deviation, lddt, rmsf, rsa, rsrz, rscc, qscore, am, msa, ppse }: Map of residue key → number
+//   values: { deviation, lddt, rmsf, rsa, rsrz, rscc, qscore, am, msa, ppse, conservation, grade, mapfit }: Map of residue key → number
 //   uniprot(residue): UniProt position or null
 // Returns Map(target id → Uint8Array atom mask over target.model.atoms).
 export function evaluateSelection(ast, targets) {

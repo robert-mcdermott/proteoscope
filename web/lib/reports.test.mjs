@@ -4,6 +4,8 @@ import test from 'node:test';
 import {
   accessionOf,
   braceProbabilities,
+  createFeatureCollector,
+  peptideFeatureKey,
   bracketProbabilities,
   detectReport,
   modificationLabel,
@@ -209,4 +211,50 @@ test('DIA-NN precursor matrices, Spectronaut fragment rows and single-experiment
   ), 'Phospho (STY)Sites.txt'), { accessions: ['P04637'] });
   const [site] = summarizeReport(sites, { qValue: 0.01, localization: 0.75 }).sites;
   assert.equal(quantValue(site, 'intensity'), Math.log10(5000), 'the total intensity stands for the one experiment');
+});
+
+test('statistics read every protein of a report as features: modified peptides and sites', async () => {
+  assert.equal(peptideFeatureKey('PEPSTIDEK', [{ position: 4, label: 'Phospho', probability: 0.99 }, { position: 1, label: 'Oxidation', probability: NaN }]), 'pep|PEPSTIDEK|1Oxidation,4Phospho');
+  assert.equal(peptideFeatureKey('PEPSTIDEK', [{ position: 4, label: 'Phospho', probability: 0.4 }, { position: 0, label: 'Carbamidomethyl' }]), 'pep|PEPSTIDEK|?Phospho', 'unlocalized modifications lose their position; fixed ones are left out');
+
+  const collector = createFeatureCollector({ qValue: 0.01, localization: 0.75 });
+  collector.add({ sequence: 'AAAK', mods: [], sample: 'r1', quantity: 100, q: 0.001 }, 'diann');
+  collector.add({ sequence: 'AAAK', mods: [], sample: 'r1', quantity: 50, q: 0.001 }, 'diann');
+  collector.add({ sequence: 'AAAK', mods: [], sample: 'r2', quantity: 80, q: 0.001 }, 'diann');
+  collector.add({ sequence: 'AAAK', mods: [], sample: 'r2', quantity: 70, q: 0.2 }, 'diann');
+  collector.add({ sequence: 'BBBK', mods: [], sample: 'r2', quantity: 5, q: 0.001, decoy: true }, 'diann');
+  collector.add({ site: true, protein: 'P1', position: 15, label: 'Phospho', probability: 0.9, quantities: { r1: 10, r2: 0, r3: 12 } }, 'maxquant-sites');
+  const features = collector.finish();
+  assert.deepEqual(features.keys, ['pep|AAAK|', 'site|P1|15|Phospho']);
+  assert.deepEqual(features.samples, ['r1', 'r2', 'r3']);
+  assert.deepEqual([...features.values], [150, 80, NaN, 10, NaN, 12], 'charge states sum per sample; failed q-values, decoys and zeros drop out');
+
+  // Localization is judged per feature, since engines report it per run: a peptidoform localized
+  // in some runs stays one feature; peptidoforms never localized merge; a site table's site
+  // whose best probability is below the threshold is left out.
+  const perRun = createFeatureCollector({ qValue: 0.01, localization: 0.75 });
+  for (const [sample, probability] of [['a1', 0.6], ['a2', 0.7], ['b1', 0.95], ['b2', 0.99]]) {
+    perRun.add({ sequence: 'PEPSIDEK', proteins: ['P1'], mods: [{ position: 3, label: 'Phospho', probability }], sample, quantity: 100, q: 0.001 }, 'diann');
+  }
+  perRun.add({ sequence: 'SSAK', proteins: ['P2'], mods: [{ position: 0, label: 'Phospho', probability: 0.5 }], sample: 'a1', quantity: 10, q: 0.001 }, 'diann');
+  perRun.add({ sequence: 'SSAK', proteins: ['P2'], mods: [{ position: 1, label: 'Phospho', probability: 0.5 }], sample: 'a1', quantity: 20, q: 0.001 }, 'diann');
+  perRun.add({ site: true, protein: 'P3', position: 7, label: 'Phospho', probability: 0.5, quantities: { a1: 5 } }, 'maxquant-sites');
+  const merged = perRun.finish();
+  assert.deepEqual(merged.keys, ['pep|PEPSIDEK|3Phospho', 'pep|SSAK|?Phospho']);
+  assert.deepEqual(merged.proteins, ['P1', 'P2']);
+  assert.deepEqual(merged.samples, ['a1', 'a2', 'b1', 'b2']);
+  assert.deepEqual([...merged.values], [100, 100, 100, 100, 30, NaN, NaN, NaN]);
+
+  // readReport with `collect` keeps the structure's rows and collects all of them.
+  const header = ['Run', 'Protein.Ids', 'Protein.Group', 'Stripped.Sequence', 'Modified.Sequence', 'Precursor.Charge', 'Q.Value', 'Precursor.Normalised'];
+  const text = table(header, [
+    ['a1', 'P04637', 'P04637', 'PEPTIDEK', 'PEPTIDEK', '2', '0.001', '1000'],
+    ['a2', 'P04637', 'P04637', 'PEPTIDEK', 'PEPTIDEK', '2', '0.001', '1100'],
+    ['a1', 'Q99999', 'Q99999', 'OTHERPEPK', 'OTHERPEPK', '2', '0.001', '500'],
+    ['a2', 'Q99999', 'Q99999', 'OTHERPEPK', 'OTHERPEPK', '2', '0.001', '520'],
+  ]);
+  const report = await readReport(blob(text, 'report.tsv'), { accessions: ['P04637'], collect: { qValue: 0.01, localization: 0.75 } });
+  assert.equal(report.rows.length, 2, 'only the structure’s protein is kept');
+  assert.deepEqual(report.features.keys, ['pep|PEPTIDEK|', 'pep|OTHERPEPK|']);
+  assert.deepEqual([...report.features.values], [1000, 1100, 500, 520]);
 });

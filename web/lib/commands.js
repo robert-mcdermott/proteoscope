@@ -26,6 +26,7 @@ export const COMMANDS = [
   { name: 'remove', aliases: ['delete', 'close'], syntax: 'remove <structure>', summary: 'Remove a structure from the scene' },
   { name: 'activate', aliases: ['use'], syntax: 'activate <structure>', summary: 'Make a structure the active one' },
   { name: 'superpose', aliases: ['super', 'align', 'matchmaker', 'mm'], syntax: 'superpose <moving|all> [onto <reference>] [fit <selection>]', summary: 'Superpose structures and report RMSD, TM-score and lDDT' },
+  { name: 'tmalign', aliases: ['usalign', 'structalign', 'tm-align'], syntax: 'tmalign <moving|all> [onto <reference>]', summary: 'Superpose by structure alone (TM-align; MM-align for complexes), for remote homologs and different complexes' },
   { name: 'alphafold', aliases: ['af'], syntax: 'alphafold', summary: 'Compare the active structure with its AlphaFold DB model' },
   { name: 'assembly', aliases: ['assemblies', 'biounit'], syntax: 'assembly [<id>|au]', summary: 'Build a biological assembly of the active structure (au: the asymmetric unit), or list them' },
   { name: 'evidence', aliases: ['public', 'peptideatlas'], syntax: 'evidence', summary: 'Load public peptides and PTM sites (EBI Proteins API) and color their coverage' },
@@ -36,6 +37,9 @@ export const COMMANDS = [
   { name: 'domains', aliases: ['paedomains'], syntax: 'domains', summary: 'Find rigid domains in the PAE matrix and color by them' },
   { name: 'msa', aliases: [], syntax: 'msa', summary: 'Color by MSA depth (AlphaFold DB models, prediction folders, dropped .a3m files)' },
   { name: 'validate', aliases: ['validation', 'report'], syntax: 'validate [clashes|fit|refresh|off]', summary: 'Load the wwPDB validation report and color outliers, show clashes or density fit' },
+  { name: 'conservation', aliases: ['consurf', 'conserved'], syntax: 'conservation [jsd|entropy|off]', summary: 'Color by conservation from the prediction\'s MSA, AlphaFold DB\'s, or a dropped alignment (Jensen–Shannon divergence, ConSurf-style grades)' },
+  { name: 'map', aliases: ['density', 'volume'], syntax: 'map [load|refresh|fit|off] · map level <σ> [2fofc|fofc|em] · map style mesh|surface · map region focus|view|all · map radius <Å> · map zone <Å>|off', summary: 'Load the X-ray or cryo-EM map of a PDB entry, contour it, and fit the model to it' },
+  { name: 'pose', aliases: ['poses', 'docking'], syntax: 'pose [<n>|next|previous|fingerprints|off]', summary: 'Show a docking pose (opened from SDF, MOL2 or PDBQT), compute interaction fingerprints, or remove the poses' },
   { name: 'missense', aliases: ['alphamissense', 'am'], syntax: 'missense [<UniProt accession>]', summary: 'Color by AlphaMissense pathogenicity (human proteins)' },
   { name: 'refresh', aliases: ['reload'], syntax: 'refresh', summary: 'Download the active structure again, bypassing the cache' },
   { name: 'preset', aliases: ['style', 'rep'], syntax: 'preset <cartoon|ball-stick|sticks|spacefill|trace|surface>', summary: 'Apply a representation preset' },
@@ -166,7 +170,8 @@ export function parseCommand(text, options = {}) {
     case 'activate':
       if (!rest) throw new CommandError(`Usage: ${command.syntax}`);
       return { ...parsed, structure: rest };
-    case 'superpose': {
+    case 'superpose':
+    case 'tmalign': {
       if (!words.length) throw new CommandError(`Usage: ${command.syntax}`);
       const fitIndex = words.findIndex((word) => word.toLowerCase() === 'fit');
       const head = fitIndex >= 0 ? words.slice(0, fitIndex) : words;
@@ -188,6 +193,46 @@ export function parseCommand(text, options = {}) {
       const mode = words[0]?.toLowerCase() ?? 'load';
       if (!['load', 'clashes', 'fit', 'refresh', 'off'].includes(mode) || words.length > 1) throw new CommandError(`Usage: ${command.syntax}`);
       return { ...parsed, mode };
+    }
+    case 'conservation': {
+      const method = words[0]?.toLowerCase() ?? 'jsd';
+      if (words.length > 1 || !['jsd', 'entropy', 'off'].includes(method)) {
+        // "conservation > 0.5" is a selection.
+        if (/^[<>=!]/.test(words[0] ?? '')) return null;
+        throw new CommandError(`Usage: ${command.syntax}`);
+      }
+      return { ...parsed, method };
+    }
+    case 'map': {
+      const action = words[0]?.toLowerCase() ?? 'load';
+      if (['load', 'fit', 'off', 'refresh'].includes(action)) {
+        if (words.length > 1) throw new CommandError(`Usage: ${command.syntax}`);
+        return { ...parsed, action };
+      }
+      const value = words[1]?.toLowerCase();
+      if (action === 'level') {
+        const sigma = Number(value?.replace(/σ|sigma$/i, ''));
+        const channel = words[2]?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? null;
+        if (!(sigma > 0) || words.length > 3 || (channel && !['2fofc', 'fofc', 'em', 'map'].includes(channel))) throw new CommandError('Usage: map level <σ> [2fofc|fofc|em], for example "map level 1.2".');
+        return { ...parsed, action, value: sigma, channel };
+      }
+      if (action === 'style' && ['mesh', 'surface'].includes(value) && words.length === 2) return { ...parsed, action, value };
+      if (action === 'region' && ['focus', 'view', 'all'].includes(value) && words.length === 2) return { ...parsed, action, value };
+      if ((action === 'radius' || action === 'zone') && words.length === 2) {
+        const distance = value === 'off' && action === 'zone' ? 0 : Number(value?.replace(/å|a$/i, ''));
+        if (Number.isFinite(distance) && distance >= 0 && distance <= 60) return { ...parsed, action, value: distance };
+      }
+      throw new CommandError(`Usage: ${command.syntax}`);
+    }
+    case 'pose': {
+      if (!words.length) return { ...parsed, action: 'list' };
+      const word = words[0].toLowerCase();
+      if (words.length === 1 && ['next', 'previous', 'prev', 'fingerprints', 'fingerprint', 'off', 'list'].includes(word)) {
+        return { ...parsed, action: { prev: 'previous', fingerprint: 'fingerprints' }[word] ?? word };
+      }
+      const index = Number(word.replace(/^#/, ''));
+      if (words.length === 1 && Number.isInteger(index) && index >= 1) return { ...parsed, action: 'show', index };
+      throw new CommandError(`Usage: ${command.syntax}`);
     }
     case 'missense':
       if (words.length > 1 || (words[0] && !/^[A-Z0-9]{6,10}(-\d+)?$/i.test(words[0]))) throw new CommandError(`Usage: ${command.syntax}`);

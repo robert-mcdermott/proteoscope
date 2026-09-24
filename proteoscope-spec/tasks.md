@@ -382,3 +382,32 @@ the completed v0.1 application.
 
 - [x] 65. Documentation: README sections and screenshots, design, requirements, roadmap (wave 5)
   - _Requirements: 15, 32, 33, 34, 35, 36, 37_
+
+## Wave 6: maps, ligand chemistry and statistics
+
+- [x] 66. Density maps: volume-server header, box and cell routes with RCSB fallback, EMDB metadata route; CCP4/MRC and volume-server BinaryCIF parsing; Surface Nets contouring in a worker; regions around the focus or view, zones; screen-space line pipeline; map fit with `mapfit` scheme and keyword; `map` command; sessions
+  - _Requirements: 38_
+
+- [x] 67. Ligand chemistry: CCD tables from mmCIF, built-in standard residues, fetched components (`/api/fetch/ccd/{id}`), CONECT bond orders; bond orders and aromatic rings in sticks; chemistry-aware interaction typing and protonation rules
+  - _Requirements: 39_
+
+- [x] 68. Docking poses: SDF, MOL2 and PDBQT readers; poses in the receptor with scores, sorting and stepping; interaction fingerprints and CSV export; `pose` command; sessions
+  - _Requirements: 40_
+
+- [x] 69. Structure-only alignment: TM-align and MM-align port in the surface worker; *Pair residues by* option; `tmalign` command; console API and sessions
+  - _Requirements: 41_
+
+- [x] 70. Differential statistics: moderated t-test, normalization, imputation, BH q-values and MSstatsPTM adjustment on the whole report; volcano plot; significant-change coloring and CSV columns
+  - _Requirements: 42_
+
+- [x] 71. Conservation: alignment parsers, Jensen–Shannon divergence and entropy, grades and colors, mapping to chains, `conservation` command and keywords
+  - _Requirements: 43_
+
+- [x] 72. Methods paragraph, references with DOIs and BibTeX, `CITATION.cff`, application version in sessions
+  - _Requirements: 44_
+
+- [x] 73. Continuous integration (Go and browser-module jobs, weekly validation) and the validation suite against limma, MSstatsPTM, US-align, Capra & Singh, EMDB and MolProbity
+  - _Requirements: 41, 42, 43, 45_
+
+- [x] 74. Documentation: README sections and screenshots, design, requirements, roadmap (wave 6)
+  - _Requirements: 15, 38, 39, 40, 41, 42, 43, 44, 45_

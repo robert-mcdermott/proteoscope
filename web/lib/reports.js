@@ -473,15 +473,22 @@ const PARSERS = {
       q: col.at('EG.Qvalue', 'FG.Qvalue'), decoy: col.at('EG.IsDecoy'), localization: col.at('EG.PTMLocalizationProbabilities'), charge: col.at('FG.Charge'),
     };
     // Exports with fragment columns (F.*) repeat each precursor once per fragment ion; its
-    // quantity counts once per run.
+    // quantity counts once per run. Exports list one run after another, so the precursors seen are
+    // kept for the current run only (a whole report is read for statistics).
     const fragments = header.some((name) => /^F\./.test(name));
     const seen = new Set();
+    let run = null;
     return (cells) => {
       const parsed = parsePeptideNotation(cell(cells, columns.modified));
       const sequence = cell(cells, columns.sequence) || parsed?.sequence;
       if (!sequence) return null;
       if (fragments) {
-        const key = `${cell(cells, columns.file)}|${cell(cells, columns.condition)}|${cell(cells, columns.replicate)}|${cell(cells, columns.modified) || sequence}|${cell(cells, columns.charge)}`;
+        const current = `${cell(cells, columns.file)}|${cell(cells, columns.condition)}|${cell(cells, columns.replicate)}`;
+        if (current !== run) {
+          seen.clear();
+          run = current;
+        }
+        const key = `${cell(cells, columns.modified) || sequence}|${cell(cells, columns.charge)}`;
         if (seen.has(key)) return null;
         seen.add(key);
       }
@@ -814,6 +821,9 @@ export async function readReport(blob, options = {}) {
   let total = 0;
   const rows = [];
   let mzTab = null;
+  // With options.collect, every row's quantities also go to a feature matrix of the whole report
+  // (for statistics), so no line can be skipped unparsed.
+  const collector = options.collect ? createFeatureCollector(options.collect) : null;
   for await (const line of readLines(blob, options.onProgress)) {
     if (!line.trim()) continue;
     if (!format && !mzTab && /^(MTD|COM)\t/.test(line)) {
@@ -822,8 +832,9 @@ export async function readReport(blob, options = {}) {
     }
     if (mzTab) {
       if (/^(PSM|PEP)\t/.test(line)) total += 1;
-      if (/^(PSM|PEP)\t/.test(line) && needles.length && !needles.some((needle) => line.includes(needle))) continue;
+      if (!collector && /^(PSM|PEP)\t/.test(line) && needles.length && !needles.some((needle) => line.includes(needle))) continue;
       const row = mzTab(line);
+      if (collector && row?.section === 'PEP') collector.add(markSpecialAccessions(row), format);
       if (keep(row)) rows.push(markSpecialAccessions(row));
       continue;
     }
@@ -836,9 +847,13 @@ export async function readReport(blob, options = {}) {
       continue;
     }
     total += 1;
-    if (needles.length && !needles.some((needle) => line.includes(needle))) continue;
+    if (!collector && needles.length && !needles.some((needle) => line.includes(needle))) continue;
     const parsed = parse(splitCells(line, delimiter));
-    for (const row of Array.isArray(parsed) ? parsed : [parsed]) if (keep(row)) rows.push(markSpecialAccessions(row));
+    for (const row of Array.isArray(parsed) ? parsed : [parsed]) {
+      if (!row) continue;
+      if (collector) collector.add(markSpecialAccessions(row), format);
+      if (keep(row)) rows.push(markSpecialAccessions(row));
+    }
   }
   if (!format) throw new Error(`${name} is empty.`);
   let kept = rows;
@@ -847,7 +862,7 @@ export async function readReport(blob, options = {}) {
     kept = quantified.length ? rows.filter((row) => row.section === 'PEP') : rows.filter((row) => row.section === 'PSM');
     if (!kept.length) kept = rows;
   }
-  return { format, label: REPORT_FORMATS[format].label, kind: REPORT_FORMATS[format].kind, name, rows: kept, total };
+  return { format, label: REPORT_FORMATS[format].label, kind: REPORT_FORMATS[format].kind, name, rows: kept, total, features: collector?.finish() ?? null };
 }
 
 const DIANN_COLUMNS = ['Stripped.Sequence', 'Modified.Sequence', 'Protein.Ids', 'Protein.Group', 'Genes', 'Run', 'Channel', 'Precursor.Normalised',
@@ -864,7 +879,8 @@ async function readParquetReport(blob, name, options) {
   const accessions = (options.accessions ?? []).map((item) => item.replace(/-\d+$/, ''));
   const sequences = (options.sequences ?? []).map((sequence) => sequence.toUpperCase().replace(/I/g, 'L'));
   const proteinColumn = available.has('Protein.Ids') ? 'Protein.Ids' : 'Protein.Group';
-  const filter = options.keepAll ? null
+  const collector = options.collect ? createFeatureCollector(options.collect) : null;
+  const filter = options.keepAll || collector ? null
     : accessions.length ? { column: proteinColumn, test: (value) => typeof value === 'string' && accessions.some((accession) => value.includes(accession)) }
       : { column: 'Stripped.Sequence', test: (value) => typeof value === 'string' && sequences.some((sequence) => sequence.includes(value.replace(/I/g, 'L'))) };
   const rows = [];
@@ -875,11 +891,151 @@ async function readParquetReport(blob, name, options) {
       const count = values[columns[0]].length;
       for (let index = 0; index < count; index += 1) {
         const row = markSpecialAccessions(parse(columns.map((column) => values[column][index])));
-        if (row && (!accessions.length || options.keepAll || row.proteins.some((protein) => accessions.includes(protein.replace(/-\d+$/, ''))))) rows.push(row);
+        if (row && collector) collector.add(row, 'diann');
+        if (!row || (collector && !options.keepAll && !(accessions.length
+          ? row.proteins.some((protein) => accessions.includes(protein.replace(/-\d+$/, '')))
+          : sequences.some((sequence) => sequence.includes(row.sequence.replace(/I/g, 'L')))))) continue;
+        if (!accessions.length || options.keepAll || row.proteins.some((protein) => accessions.includes(protein.replace(/-\d+$/, '')))) rows.push(row);
       }
     },
   });
-  return { format: 'diann', label: `${REPORT_FORMATS.diann.label} (Parquet)`, kind: 'peptides', name, rows, total: file.rows };
+  return { format: 'diann', label: `${REPORT_FORMATS.diann.label} (Parquet)`, kind: 'peptides', name, rows, total: file.rows, features: collector?.finish() ?? null };
+}
+
+/* ---------- Features for statistics ---------- */
+
+// The quantities of every feature in a report, for statistics over the whole experiment:
+// modified peptides ("pep|SEQUENCE|3Phospho,7Oxidation") for peptide reports and sites
+// ("site|P04637|15|Phospho") for site tables. Rows are filtered by q-value as summarizeReport
+// does and summed per feature and sample. Localization is judged per feature, not per row, since
+// search engines report it per run: a modification whose best probability stays below the
+// threshold is written "?Phospho" (peptidoforms that differ only there merge), and a site table's
+// site is kept when its best probability reaches it. The matrix is features × samples (NaN when
+// absent); proteins holds each feature's leading protein.
+export function peptideFeatureKey(sequence, mods, localization = 0.75) {
+  const parts = [];
+  for (const mod of mods ?? []) {
+    if (FIXED.has(mod.label)) continue;
+    const localized = !Number.isFinite(mod.probability) || mod.probability >= localization;
+    parts.push(localized ? `${mod.position}${mod.label}` : `?${mod.label}`);
+  }
+  parts.sort();
+  return `pep|${sequence}|${parts.join(',')}`;
+}
+
+export function createFeatureCollector(options = {}) {
+  const qCutoff = options.qValue ?? 0.01;
+  const localization = options.localization ?? 0.75;
+  // Features by their peptidoform (every modification at its position), with the best
+  // localization probability of each modification over the rows.
+  const features = new Map();
+  const keys = [];
+  const proteins = [];
+  const modifications = [];
+  const best = [];
+  const samples = new Map();
+  let capacity = 1 << 16;
+  let featureOf = new Int32Array(capacity);
+  let sampleOf = new Int32Array(capacity);
+  let values = new Float64Array(capacity);
+  let count = 0;
+  const sampleIndex = (sample) => {
+    let index = samples.get(sample);
+    if (index === undefined) {
+      index = samples.size;
+      samples.set(sample, index);
+    }
+    return index;
+  };
+  const push = (feature, sample, value) => {
+    if (count === capacity) {
+      capacity *= 2;
+      const grow = (array, Type) => {
+        const next = new Type(capacity);
+        next.set(array);
+        return next;
+      };
+      featureOf = grow(featureOf, Int32Array);
+      sampleOf = grow(sampleOf, Int32Array);
+      values = grow(values, Float64Array);
+    }
+    featureOf[count] = feature;
+    sampleOf[count] = sampleIndex(sample);
+    values[count] = value;
+    count += 1;
+  };
+  const probabilityOf = (value) => (Number.isFinite(value) ? value : 1);
+  return {
+    add(row, format) {
+      if (!row || row.decoy || row.contaminant) return;
+      let key;
+      let mods = [];
+      let probabilities;
+      if (row.site) {
+        if (FIXED.has(row.label)) return;
+        key = `site|${row.protein}|${row.position}|${row.label}`;
+        probabilities = [probabilityOf(row.probability)];
+      } else {
+        if (Number.isFinite(row.q) && row.q > qCutoff && format !== 'maxquant-evidence' && format !== 'maxquant-peptides') return;
+        mods = (row.mods ?? []).filter((mod) => !FIXED.has(mod.label)).sort((a, b) => a.position - b.position || a.label.localeCompare(b.label));
+        key = `pep|${row.sequence}|${mods.map((mod) => `${mod.position}${mod.label}`).sort().join(',')}`;
+        probabilities = mods.map((mod) => probabilityOf(mod.probability));
+      }
+      let feature = features.get(key);
+      if (feature === undefined) {
+        feature = keys.length;
+        features.set(key, feature);
+        keys.push(key);
+        proteins.push(String((row.site ? row.protein : row.proteins?.[0] ?? row.protein) ?? ''));
+        modifications.push(row.site ? null : mods.map((mod) => ({ position: mod.position, label: mod.label })));
+        best.push(probabilities);
+      } else {
+        const known = best[feature];
+        probabilities.forEach((value, index) => {
+          if (value > known[index]) known[index] = value;
+        });
+      }
+      if (row.quantities) {
+        for (const [sample, value] of Object.entries(row.quantities)) if (Number.isFinite(value) && value > 0) push(feature, sample, value);
+      } else if (Number.isFinite(row.quantity) && row.quantity > 0) {
+        push(feature, row.sample || 'all', row.quantity);
+      }
+    },
+    finish() {
+      // Final keys: unlocalized modifications become "?Label"; features that end up with the same
+      // key merge, and sites below the threshold are left out.
+      const finalKeys = [];
+      const finalProteins = [];
+      const finalIndex = new Map();
+      const target = new Int32Array(keys.length).fill(-1);
+      keys.forEach((key, feature) => {
+        let final = key;
+        if (key.startsWith('site|')) {
+          if (best[feature][0] < localization) return;
+        } else {
+          const sequence = key.slice(4, key.lastIndexOf('|'));
+          final = peptideFeatureKey(sequence, modifications[feature].map((mod, index) => ({ ...mod, probability: best[feature][index] })), localization);
+        }
+        let index = finalIndex.get(final);
+        if (index === undefined) {
+          index = finalKeys.length;
+          finalIndex.set(final, index);
+          finalKeys.push(final);
+          finalProteins.push(proteins[feature]);
+        }
+        target[feature] = index;
+      });
+      const columns = samples.size;
+      const matrix = new Float64Array(finalKeys.length * columns).fill(NaN);
+      for (let index = 0; index < count; index += 1) {
+        const row = target[featureOf[index]];
+        if (row < 0) continue;
+        const cell = row * columns + sampleOf[index];
+        matrix[cell] = Number.isNaN(matrix[cell]) ? values[index] : matrix[cell] + values[index];
+      }
+      return { keys: finalKeys, proteins: finalProteins, samples: [...samples.keys()], values: matrix, rows: finalKeys.length, columns };
+    },
+  };
 }
 
 /* ---------- Aggregation ---------- */

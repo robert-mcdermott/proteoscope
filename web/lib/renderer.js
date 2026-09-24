@@ -5,6 +5,7 @@ const PICK_RADIUS = 4;
 export const SPHERE_STRIDE = 20;
 export const CYLINDER_STRIDE = 44;
 export const MESH_VERTEX_STRIDE = 32;
+export const LINE_STRIDE = 24;
 
 export const CYLINDER_STYLE = {
   dashed: 1,
@@ -378,6 +379,12 @@ fn vsMesh(
   out.position = frame.viewProj * vec4f(position, 1.0);
   out.world = position;
   out.normal = normal;
+  // Meshes that belong to no atom (density maps) carry their own color and are not picked.
+  if ((meshParams.flags & 1u) != 0u) {
+    out.color = color.rgb;
+    out.atom = 0xffffffffu;
+    return out;
+  }
   var base = atomColors[id].rgb;
   if (color.a > 0.0) {
     base = color.rgb;
@@ -456,6 +463,84 @@ fn fsGlow(in: GlowVarying) -> @location(0) vec4f {
   let feather = pow(1.0 - r2, 2.2);
   let strength = feather * feather * 0.02 * frame.params.y;
   return vec4f(in.color * strength, strength);
+}
+`;
+
+// Screen-space lines (density-map meshes): each segment becomes a quad of constant pixel
+// width with an anti-aliased edge, depth-tested against the scene and drawn after it.
+const LINES_WGSL = /* wgsl */ `
+${COMMON_WGSL}
+@group(0) @binding(0) var<uniform> frame: Frame;
+
+struct LineParams {
+  color: vec4f,
+  width: f32,
+  pad0: f32,
+  pad1: f32,
+  pad2: f32,
+};
+
+@group(1) @binding(0) var<uniform> lineParams: LineParams;
+
+const QUAD = array<vec2f, 6>(
+  vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(-1.0, 1.0),
+  vec2f(-1.0, 1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0),
+);
+
+struct LineVarying {
+  @builtin(position) position: vec4f,
+  @location(0) world: vec3f,
+  @location(1) across: f32,
+};
+
+@vertex
+fn vsLine(@builtin(vertex_index) vertexIndex: u32, @location(0) a: vec3f, @location(1) b: vec3f) -> LineVarying {
+  let corner = QUAD[vertexIndex];
+  var clipA = frame.viewProj * vec4f(a, 1.0);
+  var clipB = frame.viewProj * vec4f(b, 1.0);
+  // Segments that cross the camera plane are cut at it so their ends project sensibly.
+  let nearW = 1e-3;
+  if (clipA.w < nearW && clipB.w >= nearW) {
+    clipA = mix(clipA, clipB, (nearW - clipA.w) / (clipB.w - clipA.w));
+  } else if (clipB.w < nearW && clipA.w >= nearW) {
+    clipB = mix(clipB, clipA, (nearW - clipB.w) / (clipA.w - clipB.w));
+  }
+  let screenA = clipA.xy / clipA.w * frame.viewport.xy * 0.5;
+  let screenB = clipB.xy / clipB.w * frame.viewport.xy * 0.5;
+  let delta = screenB - screenA;
+  let length2 = dot(delta, delta);
+  var direction = vec2f(1.0, 0.0);
+  if (length2 > 1e-8) {
+    direction = delta * inverseSqrt(length2);
+  }
+  let normal = vec2f(-direction.y, direction.x);
+  let halfWidth = 0.5 * max(lineParams.width * frame.post2.w, 0.5) + 1.0;
+  let useB = corner.x > 0.0;
+  let clip = select(clipA, clipB, useB);
+  let offset = normal * corner.y * halfWidth * 2.0 * frame.viewport.zw;
+  var out: LineVarying;
+  out.position = vec4f(clip.xy + offset * clip.w, clip.z, clip.w);
+  out.world = select(a, b, useB);
+  out.across = corner.y * halfWidth;
+  return out;
+}
+
+@fragment
+fn fsLine(in: LineVarying) -> @location(0) vec4f {
+  if (clipped(in.world)) {
+    discard;
+  }
+  let halfCore = 0.5 * max(lineParams.width * frame.post2.w, 0.5);
+  let coverage = clamp(halfCore + 0.5 - abs(in.across), 0.0, 1.0);
+  if (coverage <= 0.0) {
+    discard;
+  }
+  let depth = viewDepthOf(in.world);
+  let fogAmount = clamp((depth - frame.fog.x) / max(frame.fog.y - frame.fog.x, 0.001), 0.0, 1.0) * frame.fog.z;
+  let uvY = in.position.y * frame.viewport.w;
+  let color = mix(lineParams.color.rgb, mix(frame.bgTop.rgb, frame.bgBottom.rgb, uvY), fogAmount);
+  let alpha = lineParams.color.a * coverage;
+  return vec4f(color * alpha, alpha);
 }
 `;
 
@@ -782,6 +867,7 @@ export async function createRenderer(canvas, options = {}) {
   });
 
   const geometryModule = device.createShaderModule({ label: 'geometry', code: GEOMETRY_WGSL });
+  const linesModule = device.createShaderModule({ label: 'lines', code: LINES_WGSL });
   const ssaoModule = device.createShaderModule({ label: 'ssao', code: SSAO_WGSL });
   const blurModule = device.createShaderModule({ label: 'ao blur', code: BLUR_WGSL });
   const compositeModule = device.createShaderModule({ label: 'composite', code: COMPOSITE_WGSL });
@@ -816,6 +902,19 @@ export async function createRenderer(canvas, options = {}) {
       { shaderLocation: 5, offset: 40, format: 'unorm8x4' },
     ],
   }];
+  const lineBuffers = [{
+    arrayStride: LINE_STRIDE,
+    stepMode: 'instance',
+    attributes: [
+      { shaderLocation: 0, offset: 0, format: 'float32x3' },
+      { shaderLocation: 1, offset: 12, format: 'float32x3' },
+    ],
+  }];
+  const frameLayout = device.createBindGroupLayout({
+    label: 'frame',
+    entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }],
+  });
+  const frameBindGroup = device.createBindGroup({ layout: frameLayout, entries: [{ binding: 0, resource: { buffer: frameBuffer } }] });
   const meshBuffers = [{
     arrayStride: MESH_VERTEX_STRIDE,
     attributes: [
@@ -877,6 +976,24 @@ export async function createRenderer(canvas, options = {}) {
       primitive: { topology: 'triangle-list', cullMode: 'none' },
       depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'greater-equal' },
     }),
+    lines: device.createRenderPipeline({
+      label: 'lines',
+      layout: device.createPipelineLayout({ bindGroupLayouts: [frameLayout, meshLayout] }),
+      vertex: { module: linesModule, entryPoint: 'vsLine', buffers: lineBuffers },
+      fragment: {
+        module: linesModule,
+        entryPoint: 'fsLine',
+        targets: [{
+          format: 'rgba8unorm',
+          blend: {
+            color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+            alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+          },
+        }],
+      },
+      primitive: { topology: 'triangle-list' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'greater-equal' },
+    }),
     glow: device.createRenderPipeline({
       label: 'glow',
       layout: geometryPipelineLayout,
@@ -913,6 +1030,7 @@ export async function createRenderer(canvas, options = {}) {
     cylinders: null,
     cylinderCount: 0,
     meshes: new Map(),
+    lines: new Map(),
   };
   let screenTargets = null;
   let pickChain = Promise.resolve();
@@ -1001,6 +1119,7 @@ export async function createRenderer(canvas, options = {}) {
       indexCount: mesh.indices.length,
       opacity: mesh.opacity ?? 1,
       atomOffset: mesh.atomOffset ?? 0,
+      flags: mesh.noPick ? 1 : 0,
       bindGroup: device.createBindGroup({ layout: meshLayout, entries: [{ binding: 0, resource: { buffer: paramsBuffer } }] }),
     };
     writeMeshParams(entry);
@@ -1026,12 +1145,44 @@ export async function createRenderer(canvas, options = {}) {
   function writeMeshParams(entry) {
     const params = new ArrayBuffer(16);
     new Float32Array(params, 0, 1)[0] = entry.opacity;
+    new Uint32Array(params, 4, 1)[0] = entry.flags >>> 0;
     new Uint32Array(params, 8, 1)[0] = entry.atomOffset >>> 0;
     device.queue.writeBuffer(entry.paramsBuffer, 0, params);
   }
 
   function meshIds() {
     return [...scene.meshes.keys()];
+  }
+
+  // Line segments ({ segments: Float32Array of x0,y0,z0,x1,y1,z1 …, color: [r, g, b],
+  // opacity, width in CSS pixels }); null removes them.
+  function setLines(id, lines) {
+    const previous = scene.lines.get(id);
+    if (previous) {
+      previous.buffer.destroy();
+      previous.paramsBuffer.destroy();
+      scene.lines.delete(id);
+    }
+    const count = lines?.segments ? Math.floor(lines.segments.length / 6) : 0;
+    if (!count) return;
+    const buffer = device.createBuffer({ label: `${id} segments`, size: align4(count * LINE_STRIDE), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(buffer, 0, lines.segments, 0, count * 6);
+    const paramsBuffer = device.createBuffer({ label: `${id} line params`, size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const entry = {
+      buffer,
+      paramsBuffer,
+      count,
+      bindGroup: device.createBindGroup({ layout: meshLayout, entries: [{ binding: 0, resource: { buffer: paramsBuffer } }] }),
+    };
+    scene.lines.set(id, entry);
+    setLineStyle(id, lines);
+  }
+
+  function setLineStyle(id, style) {
+    const entry = scene.lines.get(id);
+    if (!entry) return;
+    const color = style.color ?? [1, 1, 1];
+    device.queue.writeBuffer(entry.paramsBuffer, 0, new Float32Array([color[0], color[1], color[2], style.opacity ?? 1, style.width ?? 1, 0, 0, 0]));
   }
 
   function createTargets(width, height, exportTarget = false) {
@@ -1142,7 +1293,7 @@ export async function createRenderer(canvas, options = {}) {
       outline.enabled ? outline.strength ?? 0.8 : 0,
       outline.width ?? 1,
     ], 120);
-    data.set([ao.bias ?? 0.08, outline.threshold ?? 1.2, settings.fxaa === false ? 0 : 1, 0], 124);
+    data.set([ao.bias ?? 0.08, outline.threshold ?? 1.2, settings.fxaa === false ? 0 : 1, settings.lineScale ?? settings.pixelRatio ?? 1], 124);
     device.queue.writeBuffer(frameBuffer, 0, data);
   }
 
@@ -1184,12 +1335,22 @@ export async function createRenderer(canvas, options = {}) {
 
     const transparentMeshes = [...scene.meshes.values()].filter((mesh) => mesh.opacity < 0.999);
     const glow = (settings.glow ?? 0) > 0.001 && scene.sphereCount > 0;
-    if ((transparentMeshes.length || glow) && scene.geometryBindGroup) {
+    if ((transparentMeshes.length || glow || scene.lines.size) && scene.geometryBindGroup) {
       const overlayPass = encoder.beginRenderPass({
         label: 'overlay',
         colorAttachments: [{ view: targets.views.composite, loadOp: 'load', storeOp: 'store' }],
         depthStencilAttachment: { view: targets.views.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
       });
+      // Lines go first, so a transparent surface in front of them still shows them.
+      if (scene.lines.size) {
+        overlayPass.setPipeline(pipelines.lines);
+        overlayPass.setBindGroup(0, frameBindGroup);
+        for (const lines of scene.lines.values()) {
+          overlayPass.setBindGroup(1, lines.bindGroup);
+          overlayPass.setVertexBuffer(0, lines.buffer);
+          overlayPass.draw(6, lines.count);
+        }
+      }
       overlayPass.setBindGroup(0, scene.geometryBindGroup);
       if (transparentMeshes.length) {
         overlayPass.setPipeline(pipelines.meshDepth);
@@ -1295,6 +1456,7 @@ export async function createRenderer(canvas, options = {}) {
     try {
       const captureSettings = {
         ...settings,
+        lineScale: (settings.lineScale ?? settings.pixelRatio ?? 1) * factor,
         fxaa: factor === 1,
         outline: settings.outline ? { ...settings.outline, width: (settings.outline.width ?? 1) * factor } : settings.outline,
       };
@@ -1346,6 +1508,8 @@ export async function createRenderer(canvas, options = {}) {
     setMeshOpacity,
     setMeshAtomOffset,
     meshIds,
+    setLines,
+    setLineStyle,
     render,
     pick,
     capture,

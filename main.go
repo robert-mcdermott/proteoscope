@@ -23,7 +23,7 @@ import (
 //go:embed web/index.html web/styles.css web/app.js web/favicon.svg web/lib/*.js data
 var content embed.FS
 
-var version = "0.5.0-dev"
+var version = "0.6.0-dev"
 
 type sample struct {
 	ID             string `json:"id"`
@@ -281,6 +281,11 @@ func (a *app) registerAPI(mux *http.ServeMux, samples func() ([]sample, error)) 
 	mux.HandleFunc("GET /api/fetch/afdb/{accession}/msa", a.fetchAlphaFoldMSA)
 	mux.HandleFunc("GET /api/fetch/uniprot/{accession}", a.fetchUniProt)
 	mux.HandleFunc("GET /api/fetch/validation/{id}", a.fetchValidation)
+	mux.HandleFunc("GET /api/fetch/ccd/{id}", a.fetchComponent)
+	mux.HandleFunc("GET /api/fetch/volume/{source}/{id}", a.fetchVolumeHeader)
+	mux.HandleFunc("GET /api/fetch/volume/{source}/{id}/box", a.fetchVolumeBox)
+	mux.HandleFunc("GET /api/fetch/volume/{source}/{id}/cell", a.fetchVolumeCell)
+	mux.HandleFunc("GET /api/fetch/emdb/{id}", a.fetchEMDB)
 	mux.HandleFunc("GET /api/fetch/model", a.fetchModel)
 	mux.HandleFunc("GET /api/fetch/proteomics/{accession}", a.fetchProteomicsEvidence)
 	mux.HandleFunc("GET /api/search/text", a.searchText)

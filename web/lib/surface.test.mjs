@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildSurface, computeSASA } from './surface.js';
-import { examplePDB } from './test-data.mjs';
+import { TIME_SCALE, examplePDB } from './test-data.mjs';
 
 const PROBE = 1.4;
 const VDW_RADII = { C: 1.7, N: 1.55, O: 1.52, S: 1.8, P: 1.8, SE: 1.9 };
@@ -135,7 +135,7 @@ test('1ycr: SASA is plausible and every surface kind builds quickly', async (t) 
     assertValidMesh(surface, count);
     measures[kind] = meshMeasures(surface);
     t.diagnostic(describe(`1ycr ${kind}`, surface, elapsed, measures[kind]));
-    if (kind === 'ses') assert.ok(elapsed < 1000, `SES took ${elapsed} ms`);
+    if (kind === 'ses') assert.ok(elapsed < 1000 * TIME_SCALE, `SES took ${elapsed} ms`);
   }
   assert.ok(measures.vdw.volume < measures.ses.volume && measures.ses.volume < measures.sas.volume);
   assert.ok(measures.ses.area < measures.vdw.area);
@@ -151,7 +151,7 @@ test('1tup (~5,400 atoms): SES at 0.5 A builds in under a second', async (t) => 
   assertValidMesh(surface, count);
   t.diagnostic(describe(`1tup ses (${count} atoms)`, surface, elapsed, meshMeasures(surface)));
   assert.equal(surface.spacing, 0.5);
-  assert.ok(elapsed < 1000, `SES took ${elapsed} ms`);
+  assert.ok(elapsed < 1000 * TIME_SCALE, `SES took ${elapsed} ms`);
 });
 
 test('largest bundled files build with automatic resolution', async (t) => {
@@ -193,7 +193,7 @@ test('~100,000 atoms (7lyb tiled 7x) auto-coarsen and build within 4 s', async (
     t.diagnostic(describe(`${radii.length} atoms ${kind}`, surface, elapsed));
     assert.ok(surface.voxelCount <= 16e6);
     assert.ok(surface.spacing > 0.5);
-    assert.ok(elapsed < 4000, `${kind} took ${elapsed} ms`);
+    assert.ok(elapsed < 4000 * TIME_SCALE, `${kind} took ${elapsed} ms`);
   }
 });
 

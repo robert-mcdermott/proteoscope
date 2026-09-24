@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,6 +18,8 @@ type diskCache struct {
 	dir      string
 	maxAge   time.Duration
 	warnOnce sync.Once
+	limitMu  sync.Mutex
+	limited  map[string]time.Time
 }
 
 type cacheMeta struct {
@@ -133,4 +137,57 @@ func writeFileAtomic(file string, data []byte) error {
 		os.Remove(tmp.Name())
 	}
 	return err
+}
+
+// limit keeps the files of a kind within maxBytes by deleting the oldest, checking at most once a
+// minute. It suits kinds whose entries are many and seldom reused, such as map regions.
+func (c *diskCache) limit(kind string, maxBytes int64) {
+	if c == nil {
+		return
+	}
+	c.limitMu.Lock()
+	if c.limited == nil {
+		c.limited = map[string]time.Time{}
+	}
+	recent := time.Since(c.limited[kind]) < time.Minute
+	if !recent {
+		c.limited[kind] = time.Now()
+	}
+	c.limitMu.Unlock()
+	if recent {
+		return
+	}
+	dir := filepath.Join(c.dir, kind)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	type cached struct {
+		name     string
+		size     int64
+		modified time.Time
+	}
+	var files []cached
+	var total int64
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".meta.json") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, cached{name, info.Size(), info.ModTime()})
+		total += info.Size()
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].modified.Before(files[j].modified) })
+	for _, file := range files {
+		if total <= maxBytes {
+			break
+		}
+		os.Remove(filepath.Join(dir, file.name+".meta.json"))
+		os.Remove(filepath.Join(dir, file.name))
+		total -= file.size
+	}
 }

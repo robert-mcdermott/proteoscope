@@ -1,6 +1,7 @@
-// Structure comparison: pairs residues between two models (sequence alignment, UniProt numbering
-// or shared residue keys), superposes them on their principal atoms (Cα, or C4′ for nucleic
-// acids) and reports RMSD, TM-score and lDDT with per-residue deviations.
+// Structure comparison: pairs residues between two models (sequence alignment, UniProt numbering,
+// shared residue keys, or a structure-only alignment by TM-align/MM-align computed beforehand),
+// superposes them on their principal atoms (Cα, or C4′ for nucleic acids) and reports RMSD,
+// TM-score and lDDT with per-residue deviations.
 import { alignSequences } from './align.js';
 import { uniprotPositionForResidue } from './structure.js';
 import { iterativeFit, lddt, rmsf, tmScore, transformPoint, transformPoints } from './superpose.js';
@@ -10,6 +11,63 @@ export function principalAtom(residue) {
   if (residue.kind === 'protein') return residue.backbone?.CA ?? null;
   if (residue.kind === 'nucleic') return residue.nucleic?.C4 ?? residue.nucleic?.P ?? null;
   return null;
+}
+
+// Chains as the structure aligner (tmalign.js) sees them: one atom per residue, Cα for proteins and
+// C3′ for nucleic acids as in US-align, in file order (the chain's path, which sorted numbers do
+// not give with insertion codes placed before their number, as in chymotrypsin numbering). Its
+// residue indices map back through `residues`.
+export function alignerChains(model, chainIds = null) {
+  const chains = [];
+  for (const chain of polymerChainResidues(model).values()) {
+    if (chainIds?.length && !chainIds.includes(chain.id)) continue;
+    const residues = chain.residues.filter((residue) => alignerAtom(residue)).sort((a, b) => a.atoms[0].id - b.atoms[0].id);
+    if (residues.length < 3) continue;
+    const coords = new Float64Array(residues.length * 3);
+    residues.forEach((residue, index) => {
+      const atom = alignerAtom(residue);
+      coords[index * 3] = atom.x;
+      coords[index * 3 + 1] = atom.y;
+      coords[index * 3 + 2] = atom.z;
+    });
+    chains.push({ id: chain.id, kind: chain.kind, residues, coords, sequence: sequenceOf(residues) });
+  }
+  return chains;
+}
+
+function alignerAtom(residue) {
+  return residue.kind === 'nucleic' ? residue.nucleic?.C3 ?? residue.nucleic?.C4 ?? null : residue.backbone?.CA ?? null;
+}
+
+// Gapped alignment rows (reference, moving) from aligned index pairs [moving, reference].
+function alignmentRows(pairs, referenceSequence, mobileSequence) {
+  const rowA = [];
+  const rowB = [];
+  let i = 0;
+  let j = 0;
+  const reference = (end) => {
+    for (; j < end; j += 1) {
+      rowA.push(referenceSequence[j]);
+      rowB.push('-');
+    }
+  };
+  const mobile = (end) => {
+    for (; i < end; i += 1) {
+      rowA.push('-');
+      rowB.push(mobileSequence[i]);
+    }
+  };
+  for (const [m, r] of pairs) {
+    reference(r);
+    mobile(m);
+    rowA.push(referenceSequence[j]);
+    rowB.push(mobileSequence[i]);
+    i += 1;
+    j += 1;
+  }
+  reference(referenceSequence.length);
+  mobile(mobileSequence.length);
+  return { rowA: rowA.join(''), rowB: rowB.join('') };
 }
 
 // Polymer residues with a principal atom, grouped by chain; a chain's kind is its majority kind.
@@ -203,14 +261,37 @@ export function keyPairs(refModel, mobModel) {
 //   refChains / mobChains: restrict to these chain IDs
 //   fitKeys: Set of reference residue keys to fit on (e.g. a binding site or one domain)
 //   cutoff: pruning distance in Å (default 2; 0 disables pruning)
+//   structural: a tmAlign/mmAlign result for correspondence 'structure' (computed in a worker on
+//     alignerChains of both models); its residue pairs and superposition are used as they are
 export function compareStructures(ref, mob, options = {}) {
   let chainPairs = [];
   let pairs;
   const correspondence = options.correspondence ?? 'sequence';
+  const structural = correspondence === 'structure' ? options.structural : null;
+  if (correspondence === 'structure' && !structural) throw new Error('A structure alignment needs its TM-align result.');
   if (correspondence === 'uniprot') {
     pairs = uniprotPairs(ref, mob, options);
   } else if (correspondence === 'keys') {
     pairs = keyPairs(ref.model, mob.model);
+  } else if (structural) {
+    const refChains = new Map(alignerChains(ref.model, options.refChains).map((chain) => [chain.id, chain]));
+    const mobChains = new Map(alignerChains(mob.model, options.mobChains).map((chain) => [chain.id, chain]));
+    chainPairs = structural.chainPairs.map((pair) => {
+      const refChain = refChains.get(pair.reference);
+      const mobChain = mobChains.get(pair.mobile);
+      if (!refChain || !mobChain) throw new Error('The structure alignment does not match the chains of these models.');
+      const residuePairs = pair.pairs.map(([m, r]) => ({ ref: refChain.residues[r], mob: mobChain.residues[m] }));
+      const identical = residuePairs.filter((item) => item.ref.code === item.mob.code).length;
+      return {
+        ref: refChain,
+        mob: mobChain,
+        pairs: residuePairs,
+        identity: residuePairs.length ? identical / residuePairs.length : 0,
+        alignment: alignmentRows(pair.pairs, refChain.sequence, mobChain.sequence),
+        tmScore: pair.tmScore,
+      };
+    });
+    pairs = chainPairs.flatMap((chainPair) => chainPair.pairs);
   } else {
     chainPairs = pairChains(ref.model, mob.model, options);
     pairs = chainPairs.flatMap((chainPair) => chainPair.pairs);
@@ -243,10 +324,16 @@ export function compareStructures(ref, mob, options = {}) {
   const refFit = pick(refAll, fitIndices);
   const mobFit = pick(mobAll, fitIndices);
   let best = null;
-  for (const candidate of candidates) {
-    candidate.fit = iterativeFit(pick(mobAll, candidate.indices), pick(refAll, candidate.indices), { cutoff });
-    candidate.close = countWithin(mobFit, refFit, candidate.fit, cutoff);
-    if (!best || candidate.close > best.close) best = candidate;
+  if (structural) {
+    // TM-align's superposition, which maximizes the TM-score, replaces the pruned fit; its RMSD is
+    // over the pairs it aligns (those closer than d8 after superposition).
+    best = { indices: fitIndices, label: '', fit: structuralFit(structural, fitIndices.length) };
+  } else {
+    for (const candidate of candidates) {
+      candidate.fit = iterativeFit(pick(mobAll, candidate.indices), pick(refAll, candidate.indices), { cutoff });
+      candidate.close = countWithin(mobFit, refFit, candidate.fit, cutoff);
+      if (!best || candidate.close > best.close) best = candidate;
+    }
   }
   const fit = best.fit;
   const transform = { rotation: fit.rotation, translation: fit.translation };
@@ -265,7 +352,7 @@ export function compareStructures(ref, mob, options = {}) {
   const refChainIds = new Set(pairs.map((pair) => pair.ref.chain));
   const refChainMap = polymerChainResidues(ref.model);
   const refLength = [...refChainIds].reduce((total, id) => total + (refChainMap.get(id)?.residues.length ?? 0), 0);
-  const tm = options.skipTM ? null : tmScore(mobAll, refAll, { lengthNorm: Math.max(refLength, 1) });
+  const tm = structural ? { tmScore: structural.tmScore.reference } : options.skipTM ? null : tmScore(mobAll, refAll, { lengthNorm: Math.max(refLength, 1) });
   const local = lddt(refAll, mobAll);
   const identical = pairs.filter((pair) => pair.ref.code === pair.mob.code).length;
   const close = distances.reduce((count, value) => count + (value <= cutoff ? 1 : 0), 0);
@@ -278,7 +365,8 @@ export function compareStructures(ref, mob, options = {}) {
       if (pair.ref.chain === chainPair.ref.id && pair.mob.chain === chainPair.mob.id) indices.push(index);
     });
     const squared = indices.reduce((total, index) => total + distances[index] ** 2, 0);
-    const chainTM = options.skipTM || indices.length < 3 ? null : tmScore(pick(mobAll, indices), pick(refAll, indices), { lengthNorm: Math.max(1, refChainMap.get(chainPair.ref.id)?.residues.length ?? indices.length) });
+    const chainTM = structural ? { tmScore: chainPair.tmScore?.reference ?? NaN }
+      : options.skipTM || indices.length < 3 ? null : tmScore(pick(mobAll, indices), pick(refAll, indices), { lengthNorm: Math.max(1, refChainMap.get(chainPair.ref.id)?.residues.length ?? indices.length) });
     return { ref: chainPair.ref.id, mob: chainPair.mob.id, pairs: indices.length, rmsd: indices.length ? Math.sqrt(squared / indices.length) : NaN, tmScore: chainTM?.tmScore ?? NaN };
   }) : [];
 
@@ -300,6 +388,8 @@ export function compareStructures(ref, mob, options = {}) {
       rmsdAll: Math.sqrt(sum / pairs.length),
       pairCount: pairs.length,
       tmScore: tm?.tmScore ?? NaN,
+      tmScoreMobile: structural ? structural.tmScore.mobile : NaN,
+      alignedLength: structural ? structural.alignedLength : NaN,
       lddt: local.global,
       identity: identical / pairs.length,
       refLength,
@@ -316,6 +406,17 @@ export function compareStructures(ref, mob, options = {}) {
       rowA: chainPair.alignment.rowA,
       rowB: chainPair.alignment.rowB,
     })),
+  };
+}
+
+function structuralFit(structural, count) {
+  return {
+    rotation: structural.transform.rotation,
+    translation: structural.transform.translation,
+    rmsd: structural.rmsd,
+    keptCount: structural.alignedLength,
+    kept: new Uint8Array(count).fill(1),
+    cycles: 0,
   };
 }
 

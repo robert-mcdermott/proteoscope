@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#050708" />
     <title>Proteoscope</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=wave5" />
+    <link rel="stylesheet" href="/styles.css?v=wave6" />
   </head>
   <body>
     <main id="app" class="left-open right-open sequence-open">
@@ -64,11 +64,11 @@
               </label>
               <div id="sample-info" class="sample-info" hidden></div>
               <label class="upload-zone" for="file-input">
-                <input id="file-input" type="file" accept=".pdb,.ent,.cif,.mmcif,.bcif,.gz,.zst,.json,.zip,.npz,.npy,.a3m,.csv,chemical/x-pdb,chemical/x-cif,text/plain" multiple />
+                <input id="file-input" type="file" accept=".pdb,.ent,.cif,.mmcif,.bcif,.gz,.zst,.json,.zip,.npz,.npy,.a3m,.a2m,.fasta,.fa,.faa,.afa,.sto,.stockholm,.aln,.clustal,.csv,.sdf,.sd,.mol,.mol2,.pdbqt,.mrc,.map,.ccp4,chemical/x-pdb,chemical/x-cif,chemical/x-mdl-sdfile,chemical/x-mol2,text/plain" multiple />
                 <span class="upload-icon" aria-hidden="true">+</span>
                 <span>
                   <strong>Open local file</strong>
-                  <small>.pdb, .cif, .bcif (optionally .gz or .zst), a PAE .json, or an AlphaFold Server .zip. Drop several files to compare them, or a prediction folder. Files stay on this computer.</small>
+                  <small>.pdb, .cif, .bcif (optionally .gz or .zst), a PAE .json, or an AlphaFold Server .zip. Drop several files to compare them, or a prediction folder. Docking poses (.sdf, .mol2, .pdbqt), maps (.map, .mrc) and alignments (.a3m, .fasta, .sto, .aln) open in the active structure. Files stay on this computer.</small>
                 </span>
               </label>
               <label class="folder-button" for="folder-input" title="Open an AlphaFold 3, Boltz, Chai-1 or ColabFold output folder">
@@ -120,6 +120,19 @@
               </div>
             </div>
 
+            <div class="group" id="docking-group" hidden>
+              <h3>Docking poses <span id="docking-count" class="count-badge"></span></h3>
+              <p id="docking-title" class="hint"></p>
+              <div id="docking-poses" class="prediction-models"></div>
+              <div id="docking-detail" class="result-box"></div>
+              <div id="docking-fingerprint" class="fingerprint-box"></div>
+              <div class="button-row">
+                <button id="docking-fingerprints" type="button" title="Interactions of every pose with the receptor residues within 9 Å, as a pose × residue table">Interaction fingerprints</button>
+                <button id="docking-export" type="button" title="Download the poses with their scores and interactions as CSV">Export CSV</button>
+                <button id="docking-clear" type="button" title="Remove the poses from the structure">Remove poses</button>
+              </div>
+            </div>
+
             <div class="group" id="structures-group" hidden>
               <h3>Structures in scene <span id="structure-count" class="count-badge"></span></h3>
               <div id="structure-list" class="structure-list"></div>
@@ -132,6 +145,7 @@
                 <button id="session-save" type="button" title="Save structures, styles, superpositions, selections and the camera as a .proteoscope.json file">Save session</button>
                 <button id="session-link" type="button" title="Copy a link that reopens this view (fetched structures and bundled examples only)">Copy link</button>
                 <button id="session-mvs" type="button" title="Export this view as MolViewSpec (.mvsj or .mvsx) to open in Mol*">MolViewSpec</button>
+                <button id="session-methods" type="button" title="A methods paragraph for what this session used (data sources with versions, analyses and parameters) with references and BibTeX">Methods</button>
               </div>
               <p class="hint">Open a saved session like any file. Local files are embedded in the session; links carry only fetched structures and bundled examples.</p>
             </div>
@@ -219,6 +233,13 @@
                     <option value="focus">Around focus</option>
                     <option value="all">All</option>
                     <option value="none">None</option>
+                  </select>
+                </label>
+                <label class="field" title="Double, triple and aromatic bonds in sticks, from the Chemical Component Dictionary or the file"><span>Bond orders</span>
+                  <select id="bond-orders">
+                    <option value="ligands">Ligands</option>
+                    <option value="all">All residues</option>
+                    <option value="off">Off</option>
                   </select>
                 </label>
                 <div class="toggles">
@@ -326,6 +347,12 @@
                 <label class="field"><span>Moving</span><select id="compare-mobile"></select></label>
                 <label class="field"><span>Reference chain</span><select id="compare-ref-chain"></select></label>
                 <label class="field"><span>Moving chain</span><select id="compare-mob-chain"></select></label>
+                <label class="field" title="Sequence: residues paired by sequence alignment, fitted with outlier pruning (as ChimeraX matchmaker). Structure: residues paired by structure alone with TM-align (MM-align for complexes), for remote homologs"><span>Pair residues by</span>
+                  <select id="compare-method">
+                    <option value="sequence">Sequence</option>
+                    <option value="structure">Structure (TM-align)</option>
+                  </select>
+                </label>
               </div>
               <div class="toggles" hidden>
                 <label title="Fit only on the residues selected in the reference, for example one domain or a binding site, so a hinge motion elsewhere shows up as deviation"><input id="compare-fit-selection" type="checkbox" /> Fit on selected residues</label>
@@ -337,6 +364,50 @@
                 <button id="compare-models" type="button" disabled>Overlay models</button>
               </div>
               <div id="compare-result" class="result-box" hidden></div>
+            </div>
+
+            <div class="group" id="density-group">
+              <h3>Density map</h3>
+              <p class="hint">The 2Fo-Fc and Fo-Fc maps of an X-ray entry or the map of a cryo-EM entry, from the PDBe volume server (network); or a CCP4/MRC map file, read on this computer.</p>
+              <div class="button-row">
+                <button id="density-load" type="button">Load map</button>
+                <button id="density-remove" type="button" disabled>Remove</button>
+              </div>
+              <label class="folder-button" for="density-file" title="A CCP4 or MRC map (.map, .mrc, .ccp4, optionally gzipped) of the active structure">
+                <input id="density-file" type="file" accept=".map,.mrc,.ccp4,.gz" />
+                Open a map file…
+              </label>
+              <div id="density-controls" hidden>
+                <div id="density-channels" class="map-channels"></div>
+                <div class="field-grid">
+                  <label class="field"><span>Region</span>
+                    <select id="density-region">
+                      <option value="focus">Around the focus</option>
+                      <option value="view">Follow the view</option>
+                      <option value="all">Whole map</option>
+                    </select>
+                  </label>
+                  <label class="field"><span>Radius <output id="density-radius-value"></output></span><input id="density-radius" type="range" min="4" max="30" step="1" value="10" /></label>
+                  <label class="field"><span>Style</span>
+                    <select id="density-style">
+                      <option value="mesh">Mesh</option>
+                      <option value="surface">Surface</option>
+                    </select>
+                  </label>
+                  <label class="field" title="Show the map only near the focused or selected atoms (or all atoms when nothing is focused), for figures"><span>Near atoms</span>
+                    <select id="density-zone">
+                      <option value="0">Everywhere</option>
+                      <option value="1.6">Within 1.6 Å</option>
+                      <option value="2">Within 2 Å</option>
+                      <option value="3">Within 3 Å</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="button-row">
+                  <button id="density-fit" type="button" title="Map values at every atom: atom inclusion at the contour (cryo-EM) or mean 2Fo-Fc density in σ (X-ray), per residue">Map fit</button>
+                </div>
+              </div>
+              <div id="density-result" class="result-box" hidden></div>
             </div>
 
             <div class="group" id="validation-group">
@@ -413,12 +484,27 @@
                     <option value="hydrophobicity">Hydrophobicity (9-residue window)</option>
                     <option value="missense">AlphaMissense (mean pathogenicity)</option>
                     <option value="msa">MSA depth</option>
+                    <option value="conservation">Conservation</option>
+                    <option value="mapfit">Fit to the loaded map</option>
                     <option value="densityfit">Fit to density (RSRZ / Q-score)</option>
                     <option value="data">Custom data</option>
                   </select>
                 </label>
               </div>
               <canvas id="profile-canvas" class="plot wide" width="640" height="220"></canvas>
+            </div>
+
+            <div class="group" id="conservation-group">
+              <h3>Conservation</h3>
+              <p class="hint">Residue conservation from a multiple sequence alignment: the MSA of an opened prediction, or an alignment file whose first sequence is the protein (A3M, aligned FASTA, Stockholm or Clustal). Jensen–Shannon divergence (Capra &amp; Singh 2007) in ConSurf-style grades.</p>
+              <div class="button-row">
+                <button id="conservation-run" type="button">Compute conservation</button>
+              </div>
+              <label class="folder-button" for="conservation-file">
+                <input id="conservation-file" type="file" accept=".a3m,.a2m,.fasta,.fa,.afa,.sto,.stockholm,.aln,.clustal,.msa,.gz" multiple />
+                Open an alignment…
+              </label>
+              <div id="conservation-result" class="result-box" hidden></div>
             </div>
 
             <div class="group" id="pae-group">
@@ -698,6 +784,23 @@
         </form>
       </dialog>
 
+      <dialog id="methods-dialog" class="dialog wide">
+        <form method="dialog">
+          <h2>Methods and references</h2>
+          <p class="hint">A draft for a methods section, written from what this session used: data sources with their IDs, versions and revision dates, and each analysis with its parameters. Check it against what you did and edit it to fit.</p>
+          <textarea id="methods-text" class="methods-text" rows="10" aria-label="Methods paragraph"></textarea>
+          <h3>References</h3>
+          <ol id="methods-references" class="methods-references"></ol>
+          <p id="methods-status" class="hint" aria-live="polite"></p>
+          <menu>
+            <button value="close" type="submit">Close</button>
+            <button id="methods-copy-references" type="button">Copy references</button>
+            <button id="methods-bibtex" type="button">Download BibTeX</button>
+            <button id="methods-copy" type="button" class="primary">Copy methods</button>
+          </menu>
+        </form>
+      </dialog>
+
       <dialog id="help-dialog" class="dialog wide">
         <form method="dialog">
           <h2>Mouse &amp; keyboard</h2>
@@ -737,6 +840,6 @@
         </form>
       </dialog>
     </main>
-    <script type="module" src="/app.js?v=wave5"></script>
+    <script type="module" src="/app.js?v=wave6"></script>
   </body>
 </html>

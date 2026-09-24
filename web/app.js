@@ -1,11 +1,13 @@
 import { createRenderer, MESH_VERTEX_STRIDE, packColor, withTimeout } from './lib/renderer.js';
 import { createCanvasRenderer } from './lib/renderer-canvas.js';
-import { ASYMMETRIC_UNIT_ID, parseStructure } from './lib/parse.js';
+import { ASYMMETRIC_UNIT_ID, addAtomToModel, createModel, createStructure, parseCIFDocument, parseStructure, readChemComp } from './lib/parse.js';
+import { applyChemistry } from './lib/chemistry.js';
 import {
   MAX_ASSEMBLY_ATOMS,
   assignSecondary,
   buildSearchItems,
   computeBounds,
+  deriveModel,
   deriveStructure,
   materializeAssemblyModels,
   prepareAssemblyEstimates,
@@ -13,8 +15,9 @@ import {
   uniprotPositionForResidue,
 } from './lib/structure.js';
 import { buildLines, buildScene, focusNeighborhood } from './lib/scene.js';
-import { compareStructures, polymerChainResidues, superposeEnsemble } from './lib/compare.js';
-import { composeTransforms, invertTransform, isIdentityTransform, transformPoint } from './lib/superpose.js';
+import { alignerChains, compareStructures, polymerChainResidues, superposeEnsemble } from './lib/compare.js';
+import { alignSequences } from './lib/align.js';
+import { composeTransforms, invertTransform, isIdentityTransform, transformDirection, transformPoint } from './lib/superpose.js';
 import { countMask, evaluateSelection, looksLikeSelection, parseSelection, residueKeysFromMask } from './lib/select.js';
 import { COMMANDS, CommandError, parseCommand, suggestCommands } from './lib/commands.js';
 import { base64ToBytes, bytesToBase64, compressText, decodeLinkPayload, decompressBytes, decompressText, dequantizeMatrix, encodeLinkPayload, quantizeMatrix } from './lib/codec.js';
@@ -79,7 +82,7 @@ import { add, angleBetween, dihedralAngle, normalize, quatFromAxisAngle, quatMul
 import { createSequenceView } from './lib/sequence-view.js';
 import { STRUCTURE_SORTS, classifyQuery, coverageDepth, groupStructures, modelConfidence, modelRequest, shortMethod, sortStructures } from './lib/discover.js';
 import { PPSE_EXPOSED, partSphereExposure } from './lib/exposure.js';
-import { drawHistogram, drawPAE, drawProfile, drawRamachandran, drawWoods } from './lib/plots.js';
+import { drawHistogram, drawPAE, drawProfile, drawRamachandran, drawVolcano, drawWoods } from './lib/plots.js';
 import { dsspSummary } from './lib/dssp.js';
 import { KYTE_DOOLITTLE, MAX_ASA } from './lib/residues.js';
 import { elementInfo } from './lib/elements.js';
@@ -127,6 +130,7 @@ const els = {
   compareMobChain: document.querySelector('#compare-mob-chain'),
   compareFitSelection: document.querySelector('#compare-fit-selection'),
   compareRun: document.querySelector('#compare-run'),
+  compareMethod: document.querySelector('#compare-method'),
   compareReset: document.querySelector('#compare-reset'),
   compareAlphaFold: document.querySelector('#compare-alphafold'),
   compareModels: document.querySelector('#compare-models'),
@@ -158,6 +162,7 @@ const els = {
   sidechainMode: document.querySelector('#sidechain-mode'),
   showWater: document.querySelector('#show-water'),
   showHydrogen: document.querySelector('#show-hydrogen'),
+  bondOrders: document.querySelector('#bond-orders'),
   surfaceKind: document.querySelector('#surface-kind'),
   surfaceColor: document.querySelector('#surface-color'),
   surfaceOpacity: document.querySelector('#surface-opacity'),
@@ -270,8 +275,32 @@ const els = {
   exportCopy: document.querySelector('#export-copy'),
   exportMovie: document.querySelector('#export-movie'),
   helpDialog: document.querySelector('#help-dialog'),
+  methodsDialog: document.querySelector('#methods-dialog'),
+  methodsText: document.querySelector('#methods-text'),
+  methodsReferences: document.querySelector('#methods-references'),
   folderInput: document.querySelector('#folder-input'),
   predictionGroup: document.querySelector('#prediction-group'),
+  conservationRun: document.querySelector('#conservation-run'),
+  conservationFile: document.querySelector('#conservation-file'),
+  conservationResult: document.querySelector('#conservation-result'),
+  densityLoad: document.querySelector('#density-load'),
+  densityFile: document.querySelector('#density-file'),
+  densityRemove: document.querySelector('#density-remove'),
+  densityControls: document.querySelector('#density-controls'),
+  densityChannels: document.querySelector('#density-channels'),
+  densityRegion: document.querySelector('#density-region'),
+  densityRadius: document.querySelector('#density-radius'),
+  densityRadiusValue: document.querySelector('#density-radius-value'),
+  densityStyle: document.querySelector('#density-style'),
+  densityZone: document.querySelector('#density-zone'),
+  densityFit: document.querySelector('#density-fit'),
+  densityResult: document.querySelector('#density-result'),
+  dockingGroup: document.querySelector('#docking-group'),
+  dockingCount: document.querySelector('#docking-count'),
+  dockingTitle: document.querySelector('#docking-title'),
+  dockingPoses: document.querySelector('#docking-poses'),
+  dockingFingerprint: document.querySelector('#docking-fingerprint'),
+  dockingDetail: document.querySelector('#docking-detail'),
   predictionCount: document.querySelector('#prediction-count'),
   predictionTitle: document.querySelector('#prediction-title'),
   predictionModels: document.querySelector('#prediction-models'),
@@ -329,6 +358,8 @@ const DEFAULT_DISPLAY = {
   sidechains: 'focus',
   showWater: false,
   showHydrogen: false,
+  // Double, triple and aromatic bonds in sticks: 'ligands' (and modified residues), 'all' or 'off'.
+  bondOrders: 'ligands',
   atomScale: 1,
   bondScale: 1,
   cartoonWidth: 1,
@@ -347,7 +378,7 @@ const DEFAULT_DISPLAY = {
 const STRUCTURE_COLORS = ['#5aa9f0', '#f39c3d', '#5fd08e', '#e8659c', '#a78bfa', '#e8d44d', '#4fd1d9', '#c98b5c'].map(hexColor);
 const MAX_OVERLAY_MODELS = 60;
 const COMPARISON_SCHEMES = new Set(['deviation', 'lddt', 'rmsf']);
-const DATA_SCHEMES = new Set(['coverage', 'data', 'exposure', 'ppse', 'deviation', 'lddt', 'rmsf', 'validation', 'densityfit', 'missense', 'domains', 'msa']);
+const DATA_SCHEMES = new Set(['coverage', 'data', 'exposure', 'ppse', 'deviation', 'lddt', 'rmsf', 'validation', 'densityfit', 'mapfit', 'missense', 'domains', 'msa', 'conservation']);
 
 // Everything that belongs to one loaded structure. `state.structure`, `state.display`,
 // `state.selection` and the other per-structure fields below read and write the active entry.
@@ -531,7 +562,8 @@ async function init() {
     for (const id of ids.slice(1)) await fetchStructure(id, { add: true });
     if (state.entries.length > 1) {
       setActiveEntry(state.entries[0]);
-      if (hashRequest.has('superpose')) runSuperposition({ reference: state.entries[0], mobiles: state.entries.slice(1) });
+      if (hashRequest.get('superpose') === 'structure') await runStructuralSuperposition({ reference: state.entries[0], mobiles: state.entries.slice(1) });
+      else if (hashRequest.has('superpose')) runSuperposition({ reference: state.entries[0], mobiles: state.entries.slice(1) });
     }
   } else {
     // The first example opens plainly; its description offers the opening view.
@@ -553,6 +585,7 @@ async function initRenderer() {
   } catch (error) {
     console.warn('WebGPU unavailable, using canvas preview:', error);
     state.renderer = createCanvasRenderer(els.canvas);
+    state.canvasFallback = true;
     els.gpuBadge.textContent = 'Canvas preview';
     els.gpuBadge.classList.add('is-fallback');
     els.gpuBadge.title = 'WebGPU is not available in this browser, so Proteoscope uses a simplified compatibility renderer without surfaces, ambient occlusion or outlines. Use a current Chrome, Edge, Safari 26+ or Firefox 141+ (Windows) for full quality.';
@@ -682,6 +715,7 @@ function bindEvents() {
   els.sidechainMode.addEventListener('change', () => updateDisplay({ sidechains: els.sidechainMode.value }));
   els.showWater.addEventListener('change', () => updateDisplay({ showWater: els.showWater.checked }));
   els.showHydrogen.addEventListener('change', () => updateDisplay({ showHydrogen: els.showHydrogen.checked }));
+  els.bondOrders.addEventListener('change', () => updateDisplay({ bondOrders: els.bondOrders.value }));
   for (const [input, key] of [
     [document.querySelector('#atom-scale'), 'atomScale'],
     [document.querySelector('#bond-scale'), 'bondScale'],
@@ -808,6 +842,15 @@ function bindEvents() {
   els.screenshot.addEventListener('click', openExportDialog);
   els.fullscreen.addEventListener('click', toggleFullscreen);
   els.helpButton.addEventListener('click', () => els.helpDialog.showModal());
+  document.querySelector('#session-methods').addEventListener('click', () => guardedLoad(openMethodsDialog));
+  // Messages go inside the dialog: toasts would sit under its backdrop.
+  const methodsStatus = document.querySelector('#methods-status');
+  document.querySelector('#methods-copy').addEventListener('click', () => copyText(els.methodsText.value, 'Copied the methods paragraph.', methodsStatus));
+  document.querySelector('#methods-copy-references').addEventListener('click', () => copyText([...els.methodsReferences.children].map((item, index) => `${index + 1}. ${item.textContent}`).join('\n'), 'Copied the references.', methodsStatus));
+  document.querySelector('#methods-bibtex').addEventListener('click', () => {
+    downloadText(`${fileStem()}-references.bib`, state.methods?.bibtex ?? '', 'application/x-bibtex');
+    methodsStatus.textContent = `Saved ${fileStem()}-references.bib.`;
+  });
   els.exportConfirm.addEventListener('click', (event) => {
     event.preventDefault();
     exportImage('download');
@@ -830,7 +873,15 @@ function bindEvents() {
   }
   els.compareReference.addEventListener('change', () => populateCompareChains());
   els.compareMobile.addEventListener('change', () => populateCompareChains());
-  els.compareRun.addEventListener('click', () => runSuperposition());
+  els.compareRun.addEventListener('click', () => (els.compareMethod.value === 'structure' ? runStructuralSuperposition() : runSuperposition()));
+  // TM-align chooses its own pairs, so a fit on selected residues applies to sequence pairing only.
+  els.compareMethod.addEventListener('change', () => {
+    const structure = els.compareMethod.value === 'structure';
+    const label = els.compareFitSelection.closest('label');
+    label.dataset.title ??= label.title;
+    els.compareFitSelection.disabled = structure;
+    label.title = structure ? 'TM-align chooses the residues it fits; pair residues by sequence to fit on a selection.' : label.dataset.title;
+  });
   els.compareReset.addEventListener('click', resetComparedPositions);
   els.compareAlphaFold.addEventListener('click', compareWithAlphaFold);
   els.compareModels.addEventListener('click', () => toggleModelOverlay());
@@ -855,6 +906,48 @@ function bindEvents() {
   els.msaDepth.addEventListener('click', () => runCommand('msa'));
   els.predictionSuperpose.addEventListener('click', () => guardedLoad(superposePredictionModels));
   els.predictionExport.addEventListener('click', exportPredictionCSV);
+  document.querySelector('#docking-fingerprints').addEventListener('click', () => guardedLoad(() => computePoseFingerprints()));
+  els.densityLoad.addEventListener('click', () => runCommand('map'));
+  els.conservationRun.addEventListener('click', () => runCommand('conservation'));
+  els.conservationFile.addEventListener('change', () => {
+    const files = [...els.conservationFile.files];
+    els.conservationFile.value = '';
+    if (files.length) guardedLoad(() => openAlignmentFiles(files.map((file) => fileRef(file))));
+  });
+  els.densityFile.addEventListener('change', () => {
+    const [file] = els.densityFile.files;
+    els.densityFile.value = '';
+    if (file) guardedLoad(() => openMapFile(fileRef(file)));
+  });
+  els.densityRemove.addEventListener('click', () => removeDensity());
+  els.densityFit.addEventListener('click', () => runCommand('map fit'));
+  els.densityRegion.addEventListener('change', () => {
+    if (!state.active?.density) return;
+    state.active.density.region = els.densityRegion.value;
+    updateDensity(state.active);
+  });
+  els.densityRadius.addEventListener('input', () => {
+    const density = state.active?.density;
+    if (!density) return;
+    density.radius = Number(els.densityRadius.value);
+    els.densityRadiusValue.textContent = `${density.radius} Å`;
+    clearTimeout(state.densityLevelTimer);
+    state.densityLevelTimer = setTimeout(() => updateDensity(state.active), 150);
+  });
+  els.densityStyle.addEventListener('change', () => {
+    const density = state.active?.density;
+    if (!density) return;
+    density.style = els.densityStyle.value;
+    density.opacity = density.style === 'surface' ? 0.45 : 1;
+    drawDensity(state.active);
+  });
+  els.densityZone.addEventListener('change', () => {
+    if (!state.active?.density) return;
+    state.active.density.zone = Number(els.densityZone.value);
+    updateDensity(state.active);
+  });
+  document.querySelector('#docking-export').addEventListener('click', exportDockingCSV);
+  document.querySelector('#docking-clear').addEventListener('click', () => guardedLoad(clearPoses));
   document.querySelectorAll('[data-pair-metric]').forEach((button) => {
     button.addEventListener('click', () => {
       state.pairMetric = button.dataset.pairMetric;
@@ -1029,8 +1122,9 @@ function updateLocationHash() {
     if (location.hash.includes('fetch=')) history.replaceState(null, '', location.pathname + location.search);
     return;
   }
-  const superposed = state.entries.some((entry) => entry.comparison && entry.comparison.referenceId === state.entries[0].id);
-  history.replaceState(null, '', `#fetch=${ids.map(encodeURIComponent).join(',')}${superposed ? '&superpose' : ''}`);
+  const superposed = state.entries.find((entry) => entry.comparison && entry.comparison.referenceId === state.entries[0].id);
+  const method = superposed?.comparison.recipe?.correspondence === 'structure' ? '=structure' : '';
+  history.replaceState(null, '', `#fetch=${ids.map(encodeURIComponent).join(',')}${superposed ? `&superpose${method}` : ''}`);
 }
 
 function applyRemoteMetadata(encoded, entry = state.active) {
@@ -1081,6 +1175,8 @@ async function openFiles(files) {
     for (const [index, set] of sets.entries()) await openPredictionSet(set, { add: index > 0 || els.addMode.checked });
     // The logs, settings, templates and inputs in a prediction folder are left alone.
     const rest = unclaimed.filter((ref) => !insidePredictionFolder(ref, sets));
+    const molecules = rest.filter((ref) => MOLECULE_FILE.test(ref.name));
+    const maps = rest.filter((ref) => MAP_FILE.test(ref.name));
     const structures = rest.filter((ref) => STRUCTURE_FILE.test(ref.name));
     let first = null;
     for (const [index, ref] of structures.entries()) {
@@ -1097,11 +1193,18 @@ async function openFiles(files) {
         showToast(`Opened ${structures.length} structures. Superpose them in the Analysis tab.`);
       }
     }
-    for (const ref of rest.filter((item) => !STRUCTURE_FILE.test(item.name))) await openAnnotationFile(ref);
+    if (molecules.length) await openMoleculeFiles(molecules);
+    for (const ref of maps) await openMapFile(ref);
+    const others = rest.filter((item) => !STRUCTURE_FILE.test(item.name) && !MOLECULE_FILE.test(item.name) && !MAP_FILE.test(item.name));
+    // Alignments dropped together (one per chain, say) are scored together.
+    const alignments = others.filter((item) => isAlignmentFile(item.name));
+    if (alignments.length) await openAlignmentFiles(alignments);
+    for (const ref of others.filter((item) => !isAlignmentFile(item.name))) await openAnnotationFile(ref);
   });
 }
 
 const STRUCTURE_FILE = /\.(pdb|ent|cif|mmcif|bcif)$/i;
+const MAP_FILE = /\.(mrc|map|ccp4)$/i;
 
 // Files compressed with gzip or Zstandard (AlphaFold 3's --compress_large_output_files) are read
 // decompressed under their inner name.
@@ -1219,8 +1322,8 @@ async function openAnnotationFile(ref) {
     setEntryPAE(state.active, matrix, ref.name);
     return;
   }
-  if (name.endsWith('.a3m') || name.endsWith('.a2m')) {
-    applyMSA(state.active, [msaDepth(await ref.text())], ref.name);
+  if (isAlignmentFile(name)) {
+    await openAlignmentFiles([ref]);
     return;
   }
   if (/\.(csv|tsv|txt|parquet|mztab|xls)$/.test(name)) {
@@ -1286,7 +1389,7 @@ async function loadStructureFromURL(url, label, options = {}) {
 async function loadStructureFromText(text, label, options = {}) {
   showLoading(`Parsing ${label}`);
   await nextFrame();
-  const structure = parseStructure(text, label);
+  const structure = options.structure ?? parseStructure(text, label);
   // Files from prediction folders are predictions even when they carry no ModelCIF records.
   if (options.predicted) structure.meta.isPredicted = true;
   structure.baseModels = structure.models;
@@ -1318,6 +1421,7 @@ async function loadStructureFromText(text, label, options = {}) {
   markSceneDirty();
   refreshSurface(entry);
   hideLoading();
+  completeChemistry(entry);
   return entry;
 }
 
@@ -1429,6 +1533,13 @@ function releaseEntryMeshes(entry) {
     }
   }
   state.renderer?.setMesh(`surface:${entry.id}`, null);
+  if (entry.density) {
+    // Pending updates and the follow timer find the map gone.
+    entry.density.updateToken += 1;
+    clearDensityGeometry(entry);
+    volumeWorker().run('drop', { key: String(entry.id) }).catch(() => {});
+    entry.density = null;
+  }
 }
 
 // Clears result panels that describe the previous active structure.
@@ -1521,6 +1632,502 @@ function reassignSecondary() {
   markColorsDirty();
   renderSequence();
   refreshTabPanels();
+}
+
+/* ---------- Ligand chemistry ---------- */
+
+// Ligands and modified residues that the file does not define (PDB files, predictions) get
+// their bond orders, aromaticity and charges from the Chemical Component Dictionary through the
+// server, in the background. Until then, or offline without a cached copy, they keep the
+// chemistry inferred from their geometry.
+async function completeChemistry(entry) {
+  const structure = entry.structure;
+  structure.componentsRequested ??= new Set();
+  const missing = new Set();
+  for (const model of new Set([...structure.baseModels, ...structure.models])) {
+    for (const id of model.missingComponents ?? []) if (!structure.componentsRequested.has(id)) missing.add(id);
+  }
+  if (!missing.size) return;
+  const batch = [...missing].slice(0, MAX_COMPONENT_REQUESTS);
+  for (const id of batch) structure.componentsRequested.add(id);
+  const fetched = await Promise.all(batch.map(async (id) => {
+    try {
+      const response = await fetch(`/api/fetch/ccd/${encodeURIComponent(id)}`);
+      if (!response.ok) return null;
+      return readChemComp(parseCIFDocument(await response.text())).get(id) ?? null;
+    } catch {
+      return null;
+    }
+  }));
+  let added = 0;
+  for (const component of fetched) {
+    if (!component) continue;
+    component.source = 'ccd';
+    structure.components.set(component.id, component);
+    added += 1;
+  }
+  if (!state.entries.includes(entry)) return;
+  if (added) {
+    for (const model of new Set([...structure.baseModels, ...structure.models])) applyChemistry(model, structure);
+    markSceneDirty();
+    if (entry === state.active && state.focus) computeFocusInteractions([...state.focus.residues]);
+  }
+  // Structures with more ligand types than one batch get the rest next.
+  if (missing.size > batch.length) await completeChemistry(entry);
+}
+
+const MAX_COMPONENT_REQUESTS = 40;
+
+/* ---------- Docking poses ---------- */
+
+// Poses from docking programs (SDF, MOL2 or PDBQT) are shown one at a time as a ligand of the
+// active structure, the receptor, so focus, interactions, the selection language and exports
+// treat a pose like any other ligand. Stepping to another pose swaps only the ligand's atoms.
+// Residue names for the shown pose: the first the receptor does not use, so the pose's chemistry
+// never replaces that of the receptor's own residues (a reference ligand named LIG, say).
+const POSE_RESIDUES = ['LIG', 'LG1', 'LG2', 'LG3', 'LG4', 'LG5', 'LG6', 'LG7', 'LG8', 'LG9'];
+const MOLECULE_FILE = /\.(sdf|sd|mol|mol2|pdbqt)$/i;
+const FINGERPRINT_RADIUS = 9;
+const MAX_FINGERPRINT_POSES = 1000;
+
+async function openMoleculeFiles(refs) {
+  const files = [];
+  for (const ref of refs) files.push({ name: ref.name, text: await ref.text() });
+  const { docking, receptors } = await readMoleculeFiles(files);
+  // A PDBQT file of protein residues is the receptor itself.
+  for (const receptor of receptors) {
+    await loadStructureFromText(receptor.text, receptor.name, { source: 'Local file (PDBQT receptor)', add: state.entries.length > 0 && els.addMode.checked });
+  }
+  if (!docking) return;
+  const host = state.active ?? await createPoseHost(docking);
+  await attachPoses(host, docking);
+  activateTab('structure');
+  const scores = docking.columns.length ? ` Scores: ${docking.columns.slice(0, 3).map((column) => column.key).join(', ')}; click a column to sort.` : '';
+  showToast(`${docking.molecules.length === 1 ? 'Opened 1 pose' : `Opened ${docking.molecules.length} poses`} in ${host.name}.${scores}`);
+}
+
+// The poses of one or more molecule files ({ name, text }), in rank order; PDBQT receptors are
+// returned as PDB text.
+async function readMoleculeFiles(files) {
+  const molfile = await import('./lib/molfile.js');
+  const molecules = [];
+  const kept = [];
+  const receptors = [];
+  let format = '';
+  for (const file of files) {
+    const detected = molfile.detectMolfile(file.text, file.name);
+    if (detected === 'pdbqt' && molfile.isPDBQTReceptor(file.text)) {
+      receptors.push({ name: file.name.replace(/\.pdbqt$/i, '.pdb'), text: molfile.pdbqtToPDB(file.text) });
+      continue;
+    }
+    const parsed = molfile.parseMolfile(file.text, file.name, detected);
+    const stem = file.name.replace(/\.[^.]+$/, '');
+    // DiffDock writes one file per pose, rank1_confidence-0.52.sdf.
+    const fromName = molfile.confidenceFromName(file.name);
+    parsed.molecules.forEach((molecule, index) => {
+      molecule.title ||= parsed.molecules.length > 1 ? `${stem} ${index + 1}` : stem;
+      molecule.file = file.name;
+      molecule.fileRank = fromName?.rank ?? 0;
+      if (Number.isFinite(fromName?.confidence) && !molecule.properties.has('confidence')) molecule.properties.set('confidence', String(fromName.confidence));
+    });
+    molecules.push(...parsed.molecules);
+    kept.push(file);
+    format ||= parsed.format;
+  }
+  if (!molecules.length) return { docking: null, receptors };
+  if (molecules.every((molecule) => molecule.fileRank)) molecules.sort((a, b) => a.fileRank - b.fileRank);
+  return {
+    receptors,
+    docking: {
+      name: kept.length === 1 ? kept[0].name : `${kept.length} files`,
+      format,
+      files: kept,
+      molecules,
+      columns: molfile.scoreColumns(molecules),
+      index: -1,
+      fingerprints: null,
+      sort: null,
+    },
+  };
+}
+
+// Without a receptor, the poses open in a structure of their own.
+async function createPoseHost(docking, options = {}) {
+  const structure = createStructure(docking.name, 'pdb');
+  structure.meta.title = docking.name;
+  structure.models.push(createModel(1));
+  structure.baseModels = structure.models;
+  return loadStructureFromText('', docking.name, { ...options, structure, source: `${formatLabel(docking.format)} poses`, origin: { type: 'molecules', name: docking.name } });
+}
+
+async function serializeDocking(docking, options) {
+  if (options.link) throw new Error(`The docking poses (${docking.name}) are local files, so they cannot travel in a link. Save the session as a file instead.`);
+  const files = [];
+  for (const file of docking.files) files.push({ name: file.name, data: bytesToBase64(await compressText(file.text)) });
+  return { encoding: 'gzip-base64', files, index: docking.index, sort: docking.sort, fingerprints: Boolean(docking.fingerprints) };
+}
+
+async function restoreDocking(entry, saved) {
+  const files = [];
+  for (const file of saved.files ?? []) files.push({ name: file.name, text: await decompressText(base64ToBytes(file.data)) });
+  const { docking } = await readMoleculeFiles(files);
+  if (!docking) return;
+  docking.sort = saved.sort ?? null;
+  await attachPoses(entry, docking, { index: Math.min(Math.max(0, saved.index ?? 0), docking.molecules.length - 1), focus: false });
+  if (saved.fingerprints) await computePoseFingerprints(entry);
+}
+
+function formatLabel(format) {
+  return { sdf: 'SDF', mol2: 'MOL2', pdbqt: 'PDBQT' }[format] ?? format.toUpperCase();
+}
+
+async function attachPoses(entry, docking, options = {}) {
+  const structure = entry.structure;
+  if (structure.activeAssemblyId !== ASYMMETRIC_UNIT_ID) await activateAssembly(ASYMMETRIC_UNIT_ID, entry);
+  if (entry.docking) removePoseAtoms(entry);
+  docking.receptorAtoms = structure.baseModels.map((model) => model.atoms.length);
+  const used = new Set(structure.baseModels.flatMap((model) => model.atoms.map((atom) => atom.chain)));
+  docking.chain = ['L', 'Z', 'Y', 'X', 'W', 'V', 'U', 'Q'].find((chain) => !used.has(chain)) ?? '~';
+  const names = new Set(structure.baseModels.flatMap((model) => model.residues.map((residue) => String(residue.resName).toUpperCase())));
+  docking.resName = POSE_RESIDUES.find((name) => !names.has(name) && !structure.components.has(name)) ?? 'LG0';
+  entry.docking = docking;
+  await showPose(entry, options.index ?? 0, { focus: options.focus ?? true });
+}
+
+function removePoseAtoms(entry) {
+  const docking = entry.docking;
+  entry.structure.baseModels.forEach((model, index) => {
+    const count = docking.receptorAtoms?.[index];
+    if (Number.isInteger(count) && count !== model.atoms.length) rebuildModelAtoms(model, model.atoms.slice(0, count));
+  });
+  if (entry.structure.components.get(docking.resName)?.isolated) entry.structure.components.delete(docking.resName);
+  deriveStructure(entry.structure, { secondaryMode: state.secondaryMode });
+}
+
+function rebuildModelAtoms(model, atoms) {
+  Object.assign(model, createModel(model.number));
+  for (const atom of atoms) addAtomToModel(model, atom);
+}
+
+async function showPose(entry, index, options = {}) {
+  const docking = entry.docking;
+  const molecule = docking?.molecules[index];
+  if (!molecule) return;
+  const { moleculeAtoms, moleculeComponent } = await import('./lib/molfile.js');
+  const structure = entry.structure;
+  const poseKey = poseResidueKey(docking);
+  const focused = entry === state.active && state.focus?.residues.has(poseKey);
+  structure.components.set(docking.resName, moleculeComponent(molecule, docking.resName));
+  structure.baseModels.forEach((model, modelIndex) => {
+    const receptor = model.atoms.slice(0, docking.receptorAtoms[modelIndex]);
+    const firstSerial = receptor.reduce((max, atom) => Math.max(max, atom.serial || 0), 0) + 1;
+    rebuildModelAtoms(model, receptor);
+    for (const atom of placedPoseAtoms(entry, moleculeAtoms(molecule, { chain: docking.chain, resName: docking.resName, firstId: model.atoms.length, firstSerial }))) addAtomToModel(model, atom);
+  });
+  structure.models = structure.baseModels;
+  deriveStructure(structure, { secondaryMode: state.secondaryMode });
+  docking.index = index;
+  // Per-atom results of the previous pose no longer apply.
+  entry.sasa = null;
+  dropPoseMeasurements(entry, docking.receptorAtoms[0]);
+  if (entry === state.active) updateStructureUI();
+  markSceneDirty();
+  markColorsDirty();
+  if (entry.surface.kind !== 'off') refreshSurface(entry);
+  if (entry !== state.active) return;
+  if (options.focus || focused) await focusResidues([poseKey]);
+  renderDocking();
+}
+
+// A pose's file coordinates are in the receptor's deposited frame; a superposed receptor moved.
+function placedPoseAtoms(entry, atoms) {
+  if (!entry.transform) return atoms;
+  for (const atom of atoms) [atom.x, atom.y, atom.z] = transformPoint(entry.transform, atom.x, atom.y, atom.z);
+  return atoms;
+}
+
+function poseResidueKey(docking) {
+  return `${docking.chain}:1:${docking.resName}`;
+}
+
+// Measurements and pending picks on atoms of the pose, which is being replaced or removed.
+function dropPoseMeasurements(entry, receptorCount) {
+  const onReceptor = (item) => item.entry !== entry || item.atom.id < receptorCount;
+  state.measurements = state.measurements.filter((measurement) => measurement.atoms.every(onReceptor));
+  state.measurePending = state.measurePending.filter(onReceptor);
+  renderMeasurements();
+}
+
+// Receptor ligands that the poses were docked over (most of their atoms within 1.5 Å of a pose):
+// left out as interaction partners. Cofactors a pose binds, such as heme, stay.
+function overlappedLigands(model, receptorCount, poses) {
+  const overlapped = new Set();
+  const byResidue = new Map();
+  for (let index = 0; index < receptorCount; index += 1) {
+    const atom = model.atoms[index];
+    if (atom.kind !== 'ligand' || atom.isHydrogen) continue;
+    if (!byResidue.has(atom.residueKey)) byResidue.set(atom.residueKey, []);
+    byResidue.get(atom.residueKey).push(atom);
+  }
+  for (const [key, atoms] of byResidue) {
+    let close = 0;
+    for (const atom of atoms) {
+      if (poses.some((pose) => pose.some((other) => (other.x - atom.x) ** 2 + (other.y - atom.y) ** 2 + (other.z - atom.z) ** 2 <= 2.25))) close += 1;
+    }
+    if (close >= Math.max(3, atoms.length * 0.25)) overlapped.add(key);
+  }
+  return overlapped;
+}
+
+async function clearPoses(entry = state.active) {
+  if (!entry?.docking) return;
+  const poseKey = poseResidueKey(entry.docking);
+  if (entry === state.active && state.focus?.residues.has(poseKey)) clearFocus();
+  dropPoseMeasurements(entry, entry.docking.receptorAtoms[0]);
+  removePoseAtoms(entry);
+  entry.docking = null;
+  entry.sasa = null;
+  if (entry === state.active) updateStructureUI();
+  markSceneDirty();
+  markColorsDirty();
+  if (entry.surface.kind !== 'off') refreshSurface(entry);
+}
+
+function dockingOf(entry = state.active) {
+  return entry?.docking ?? null;
+}
+
+function stepPose(delta) {
+  const docking = dockingOf();
+  if (!docking) return;
+  const order = dockingOrder(docking);
+  const position = order.indexOf(docking.index);
+  const next = order[Math.max(0, Math.min(order.length - 1, position + delta))];
+  if (next !== undefined && next !== docking.index) guardedLoad(() => showPose(state.active, next));
+}
+
+// Pose order in the table: the chosen score column, else the file's order (best first for
+// Vina, GNINA, smina and DiffDock).
+function dockingOrder(docking) {
+  const order = docking.molecules.map((_, index) => index);
+  const column = docking.columns.find((item) => item.key === docking.sort);
+  if (!column) return order;
+  const value = (index) => Number(docking.molecules[index].properties.get(column.key));
+  return order.sort((a, b) => {
+    const x = value(a);
+    const y = value(b);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return Number.isFinite(x) ? -1 : Number.isFinite(y) ? 1 : a - b;
+    return (column.lower ? x - y : y - x) || a - b;
+  });
+}
+
+// Heavy-atom RMSD to the first pose when the atoms correspond (the same molecule written in the
+// same atom order, as docking programs do), without superposition.
+function poseRMSD(docking, index) {
+  const first = docking.molecules[0].atoms;
+  const atoms = docking.molecules[index].atoms;
+  if (atoms.length !== first.length || atoms.some((atom, position) => atom.element !== first[position].element)) return NaN;
+  let sum = 0;
+  let count = 0;
+  atoms.forEach((atom, position) => {
+    if (atom.element === 'H') return;
+    const other = first[position];
+    sum += (atom.x - other.x) ** 2 + (atom.y - other.y) ** 2 + (atom.z - other.z) ** 2;
+    count += 1;
+  });
+  return count ? Math.sqrt(sum / count) : NaN;
+}
+
+// Interaction fingerprints: each pose's interactions with the receptor residues within 9 Å,
+// computed on a small model of that pocket so many poses stay fast.
+async function computePoseFingerprints(entry = state.active) {
+  const docking = dockingOf(entry);
+  if (!docking) return;
+  const module = await loadModule('interactions', './lib/interactions.js');
+  if (!module) return;
+  const { moleculeAtoms, moleculeComponent } = await import('./lib/molfile.js');
+  const model = entry.structure.baseModels[0];
+  const receptorCount = docking.receptorAtoms[0];
+  const count = Math.min(docking.molecules.length, MAX_FINGERPRINT_POSES);
+  const poses = docking.molecules.slice(0, count).map((molecule) => placedPoseAtoms(entry, moleculeAtoms(molecule, { chain: docking.chain, resName: docking.resName, firstId: 0 })));
+  const overlapped = overlappedLigands(model, receptorCount, poses.map((atoms) => atoms.filter((atom) => !atom.isHydrogen)));
+  const cell = FINGERPRINT_RADIUS;
+  const grid = new Map();
+  for (let index = 0; index < receptorCount; index += 1) {
+    const atom = model.atoms[index];
+    // Waters and a crystal ligand the poses were docked over are left out.
+    if (atom.isWater || overlapped.has(atom.residueKey)) continue;
+    const key = `${Math.floor(atom.x / cell)},${Math.floor(atom.y / cell)},${Math.floor(atom.z / cell)}`;
+    if (!grid.has(key)) grid.set(key, []);
+    grid.get(key).push(atom);
+  }
+  const residueAtoms = new Map();
+  for (let index = 0; index < receptorCount; index += 1) {
+    const atom = model.atoms[index];
+    if (!residueAtoms.has(atom.residueKey)) residueAtoms.set(atom.residueKey, []);
+    residueAtoms.get(atom.residueKey).push(atom);
+  }
+  const results = new Array(count);
+  let lastUpdate = performance.now();
+  for (let pose = 0; pose < count; pose += 1) {
+    const molecule = docking.molecules[pose];
+    const keys = new Set();
+    const limit = FINGERPRINT_RADIUS * FINGERPRINT_RADIUS;
+    for (const atom of poses[pose]) {
+      const gx = Math.floor(atom.x / cell);
+      const gy = Math.floor(atom.y / cell);
+      const gz = Math.floor(atom.z / cell);
+      for (let dx = -1; dx <= 1; dx += 1) {
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dz = -1; dz <= 1; dz += 1) {
+            for (const other of grid.get(`${gx + dx},${gy + dy},${gz + dz}`) ?? []) {
+              if (!keys.has(other.residueKey) && (other.x - atom.x) ** 2 + (other.y - atom.y) ** 2 + (other.z - atom.z) ** 2 <= limit) keys.add(other.residueKey);
+            }
+          }
+        }
+      }
+    }
+    const pocket = createModel(1);
+    for (const key of keys) for (const atom of residueAtoms.get(key)) addAtomToModel(pocket, { ...atom, id: pocket.atoms.length });
+    const first = pocket.atoms.length;
+    for (const atom of placedPoseAtoms(entry, moleculeAtoms(molecule, { chain: docking.chain, resName: docking.resName, firstId: first }))) addAtomToModel(pocket, atom);
+    deriveModel(pocket, { components: new Map([[docking.resName, moleculeComponent(molecule, docking.resName)]]), conect: [], meta: {}, secondaryRanges: [] }, { secondaryMode: 'file' });
+    const list = module.findInteractions(pocket, pocket.atoms.slice(first).map((atom) => atom.id), {});
+    const residues = new Map();
+    const counts = {};
+    for (const interaction of list) {
+      counts[interaction.type] = (counts[interaction.type] ?? 0) + 1;
+      const key = interaction.residueB;
+      if (!key) continue;
+      if (!residues.has(key)) residues.set(key, new Set());
+      residues.get(key).add(interaction.type);
+    }
+    results[pose] = { counts, residues };
+    if (performance.now() - lastUpdate > 200) {
+      lastUpdate = performance.now();
+      setLoading(`Interaction fingerprints · ${pose + 1} of ${count} poses`);
+      await nextFrame();
+    }
+  }
+  docking.fingerprints = results;
+  renderDocking();
+}
+
+// Interaction types in the order a fingerprint cell shows them (the first present wins).
+const FINGERPRINT_PRIORITY = ['salt-bridge', 'metal-coordination', 'hydrogen-bond', 'halogen-bond', 'pi-stacking', 'cation-pi', 'water-bridge', 'hydrophobic'];
+
+function interactionSummary(counts = {}) {
+  const parts = [
+    counts['hydrogen-bond'] ? `${counts['hydrogen-bond']} H` : '',
+    counts['salt-bridge'] ? `${counts['salt-bridge']} ionic` : '',
+    (counts['pi-stacking'] ?? 0) + (counts['cation-pi'] ?? 0) ? `${(counts['pi-stacking'] ?? 0) + (counts['cation-pi'] ?? 0)} π` : '',
+    counts['halogen-bond'] ? `${counts['halogen-bond']} X` : '',
+    counts['metal-coordination'] ? `${counts['metal-coordination']} metal` : '',
+    counts.hydrophobic ? `${counts.hydrophobic} hyd` : '',
+  ].filter(Boolean);
+  return parts.join(' · ') || 'none';
+}
+
+function renderDocking() {
+  const entry = state.active;
+  const docking = dockingOf(entry);
+  els.dockingGroup.hidden = !docking;
+  if (!docking) return;
+  const columns = docking.columns.slice(0, 3);
+  els.dockingCount.textContent = String(docking.molecules.length);
+  els.dockingTitle.textContent = `${docking.name} · ${formatLabel(docking.format)} · in ${entry.name}${docking.molecules.length > 1 ? ' · click a pose, or press [ and ]' : ''}`;
+  const order = dockingOrder(docking);
+  const titles = new Set(docking.molecules.map((molecule) => molecule.title));
+  const showTitles = titles.size > 1;
+  const rmsd = docking.molecules.length > 1 && Number.isFinite(poseRMSD(docking, Math.min(1, docking.molecules.length - 1)));
+  const header = `<tr><th>#</th>${showTitles ? '<th>Pose</th>' : ''}${columns.map((column) => `<th class="sortable${docking.sort === column.key ? ' is-sorted' : ''}" data-sort="${escapeHTML(column.key)}" title="${escapeHTML(column.key)} (${column.lower ? 'lower' : 'higher'} is better). Click to sort.">${escapeHTML(shortScoreName(column.key))}</th>`).join('')}${rmsd ? '<th title="Heavy-atom RMSD to pose 1 (Å), without superposition">RMSD</th>' : ''}${docking.fingerprints ? '<th>Interactions</th>' : ''}</tr>`;
+  const shown = order.slice(0, 200);
+  const rows = shown.map((index) => {
+    const molecule = docking.molecules[index];
+    const values = columns.map((column) => `<td>${scoreText(Number(molecule.properties.get(column.key)))}</td>`).join('');
+    const fingerprint = docking.fingerprints?.[index];
+    return `<tr class="${index === docking.index ? 'is-active' : ''}" data-pose="${index}" title="${escapeHTML(`${molecule.title} · ${molecule.formula}`)}"><td>${index + 1}</td>${showTitles ? `<td>${escapeHTML(molecule.title)}</td>` : ''}${values}${rmsd ? `<td>${scoreText(poseRMSD(docking, index), 1)}</td>` : ''}${docking.fingerprints ? `<td>${escapeHTML(fingerprint ? interactionSummary(fingerprint.counts) : '–')}</td>` : ''}</tr>`;
+  }).join('');
+  els.dockingPoses.innerHTML = `<table class="prediction-table"><thead>${header}</thead><tbody>${rows}</tbody></table>${order.length > shown.length ? `<p class="hint">Showing ${shown.length} of ${order.length} poses.</p>` : ''}`;
+  for (const row of els.dockingPoses.querySelectorAll('[data-pose]')) {
+    row.addEventListener('click', () => guardedLoad(() => showPose(entry, Number(row.dataset.pose))));
+  }
+  for (const cell of els.dockingPoses.querySelectorAll('[data-sort]')) {
+    cell.addEventListener('click', (event) => {
+      event.stopPropagation();
+      docking.sort = docking.sort === cell.dataset.sort ? null : cell.dataset.sort;
+      renderDocking();
+    });
+  }
+  renderPoseDetail(entry, docking);
+  renderFingerprint(entry, docking, order);
+}
+
+function shortScoreName(key) {
+  const names = { 'Vina affinity': 'Vina', minimizedAffinity: 'Affinity', CNNscore: 'CNN score', CNNaffinity: 'CNN affinity', r_i_docking_score: 'Docking score', r_i_glide_gscore: 'GlideScore' };
+  return names[key] ?? key;
+}
+
+function renderPoseDetail(entry, docking) {
+  const molecule = docking.molecules[docking.index];
+  if (!molecule) {
+    els.dockingDetail.replaceChildren();
+    return;
+  }
+  const properties = [...molecule.properties].filter(([key]) => !/^model_server/.test(key)).slice(0, 8);
+  els.dockingDetail.innerHTML = `<div><strong>${escapeHTML(molecule.title)}</strong> · ${escapeHTML(molecule.formula)} · ${molecule.atoms.filter((atom) => atom.element !== 'H').length} heavy atoms${molecule.file && docking.name !== molecule.file ? ` · ${escapeHTML(molecule.file)}` : ''}</div>
+    ${properties.length ? `<div class="hint">${properties.map(([key, value]) => `${escapeHTML(key)} ${escapeHTML(value.length > 40 ? `${value.slice(0, 40)}…` : value)}`).join(' · ')}</div>` : ''}`;
+}
+
+function renderFingerprint(entry, docking, order) {
+  const results = docking.fingerprints;
+  if (!results) {
+    els.dockingFingerprint.replaceChildren();
+    return;
+  }
+  const frequency = new Map();
+  for (const result of results) for (const key of result?.residues.keys() ?? []) frequency.set(key, (frequency.get(key) ?? 0) + 1);
+  const model = activeModelOf(entry);
+  const residues = [...frequency.keys()]
+    .sort((a, b) => frequency.get(b) - frequency.get(a))
+    .slice(0, 36)
+    .map((key) => model.residueMap.get(key))
+    .filter(Boolean)
+    .sort((a, b) => a.chain.localeCompare(b.chain) || a.resSeq - b.resSeq);
+  const types = new Map(state.interactionTypes.map((type) => [type.id, type]));
+  const poses = order.filter((index) => results[index]).slice(0, 60);
+  const cell = (result, residue) => {
+    const present = result.residues.get(residue.key);
+    if (!present) return '<td></td>';
+    const type = FINGERPRINT_PRIORITY.find((id) => present.has(id));
+    return `<td style="background:${types.get(type)?.color ?? '#888'}" title="${escapeHTML([...present].map((id) => types.get(id)?.label ?? id).join(', '))}"></td>`;
+  };
+  els.dockingFingerprint.innerHTML = `<table class="fingerprint"><thead><tr><th></th>${residues.map((residue) => `<th title="${escapeHTML(residueLabel(residue))} · in ${frequency.get(residue.key)} of ${results.length} poses"><span>${escapeHTML(`${residue.code || residue.resName}${residue.resSeq}`)}</span></th>`).join('')}</tr></thead>
+    <tbody>${poses.map((index) => `<tr data-pose="${index}" class="${index === docking.index ? 'is-active' : ''}"><th>${index + 1}</th>${residues.map((residue) => cell(results[index], residue)).join('')}</tr>`).join('')}</tbody></table>
+    <p class="hint">Residues contacted in most poses; a cell shows the strongest interaction type (colors as in the Interactions card).${poses.length < results.length ? ` First ${poses.length} poses.` : ''}</p>`;
+  for (const row of els.dockingFingerprint.querySelectorAll('[data-pose]')) {
+    row.addEventListener('click', () => guardedLoad(() => showPose(entry, Number(row.dataset.pose))));
+  }
+}
+
+function exportDockingCSV() {
+  const docking = dockingOf();
+  if (!docking) return;
+  const header = ['pose', 'title', 'file', 'formula', ...docking.columns.map((column) => column.key), 'rmsd_to_pose_1', 'hydrogen_bonds', 'salt_bridges', 'pi_interactions', 'halogen_bonds', 'metal', 'hydrophobic', 'residues'];
+  const rows = [header];
+  docking.molecules.forEach((molecule, index) => {
+    const result = docking.fingerprints?.[index];
+    const counts = result?.counts ?? {};
+    const rmsd = poseRMSD(docking, index);
+    rows.push([
+      index + 1, molecule.title, molecule.file ?? '', molecule.formula,
+      ...docking.columns.map((column) => molecule.properties.get(column.key) ?? ''),
+      Number.isFinite(rmsd) ? rmsd.toFixed(3) : '',
+      ...(result ? [counts['hydrogen-bond'] ?? 0, counts['salt-bridge'] ?? 0, (counts['pi-stacking'] ?? 0) + (counts['cation-pi'] ?? 0), counts['halogen-bond'] ?? 0, counts['metal-coordination'] ?? 0, counts.hydrophobic ?? 0] : ['', '', '', '', '', '']),
+      result ? [...result.residues].map(([key, types]) => `${key}(${[...types].join('+')})`).join(' ') : '',
+    ]);
+  });
+  downloadText(`${docking.name.replace(/\.[^.]+$/, '')}_poses.csv`, csvText(rows), 'text/csv');
 }
 
 /* ---------- Scene ---------- */
@@ -1688,6 +2295,8 @@ function rebuildScene() {
     if (part) state.renderer.setMeshAtomOffset(`surface:${entry.id}`, part.offset);
   }
   state.renderer.setCanvasShapes?.(shapes);
+  // Maps follow their structure's visibility.
+  for (const entry of state.entries) if (entry.density && entry.density.shown !== entry.visible) drawDensity(entry);
   state.sceneBounds = bounds ?? sceneBoundsFromEntries();
   state.dirty.scene = false;
 }
@@ -1825,6 +2434,15 @@ function colorExtras(entry = state.active) {
     extras.domainCount = entry.domains.count;
   }
   if (scheme === 'msa' && entry.msa) extras.residueValues = entry.msa.values;
+  if (scheme === 'conservation' && entry.conservation) {
+    extras.residueValues = entry.conservation.grades;
+    extras.conservationNote = entry.conservation.method === 'entropy' ? 'Shannon entropy' : 'Jensen–Shannon divergence (Capra & Singh 2007)';
+  }
+  if (scheme === 'mapfit' && entry.density?.fit) {
+    extras.residueValues = entry.density.fit.values;
+    extras.mapFitKind = entry.density.fit.kind;
+    extras.mapFitLevel = entry.density.fit.level;
+  }
   return extras;
 }
 
@@ -1894,6 +2512,7 @@ function frame(time) {
     renderFrame(time);
     updateLabels();
   }
+  if (!state.drag) followDensity();
 }
 
 function resizeCanvas() {
@@ -2251,6 +2870,10 @@ function residueDataText(residue, entry = state.active, options = {}) {
   if (record?.criteria.length && !options.card) parts.push(record.criteria.join(', '));
   const depth = entry.msa?.values.get(residue.key);
   if (Number.isFinite(depth)) parts.push(`MSA depth ${formatNumber(depth)}`);
+  const grade = entry.conservation?.grades.get(residue.key);
+  if (grade) parts.push(`conservation grade ${grade} (${entry.conservation.values.get(residue.key)?.toFixed(2) ?? '–'})`);
+  const fit = entry.density?.fit?.values.get(residue.key);
+  if (Number.isFinite(fit)) parts.push(entry.density.fit.kind === 'sigma' ? `map ${fit.toFixed(1)}σ at atoms` : `${formatPercent(fit)} of atoms in the map`);
   return parts.join(' · ');
 }
 
@@ -2279,6 +2902,8 @@ function onKeyDown(event) {
   } else if (key === 'h' || key === 'H') {
     els.showHydrogen.checked = !els.showHydrogen.checked;
     updateDisplay({ showHydrogen: els.showHydrogen.checked });
+  } else if ((key === '[' || key === ']') && dockingOf()) {
+    stepPose(key === ']' ? 1 : -1);
   } else if (key === '/') {
     event.preventDefault();
     els.searchInput.focus();
@@ -2329,6 +2954,8 @@ function clearSelection(clearFocusToo) {
 
 function onSelectionChanged() {
   sequenceView?.setSelection(state.selection);
+  // Without a focus, the map region and zone follow the selection.
+  if (!state.focus) densityFocusChanged();
   const first = [...state.selection][0];
   if (first) sequenceView?.scrollTo(first);
   renderSelectionPanel();
@@ -2358,6 +2985,7 @@ async function focusResidues(keys) {
   fitView(true, false, atoms);
   onSelectionChanged();
   markSceneDirty();
+  densityFocusChanged();
   await computeFocusInteractions(valid);
 }
 
@@ -2366,6 +2994,7 @@ function clearFocus() {
   state.interactions = { ...state.interactions, list: [], title: '' };
   renderInteractions();
   markSceneDirty();
+  densityFocusChanged();
 }
 
 async function computeFocusInteractions(keys) {
@@ -2374,8 +3003,18 @@ async function computeFocusInteractions(keys) {
   if (!module?.findInteractions || state.focus !== focus) return;
   const model = activeModel();
   const focusAtoms = keys.flatMap((key) => model.residueMap.get(key)?.atoms ?? []).map((atom) => atom.id);
+  // A docking pose interacts with the receptor, not with a crystal ligand it may overlap.
+  const docking = dockingOf();
+  const poseKey = docking ? poseResidueKey(docking) : '';
+  const pose = docking && keys.includes(poseKey);
+  let groupB;
+  if (pose) {
+    const poseAtoms = (model.residueMap.get(poseKey)?.atoms ?? []).filter((atom) => !atom.isHydrogen);
+    const overlapped = overlappedLigands(model, docking.receptorAtoms[0] ?? model.atoms.length, [poseAtoms]);
+    groupB = model.atoms.filter((atom) => atom.residueKey !== poseKey && !overlapped.has(atom.residueKey)).map((atom) => atom.id);
+  }
   try {
-    const list = module.findInteractions(model, focusAtoms, { includeWater: state.display.showWater });
+    const list = module.findInteractions(model, focusAtoms, { includeWater: state.display.showWater, groupB });
     const residue = model.residueMap.get(keys[0]);
     state.interactions = { ...state.interactions, list, title: keys.length === 1 ? residueLabel(residue) : `${keys.length} residues` };
   } catch (error) {
@@ -2557,6 +3196,9 @@ function selectionContext(entry) {
       am: entry.missense?.values ?? null,
       msa: entry.msa?.values ?? null,
       ppse: entry.exposure ? new Map([...entry.exposure].map(([key, value]) => [key, value.ppse])) : null,
+      conservation: entry.conservation?.values ?? null,
+      grade: entry.conservation?.grades ?? null,
+      mapfit: entry.density?.fit?.values ?? null,
     },
     idr: entry.exposure ? new Set([...entry.exposure].filter(([, value]) => value.idr).map(([key]) => key)) : null,
     uniprot: (residue) => uniprotNumber(entry, residue),
@@ -2840,6 +3482,8 @@ async function executeCommand(parsed, options) {
     }
     case 'superpose':
       return superposeCommand(parsed);
+    case 'tmalign':
+      return superposeCommand({ ...parsed, method: 'structure' });
     case 'alphafold':
       await compareWithAlphaFold();
       return '';
@@ -2894,6 +3538,19 @@ async function executeCommand(parsed, options) {
       setColorScheme('validation', [entry]);
       return message || 'Colored by validation outliers.';
     }
+    case 'map':
+      return mapCommand(parsed);
+    case 'conservation':
+      if (parsed.method === 'off') {
+        state.active.conservation = null;
+        if (state.active.color.scheme === 'conservation') setColorScheme('chain', [state.active]);
+        renderConservation();
+        renderProfile();
+        return 'Conservation cleared.';
+      }
+      return computeConservation(state.active, { method: parsed.method });
+    case 'pose':
+      return poseCommand(parsed);
     case 'missense':
       return loadMissense(state.active, { accession: parsed.accession });
     case 'refresh': {
@@ -3145,18 +3802,23 @@ function colorCommand({ selection, color, scheme, reset }) {
   return `Colored ${describeResolution(resolved)}.`;
 }
 
-function superposeCommand({ mobile, reference, fit }) {
+async function superposeCommand({ mobile, reference, fit, method }) {
   const all = ['all', '*'].includes(mobile.toLowerCase());
   const fixed = reference ? requireEntry(reference) : null;
   const moving = all ? null : requireEntry(mobile);
   const referenceEntry = fixed ?? (moving === state.active ? state.entries.find((entry) => entry !== moving) : state.active);
   const mobiles = all ? state.entries.filter((entry) => entry !== referenceEntry) : [moving];
   if (!referenceEntry || !mobiles.length || mobiles.includes(referenceEntry)) throw new CommandError('Superposition needs two different structures, for example "superpose 1AKE onto 4AKE".');
+  if (method === 'structure' && fit) throw new CommandError('A structure alignment (TM-align) chooses its own residue pairs; "fit" works with sequence superposition.');
   const fitKeys = fit ? requireSelection(fit, [referenceEntry]).results[0].keys : null;
-  const results = runSuperposition({ reference: referenceEntry, mobiles, fitKeys });
+  const results = method === 'structure'
+    ? await runStructuralSuperposition({ reference: referenceEntry, mobiles })
+    : runSuperposition({ reference: referenceEntry, mobiles, fitKeys });
   const lines = results.map((item) => (item.error
     ? `${item.mobile.name}: ${item.error.message}`
-    : `${item.mobile.name} onto ${referenceEntry.name}: ${item.result.stats.rmsd.toFixed(2)} Å over ${item.result.stats.keptCount} pairs, TM-score ${item.result.stats.tmScore.toFixed(3)}`));
+    : method === 'structure'
+      ? `${item.mobile.name} onto ${referenceEntry.name} (TM-align): TM-score ${item.result.stats.tmScore.toFixed(3)} (reference) / ${item.result.stats.tmScoreMobile.toFixed(3)} (moving), ${item.result.stats.rmsd.toFixed(2)} Å over ${item.result.stats.alignedLength} aligned residues`
+      : `${item.mobile.name} onto ${referenceEntry.name}: ${item.result.stats.rmsd.toFixed(2)} Å over ${item.result.stats.keptCount} pairs, TM-score ${item.result.stats.tmScore.toFixed(3)}`));
   if (results.every((item) => item.error)) throw new CommandError(lines.join('; '));
   return { message: lines.join('; '), data: results.map((item) => ({ name: item.mobile.name, stats: item.result?.stats ?? null, error: item.error?.message ?? null })) };
 }
@@ -3380,6 +4042,61 @@ function runSuperposition(options = {}) {
   return results;
 }
 
+// Structure-only superposition (TM-align for single chains, MM-align for complexes, in the worker):
+// for remote homologs, different complexes or models whose sequences differ.
+async function structuralComparison(reference, mobile, recipe) {
+  const strip = ({ id, kind, coords, sequence }) => ({ id, kind, coords, sequence });
+  const referenceChains = alignerChains(activeModelOf(reference), recipe.refChains).map(strip);
+  const mobileChains = alignerChains(activeModelOf(mobile), recipe.mobChains).map(strip);
+  if (!referenceChains.length || !mobileChains.length) throw new Error('A structure alignment needs a polymer chain of at least three residues on each side.');
+  const structural = await alignWorker().run('structure-align', { mobile: mobileChains, reference: referenceChains });
+  return compareStructures(pairOf(reference), pairOf(mobile), { ...recipe, correspondence: 'structure', structural });
+}
+
+async function runStructuralSuperposition(options = {}) {
+  const reference = options.reference ?? entryById(els.compareReference.value);
+  const mobiles = (options.mobiles ?? (els.compareMobile.value === '*'
+    ? state.entries.filter((entry) => entry !== reference)
+    : [entryById(els.compareMobile.value)])).filter((entry) => entry && entry !== reference);
+  if (!reference || !mobiles.length) {
+    showToast('Choose two different structures to superpose.', true);
+    return [];
+  }
+  const refChain = options.refChain ?? (options.reference ? '*' : els.compareRefChain.value || '*');
+  const mobChain = options.mobChain ?? (options.reference ? '*' : els.compareMobChain.value || '*');
+  const results = [];
+  showLoading('Aligning by structure (TM-align)');
+  try {
+    for (const mobile of mobiles) {
+      try {
+        const recipe = {
+          correspondence: 'structure',
+          refChains: refChain !== '*' ? [refChain] : null,
+          mobChains: mobChain !== '*' && mobiles.length === 1 ? [mobChain] : null,
+        };
+        const result = await structuralComparison(reference, mobile, recipe);
+        applyComparison(reference, mobile, result, recipe);
+        results.push({ mobile, result });
+      } catch (error) {
+        console.warn(error);
+        results.push({ mobile, error });
+      }
+    }
+  } finally {
+    hideLoading();
+  }
+  const predicted = results.filter((item) => item.result && stylePredictedComparison(reference, item.mobile));
+  renderCompareResult(reference, results, { structural: true, note: predicted.length ? 'Experimental structure in gray, predicted model colored by pLDDT.' : '' });
+  if (results.some((item) => item.result)) {
+    if (!COMPARISON_SCHEMES.has(reference.color.scheme) && reference.color.scheme !== 'plddt') {
+      for (const entry of [reference, ...mobiles]) if (entry.color.scheme === 'chain') entry.color.scheme = 'structure';
+    }
+    syncStyleControls();
+    fitView(true, false);
+  }
+  return results;
+}
+
 // A predicted model superposed on an experimental structure keeps its pLDDT colors, is trimmed to
 // the aligned span when it is much longer (full-length models of one domain), and the
 // experimental structure turns neutral gray so it cannot be confused with the pLDDT blues.
@@ -3428,10 +4145,12 @@ function applyEntryTransform(entry, transform) {
     }
     model.bounds = computeBounds(model.atoms);
     model.cartoonCache = new Map();
+    model.geometryVersion = (model.geometryVersion ?? 0) + 1;
   }
   const combined = entry.transform ? composeTransforms(transform, entry.transform) : { rotation: [...transform.rotation], translation: [...transform.translation] };
   entry.transform = isIdentityTransform(combined, 1e-7) ? null : combined;
   entry.transformVersion += 1;
+  if (entry.density) drawDensity(entry);
   for (const item of entry.interactions.list) {
     if (item.pointA) item.pointA = transformPoint(transform, ...item.pointA);
     if (item.pointB) item.pointB = transformPoint(transform, ...item.pointB);
@@ -3566,7 +4285,7 @@ function renderCompareResult(reference, results, options = {}) {
     if (error) return `<div class="warn">${escapeHTML(mobile.name)}: ${escapeHTML(error.message)}</div>`;
     const stats = result.stats;
     const chains = result.chainPairs.length
-      ? `chains ${result.chainPairs.map((pair) => (pair.ref === pair.mob ? pair.ref : `${pair.ref}↔${pair.mob}`)).join(', ')}`
+      ? `${stats.correspondence === 'structure' ? 'TM-align · ' : ''}chains ${result.chainPairs.map((pair) => (pair.ref === pair.mob ? pair.ref : `${pair.ref}↔${pair.mob}`)).join(', ')}`
       : stats.correspondence === 'uniprot' ? 'matched by UniProt numbering' : '';
     const chainTable = result.chainPairs.length > 1
       ? `<table><thead><tr><th>Chains</th><th>Pairs</th><th>Identity</th><th>RMSD</th><th>TM</th></tr></thead><tbody>${result.chainPairs.map((pair) => `<tr><td>${escapeHTML(pair.ref === pair.mob ? pair.ref : `${pair.ref}↔${pair.mob}`)}</td><td>${pair.pairs}</td><td>${(pair.identity * 100).toFixed(0)}%</td><td>${Number.isFinite(pair.rmsd) ? `${pair.rmsd.toFixed(2)} Å` : ''}</td><td>${Number.isFinite(pair.tmScore) ? pair.tmScore.toFixed(3) : ''}</td></tr>`).join('')}</tbody></table>`
@@ -3577,9 +4296,11 @@ function renderCompareResult(reference, results, options = {}) {
     return `<div class="compare-summary">
       <div><strong>${escapeHTML(mobile.name)}</strong> onto <strong>${escapeHTML(reference.name)}</strong>${chains ? ` <span class="muted">· ${escapeHTML(chains)}</span>` : ''}</div>
       <dl class="compare-stats">
-        <div><dt>RMSD</dt><dd>${stats.rmsd.toFixed(2)} Å <small>${stats.keptCount} of ${stats.fitCount} pairs</small></dd></div>
+        ${stats.correspondence === 'structure' ? `<div title="TM-align's RMSD over its aligned residues"><dt>RMSD</dt><dd>${stats.rmsd.toFixed(2)} Å <small>${stats.alignedLength} aligned</small></dd></div>
+        <div title="TM-score normalized by the reference and by the moving structure; above 0.5 usually means the same fold"><dt>TM-score</dt><dd>${stats.tmScore.toFixed(3)} <small>/ ${stats.tmScoreMobile.toFixed(3)} moving</small></dd></div>`
+    : `<div><dt>RMSD</dt><dd>${stats.rmsd.toFixed(2)} Å <small>${stats.keptCount} of ${stats.fitCount} pairs</small></dd></div>
         <div><dt>All pairs</dt><dd>${stats.rmsdAll.toFixed(2)} Å <small>${stats.pairCount} pairs</small></dd></div>
-        <div><dt>TM-score</dt><dd>${Number.isFinite(stats.tmScore) ? stats.tmScore.toFixed(3) : 'n/a'}</dd></div>
+        <div><dt>TM-score</dt><dd>${Number.isFinite(stats.tmScore) ? stats.tmScore.toFixed(3) : 'n/a'}</dd></div>`}
         <div title="Local Distance Difference Test, over paired Cα atoms"><dt>lDDT</dt><dd>${Number.isFinite(stats.lddt) ? stats.lddt.toFixed(3) : 'n/a'}</dd></div>
         <div><dt>Identity</dt><dd>${(stats.identity * 100).toFixed(1)}%</dd></div>
         <div><dt>Within 2 Å</dt><dd>${stats.closeCount ?? stats.keptCount} <small>of ${stats.pairCount}</small></dd></div>
@@ -3597,7 +4318,9 @@ function renderCompareResult(reference, results, options = {}) {
       <button type="button" data-compare-action="structure">Color by structure</button>
       <button type="button" data-compare-action="trim" aria-pressed="${trimmed}">${trimmed ? 'Show all residues' : 'Trim to aligned region'}</button>
     </div>
-    <p class="hint">${options.note ? `${escapeHTML(options.note)} ` : ''}RMSD over Cα pairs kept after pruning pairs more than 2 Å apart${options.fitOnSelection ? ', fitted on the selected residues only' : ''}. TM-score is normalized by the reference length; lDDT compares local distances within 15 Å and needs no superposition. Hover a residue to see its deviation.</p>` : ''}`;
+    <p class="hint">${options.note ? `${escapeHTML(options.note)} ` : ''}${options.structural
+    ? 'Residues paired by structure alone (TM-align; MM-align for complexes), superposed to maximize the TM-score. lDDT compares local distances within 15 Å and needs no superposition. Hover a residue to see its deviation.'
+    : `RMSD over Cα pairs kept after pruning pairs more than 2 Å apart${options.fitOnSelection ? ', fitted on the selected residues only' : ''}. TM-score is normalized by the reference length; lDDT compares local distances within 15 Å and needs no superposition. Hover a residue to see its deviation.`}</p>` : ''}`;
   els.compareResult.dataset.reference = String(reference.id);
   els.compareResult.dataset.mobiles = results.filter((item) => item.result).map((item) => item.mobile.id).join(',');
   updateCompareControls();
@@ -3727,6 +4450,7 @@ function toggleModelOverlay(entry = state.active) {
       }
       model.bounds = computeBounds(model.atoms);
       model.cartoonCache = new Map();
+      model.geometryVersion = (model.geometryVersion ?? 0) + 1;
     });
     entry.rmsf = result.rmsf;
     entry.overlay = true;
@@ -3754,6 +4478,135 @@ function toggleModelOverlay(entry = state.active) {
   fitView(true, false);
 }
 
+/* ---------- Methods and provenance ---------- */
+
+// What the session used, for provenance.js: each structure's source with its IDs, versions and
+// revision date, and the analyses that ran on it with their parameters.
+function methodsContext() {
+  return {
+    version: state.startup?.version ?? '',
+    entries: state.entries.map((entry) => {
+      const meta = entry.structure.meta;
+      const origin = entry.origin ?? {};
+      const accession = /^([OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2})(-[0-9]+)?$/;
+      let source = 'file';
+      if (entry.prediction) source = 'prediction';
+      else if (origin.type === 'fetch') source = accession.test(String(origin.id).toUpperCase()) ? 'afdb' : 'pdb';
+      else if (origin.type === 'sample') source = meta.isPredicted ? 'afdb' : 'example';
+      else if (origin.type === 'model') source = 'model';
+      else if (origin.type === 'molecules') source = 'poses';
+      const label = entry.structure.label ?? '';
+      const model = activeModelOf(entry);
+      const comparison = entry.comparison;
+      const density = entry.density;
+      return {
+        name: entry.name,
+        code: source === 'afdb' ? (label.match(/AF-[A-Z0-9]+-F\d+/)?.[0] ?? meta.code ?? entry.name) : meta.code || entry.name,
+        source,
+        tool: predictionSetOf(entry)?.toolLabel ?? '',
+        method: meta.method,
+        resolution: meta.resolution ? meta.resolution.replace(' Angstroms', ' Å') : '',
+        revisionDate: meta.revisionDate ?? '',
+        afdbVersion: label.match(/model_(v\d+)/)?.[1] ?? '',
+        uniprot: Boolean(entry.missense || entry.report || entry.evidence) && entry.structure.uniprotSegments?.length > 0,
+        uses: {
+          dssp: model.residues.some((residue) => residue.ssSource === 'DSSP'),
+          chemistry: model.residues.some((residue) => residue.kind === 'ligand' && (residue.chemistry === 'file' || residue.chemistry === 'ccd')),
+          interactions: Boolean(entry.focus || (entry === state.active && state.interactions.list.length) || entry.interactions?.list?.length),
+          sasa: Boolean(entry.sasa),
+          electrostatics: entry.surface.kind !== 'off' && entry.surface.color === 'electrostatic',
+          superposition: comparison ? { method: comparison.recipe?.correspondence ?? 'sequence', complex: (comparison.chainPairs?.length ?? 0) > 1 } : null,
+          prediction: Boolean(entry.prediction),
+          domains: Boolean(entry.domains),
+          validation: Boolean(entry.validation),
+          missense: Boolean(entry.missense),
+          exposure: Boolean(entry.exposure),
+          evidence: Boolean(entry.evidence),
+          crosslinks: entry.proteomics.crosslinks.length ? { sasd: Boolean(entry.crosslinkSet?.sasd) } : null,
+          hdx: entry.hdx ? { test: entry.hdx.result?.test ?? '' } : null,
+          density: density ? {
+            source: density.source.type,
+            kind: density.source.kind,
+            id: density.source.kind === 'em' ? density.emdb : density.source.label,
+            name: density.source.name ?? '',
+            levels: density.channels.filter((channel) => channel.visible).map((channel) => ({
+              channel: mapChannelLabel(channel),
+              kind: channel.kind,
+              sigma: channel.sigmaLevel,
+              absolute: mapLevel(channel),
+              recommended: Number.isFinite(channel.recommended) && Math.abs(mapLevel(channel) - channel.recommended) < 1e-6 * Math.max(1, Math.abs(channel.recommended)),
+            })),
+            fit: density.fit ? { atomInclusion: density.fit.atomInclusion } : null,
+          } : null,
+          conservation: entry.conservation ? { method: entry.conservation.method, summaries: entry.conservation.summaries } : null,
+          report: reportMethodsFields(entry),
+          docking: entry.docking ? { count: entry.docking.molecules.length, name: entry.docking.name, fingerprints: Boolean(entry.docking.fingerprints) } : null,
+        },
+      };
+    }),
+  };
+}
+
+// What a search report contributed, for the methods text; kept in sessions, which do not keep the
+// report itself.
+function reportMethodsFields(entry) {
+  const report = entry.report;
+  if (!report) return entry.reportMethods ?? null;
+  const statistics = report.settings.mode === 'ratio' ? currentStatistics(report) : null;
+  return {
+    label: report.label,
+    name: report.name,
+    kind: report.kind,
+    qValue: report.settings.qValue,
+    localization: report.settings.localization,
+    qFiltered: report.kind !== 'sites' && report.format !== 'maxquant-evidence' && report.format !== 'maxquant-peptides',
+    statistics: statistics ? { ...statistics.options, adjust: statistics.adjusted.size > 0 } : null,
+  };
+}
+
+function restoreReportMethods(saved) {
+  if (!saved || typeof saved !== 'object') return null;
+  const number = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
+  const statistics = saved.statistics && typeof saved.statistics === 'object' ? {
+    normalize: saved.statistics.normalize === 'none' ? 'none' : 'median',
+    minValid: Math.max(2, Math.round(number(saved.statistics.minValid, 2))),
+    impute: Boolean(saved.statistics.impute),
+    adjust: Boolean(saved.statistics.adjust),
+    qLimit: number(saved.statistics.qLimit, 0.05),
+  } : null;
+  return {
+    label: String(saved.label ?? 'Search report'),
+    name: String(saved.name ?? ''),
+    kind: saved.kind === 'sites' ? 'sites' : 'peptides',
+    qValue: number(saved.qValue, 0.01),
+    localization: number(saved.localization, 0.75),
+    qFiltered: saved.qFiltered !== false,
+    statistics,
+  };
+}
+
+async function openMethodsDialog() {
+  if (!state.entries.length) throw new Error('Open a structure first.');
+  const { methodsText, formatReference, bibtex } = await import('./lib/provenance.js');
+  const { text, references } = methodsText(methodsContext());
+  state.methods = { text, references, bibtex: bibtex(references) };
+  els.methodsText.value = text;
+  document.querySelector('#methods-status').textContent = '';
+  els.methodsReferences.innerHTML = references.map((key) => `<li>${escapeHTML(formatReference(key))}</li>`).join('');
+  els.methodsDialog.showModal();
+}
+
+// Copies text, reporting in `target` when given (a dialog's own status line), else in a toast.
+async function copyText(text, message, target = null) {
+  const report = (note, warn) => (target ? (target.textContent = note) : showToast(note, warn));
+  try {
+    await navigator.clipboard.writeText(text);
+    report(message, false);
+  } catch {
+    report('The clipboard is not available here; select the text and copy it.', true);
+  }
+}
+
 /* ---------- Sessions and MolViewSpec ---------- */
 
 const SESSION_FORMAT = 'proteoscope-session';
@@ -3771,6 +4624,7 @@ async function sessionDocument(options = {}) {
     version: SESSION_VERSION,
     created: new Date().toISOString(),
     application: 'Proteoscope',
+    applicationVersion: state.startup?.version ?? '',
     title: state.active?.structure.meta.title ?? '',
     view: {
       camera: { target: [...camera.target], distance: camera.distance, rotation: [...camera.rotation], fov: camera.fov, orthographic: camera.orthographic },
@@ -3797,6 +4651,8 @@ async function serializeEntry(entry, options) {
     source = { type: origin.type, id: origin.id };
   } else if (origin.type === 'model') {
     source = { type: 'model', url: origin.url, name: entry.name };
+  } else if (origin.type === 'molecules') {
+    source = { type: 'molecules', name: origin.name };
   } else {
     if (options.link) throw new Error(`${entry.name} is a local file, so it cannot travel in a link. Save the session as a file instead.`);
     source = { type: 'file', name: origin.name, encoding: 'gzip-base64', data: bytesToBase64(await compressText(origin.text ?? '')) };
@@ -3827,6 +4683,7 @@ async function serializeEntry(entry, options) {
     selection: [...entry.selection],
     focus: entry.focus ? [...entry.focus.residues] : null,
     labels: [...entry.labels],
+    reportMethods: reportMethodsFields(entry),
     proteomics: {
       coverage: proteomics.coverage ? [...proteomics.coverage] : null,
       data: proteomics.data ? [...proteomics.data] : null,
@@ -3841,8 +4698,16 @@ async function serializeEntry(entry, options) {
     missense: entry.missense ? { accessions: entry.missense.accessions } : null,
     domains: Boolean(entry.domains),
     msa: entry.msa ? { values: [...entry.msa.values], source: entry.msa.source } : null,
+    conservation: entry.conservation ? {
+      values: [...entry.conservation.values].map(([key, value]) => [key, Number(value.toFixed(4))]),
+      grades: [...entry.conservation.grades],
+      summaries: entry.conservation.summaries,
+      method: entry.conservation.method,
+    } : null,
     pae: options.link ? null : await serializePAE(entry),
     prediction: entry.prediction ? predictionSessionFields(entry) : null,
+    docking: entry.docking ? await serializeDocking(entry.docking, options) : null,
+    density: entry.density ? densitySessionFields(entry.density) : null,
   };
 }
 
@@ -3918,6 +4783,19 @@ async function restoreEntryExtras(entry, item, problems) {
       const values = new Map(item.msa.values.filter(([key]) => activeModelOf(entry).residueMap.has(key)));
       if (values.size) entry.msa = { values, source: item.msa.source, summary: depthSummary([...values.values()]) };
     }
+    if (item.conservation?.grades) {
+      const model = activeModelOf(entry);
+      const known = (pairs) => new Map((pairs ?? []).filter(([key, value]) => model.residueMap.has(key) && Number.isFinite(Number(value))).map(([key, value]) => [key, Number(value)]));
+      const summaries = (item.conservation.summaries ?? []).filter((summary) => summary && typeof summary === 'object').map((summary) => ({
+        source: String(summary.source ?? ''),
+        chains: Array.isArray(summary.chains) ? summary.chains.map(String) : [],
+        sequences: Number(summary.sequences) || 0,
+        neff: Number(summary.neff) || 0,
+        method: summary.method === 'entropy' ? 'entropy' : 'jsd',
+      }));
+      const grades = new Map([...known(item.conservation.grades)].filter(([, grade]) => Number.isInteger(grade) && grade >= 1 && grade <= 9));
+      entry.conservation = { values: known(item.conservation.values), grades, summaries, method: item.conservation.method === 'entropy' ? 'entropy' : 'jsd', problems: [] };
+    }
     if (item.pae) await restorePAE(entry, item.pae);
     if (item.domains && entry.pae) computePAEDomains(entry);
     if (item.sasa) await runSASA(entry);
@@ -3933,9 +4811,48 @@ async function restoreEntryExtras(entry, item, problems) {
       // An accession typed for a local model is not in the file, so it comes from the session.
       await loadMissense(entry, { color: false, accession: item.missense.accessions?.length === 1 ? item.missense.accessions[0] : null });
     }
+    if (item.density) await restoreDensity(entry, item.density, problems);
   } catch (error) {
     problems.push(`${entry.name}: ${error.message}`);
   }
+}
+
+// Maps from the volume server are fetched again with the saved settings; map files are not
+// embedded in sessions and must be opened again.
+function densitySessionFields(density) {
+  return {
+    source: density.source.type === 'server' ? { type: 'server' } : { type: 'file', name: density.source.name },
+    channels: density.channels.map((channel) => ({ index: channel.index, sigmaLevel: Number(channel.sigmaLevel.toFixed(3)), visible: channel.visible })),
+    style: density.style,
+    opacity: density.opacity,
+    region: density.region,
+    radius: density.radius,
+    zone: density.zone,
+    fit: Boolean(density.fit),
+  };
+}
+
+async function restoreDensity(entry, saved, problems) {
+  if (saved.source?.type !== 'server') {
+    problems.push(`${entry.name}: open the map file ${saved.source?.name ?? ''} again (map files are not stored in sessions)`);
+    return;
+  }
+  await loadDensity(entry);
+  const density = entry.density;
+  for (const item of saved.channels ?? []) {
+    const channel = density.channels.find((candidate) => candidate.index === item.index);
+    if (!channel) continue;
+    if (Number.isFinite(item.sigmaLevel) && item.sigmaLevel > 0) channel.sigmaLevel = item.sigmaLevel;
+    channel.visible = item.visible !== false;
+  }
+  if (['mesh', 'surface'].includes(saved.style)) density.style = saved.style;
+  if (Number.isFinite(saved.opacity)) density.opacity = Math.min(1, Math.max(0.05, saved.opacity));
+  if (['focus', 'view', 'all'].includes(saved.region)) density.region = saved.region;
+  if (Number.isFinite(saved.radius)) density.radius = Math.min(30, Math.max(4, saved.radius));
+  if (Number.isFinite(saved.zone)) density.zone = Math.min(10, Math.max(0, saved.zone));
+  renderDensityPanel();
+  await updateDensity(entry);
+  if (saved.fit) await fitDensity(entry);
 }
 
 function linkFields(link) {
@@ -4034,25 +4951,35 @@ async function restoreSession(document0) {
     }
     entries.push(entry);
     if (entry) await applyEntrySettings(entry, item);
+    if (entry && item.docking) {
+      try {
+        await restoreDocking(entry, item.docking);
+      } catch (error) {
+        problems.push(`${item.name}: docking poses: ${error.message}`);
+      }
+    }
   }
   // Positions first, then comparisons (whose fits are then near-identity), then the rest.
   items.forEach((item, index) => {
     const entry = entries[index];
     if (entry && item.transform) applyEntryTransform(entry, item.transform);
   });
-  items.forEach((item, index) => {
+  for (const [index, item] of items.entries()) {
     const entry = entries[index];
     const reference = entries[item.comparison?.reference];
-    if (!entry || !reference) return;
+    if (!entry || !reference) continue;
     try {
       const { reference: ignored, ...recipe } = item.comparison;
       const fitKeys = recipe.fitKeys ? new Set(recipe.fitKeys) : null;
-      applyComparison(reference, entry, compareStructures(pairOf(reference), pairOf(entry), { ...recipe, fitKeys }), recipe);
+      const result = recipe.correspondence === 'structure'
+        ? await structuralComparison(reference, entry, recipe)
+        : compareStructures(pairOf(reference), pairOf(entry), { ...recipe, fitKeys });
+      applyComparison(reference, entry, result, recipe);
       if (item.trimmed) trimToAligned(entry, true);
     } catch (error) {
       problems.push(`${item.name}: ${error.message}`);
     }
-  });
+  }
   items.forEach((item, index) => {
     const entry = entries[index];
     if (entry && item.overlay && !entry.overlay) toggleModelOverlay(entry);
@@ -4103,6 +5030,9 @@ async function loadSessionSource(source, options) {
     if (source.name) entry.name = uniqueName(source.name);
     return entry;
   }
+  if (source?.type === 'molecules') {
+    return createPoseHost({ name: source.name ?? options.name ?? 'poses', format: '' }, { add: options.add, activate: false });
+  }
   if (source?.type === 'file') {
     const text = source.encoding === 'gzip-base64' ? await decompressText(base64ToBytes(source.data)) : source.data;
     return loadStructureFromText(text, source.name ?? options.name ?? 'structure', { add: options.add, activate: false, source: 'Session file', origin: { type: 'file', name: source.name, text } });
@@ -4145,6 +5075,7 @@ function applyEntryState(entry, item) {
   entry.labels = new Set(known(item.labels));
   const focusKeys = known(item.focus);
   entry.focus = focusKeys.length ? { residues: new Set(focusKeys), neighborhood: focusNeighborhood(model, focusKeys, 5) } : null;
+  entry.reportMethods = restoreReportMethods(item.reportMethods);
   const proteomics = item.proteomics ?? {};
   entry.proteomics = {
     ...emptyProteomics(),
@@ -4726,6 +5657,9 @@ function updateStructureUI() {
   els.modelSlider.value = String(state.activeModel + 1);
   els.modelStrip.classList.toggle('is-visible', models > 1);
   updateModelLabel();
+  renderDocking();
+  renderDensityPanel();
+  renderConservation();
   renderEntities();
   updateSecondarySummary();
   populateChainSelects();
@@ -5134,6 +6068,17 @@ async function runInterfaceAnalysis() {
   return list.length;
 }
 
+// CSV with quoting as needed. Text that a spreadsheet would run as a formula (=, +, - or @ first,
+// from a file's titles or tags) is prefixed with an apostrophe; numbers are left alone.
+function csvText(rows) {
+  const cellText = (cell) => {
+    let text = String(cell ?? '');
+    if (typeof cell !== 'number' && /^[=+\-@\t\r]/.test(text) && !Number.isFinite(Number(text))) text = `'${text}`;
+    return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  return rows.map((row) => row.map(cellText).join(',')).join('\n');
+}
+
 function exportInteractionsCSV() {
   if (!state.interactions.list.length || !state.structure) {
     showToast('No interactions to export yet.', true);
@@ -5146,40 +6091,62 @@ function exportInteractionsCSV() {
     const b = model.residueMap.get(item.residueB);
     rows.push([item.type, a ? shortResidueLabel(a) : '', model.atoms[item.atomA]?.name ?? 'centroid', b ? shortResidueLabel(b) : '', model.atoms[item.atomB]?.name ?? 'centroid', Number.isFinite(item.distance) ? item.distance.toFixed(2) : '']);
   }
-  downloadText(`${fileStem()}-interactions.csv`, rows.map((row) => row.join(',')).join('\n'), 'text/csv');
+  downloadText(`${fileStem()}-interactions.csv`, csvText(rows), 'text/csv');
 }
 
 /* ---------- Surfaces and SASA ---------- */
 
-function surfaceWorker() {
-  if (!state.workers) {
-    const worker = new Worker(new URL('./lib/surface-worker.js', import.meta.url), { type: 'module' });
-    const pending = new Map();
-    let counter = 0;
+// A module worker behind a promise per request. terminate() stops a long task (its requests
+// fail) and the next request starts a fresh worker.
+function createWorkerClient(url, name) {
+  let worker = null;
+  let counter = 0;
+  const pending = new Map();
+  const fail = (message) => {
+    for (const request of pending.values()) request.reject(new Error(message));
+    pending.clear();
+  };
+  const start = () => {
+    worker = new Worker(url, { type: 'module' });
     worker.addEventListener('message', (event) => {
       const { id, result, error } = event.data;
-      const entry = pending.get(id);
-      if (!entry) return;
+      const request = pending.get(id);
+      if (!request) return;
       pending.delete(id);
-      if (error) entry.reject(new Error(error));
-      else entry.resolve(result);
+      if (error) request.reject(new Error(error));
+      else request.resolve(result);
     });
-    worker.addEventListener('error', (event) => {
-      for (const entry of pending.values()) entry.reject(new Error(event.message || 'Surface worker failed'));
-      pending.clear();
-    });
-    state.workers = {
-      run(type, payload, transfer = []) {
-        counter += 1;
-        const id = counter;
-        return new Promise((resolve, reject) => {
-          pending.set(id, { resolve, reject });
-          worker.postMessage({ id, type, payload }, transfer);
-        });
-      },
-    };
-  }
+    worker.addEventListener('error', (event) => fail(event.message || `The ${name} failed.`));
+  };
+  return {
+    run(type, payload, transfer = []) {
+      if (!worker) start();
+      counter += 1;
+      const id = counter;
+      return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+        worker.postMessage({ id, type, payload }, transfer);
+      });
+    },
+    terminate(message = `The ${name} was stopped.`) {
+      worker?.terminate();
+      worker = null;
+      fail(message);
+    },
+  };
+}
+
+function surfaceWorker() {
+  state.workers ??= createWorkerClient(new URL('./lib/surface-worker.js', import.meta.url), 'surface worker');
   return state.workers;
+}
+
+// Structure alignment runs in its own copy of the surface worker, so a long MM-align of large
+// complexes does not hold up surfaces and SASA.
+let alignWorkerClient = null;
+function alignWorker() {
+  alignWorkerClient ??= createWorkerClient(new URL('./lib/surface-worker.js', import.meta.url), 'alignment worker');
+  return alignWorkerClient;
 }
 
 function surfaceAtoms(entry, model) {
@@ -5529,6 +6496,18 @@ function profileSeries() {
   if (metric === 'msa') {
     if (!state.msa) return { label: 'MSA depth', series: [], options: { emptyText: 'Open a prediction folder that includes its MSA' } };
     return { label: 'MSA depth (log10 sequences)', series: residues.map((residue) => ({ residue, value: Math.log10(Math.max(1, state.msa.values.get(residue.key) ?? NaN)) })), options: { min: 0, bands: [{ from: 0, to: Math.log10(30), color: 'rgba(198,40,40,0.14)' }] } };
+  }
+  if (metric === 'conservation') {
+    const conservation = state.active?.conservation;
+    if (!conservation) return { label: 'Conservation', series: [], options: { emptyText: 'Compute conservation above from an alignment' } };
+    return { label: conservation.method === 'entropy' ? 'Conservation (1 − normalized entropy)' : 'Conservation (Jensen–Shannon divergence)', series: residues.map((residue) => ({ residue, value: conservation.values.get(residue.key) ?? NaN })), options: { min: 0 } };
+  }
+  if (metric === 'mapfit') {
+    const fit = state.active?.density?.fit;
+    if (!fit) return { label: 'Fit to the map', series: [], options: { emptyText: 'Load a density map and run Map fit above' } };
+    return fit.kind === 'sigma'
+      ? { label: '2Fo-Fc density at atoms (σ)', series: residues.map((residue) => ({ residue, value: fit.values.get(residue.key) ?? NaN })), options: { bands: [{ from: -99, to: 1, color: 'rgba(224,71,76,0.16)' }] } }
+      : { label: 'Atom inclusion', series: residues.map((residue) => ({ residue, value: fit.values.get(residue.key) ?? NaN })), options: { min: 0, max: 1, bands: [{ from: 0, to: 0.5, color: 'rgba(224,71,76,0.16)' }] } };
   }
   if (metric === 'densityfit') {
     const fit = validationOf(state.active)?.fit;
@@ -5961,6 +6940,16 @@ function applyPredictionMSA(set, entry) {
 
 function applyMSA(entry, results, source, options = {}) {
   applyPredictionMSA({ msa: { list: results.filter(Boolean).map((depth) => ({ depth })), source } }, entry);
+  if (!entry.msa) {
+    // An experimental structure lacks residues or has tags: align the query to the chains.
+    const values = new Map();
+    for (const depth of results.filter(Boolean)) {
+      for (const { chain, pairs } of mapQueryToChains(entry, depth.query.replace(/-/g, ''))) {
+        for (const [query, residue] of pairs) values.set(chain.residues[residue].key, depth.depth[query]);
+      }
+    }
+    if (values.size) entry.msa = { values, source, summary: depthSummary([...values.values()]) };
+  }
   if (!entry.msa) throw new CommandError(`${source}: the alignment's query does not match a chain of ${entry.name}.`);
   setColorScheme('msa', [entry]);
   if (!options.quiet) showToast(`MSA depth from ${source}: median ${formatNumber(entry.msa.summary.median)} sequences.`);
@@ -6145,7 +7134,7 @@ function exportPredictionCSV() {
       rows.push([...base, pair?.chainA ?? '', pair?.chainB ?? '', format(reported), format(pair?.ipsae), format(pair?.ipsaeAB), format(pair?.ipsaeBA), format(pair?.iptm), format(pair?.pdockq), format(pair?.pdockq2), format(pair?.lis), pair?.contacts ?? '', xl?.satisfied ?? '', xl?.total ?? '']);
     }
   }
-  downloadText(`${set.name}_ranking.csv`, rows.map((row) => row.map((cell) => (/[",\n]/.test(String(cell)) ? `"${String(cell).replace(/"/g, '""')}"` : cell)).join(',')).join('\n'), 'text/csv');
+  downloadText(`${set.name}_ranking.csv`, csvText(rows), 'text/csv');
 }
 
 function rankingCommand(rank) {
@@ -6185,6 +7174,165 @@ function setEntryPAE(entry, pae, source, options = {}) {
   if (entry === state.active && !options.silent) {
     renderPAE();
     showToast(`Loaded PAE matrix (${pae.size} × ${pae.size}) from ${source}.`);
+  }
+}
+
+/* ---------- Conservation ---------- */
+
+// Conservation from a multiple sequence alignment (conservation.js: Capra & Singh's
+// Jensen–Shannon divergence with ConSurf-style grades): the MSA of an opened prediction, of an
+// AlphaFold DB model, or an alignment file dropped onto the structure. The alignment's query is
+// aligned to each protein chain, so structures with gaps, tags or other numbering map correctly.
+
+const ALIGNMENT_FILE = /\.(sto|stockholm|aln|clustal|afa|mfa|msa)$/i;
+const MIN_CONSERVATION_SEQUENCES = 10;
+
+async function conservationModule() {
+  lazyModules.conservation ??= await import('./lib/conservation.js');
+  return lazyModules.conservation;
+}
+
+// The alignments known for an entry: its prediction's MSAs (AlphaFold 3 unpaired MSA per chain,
+// ColabFold .a3m, Boltz tables) or AlphaFold DB's.
+async function knownAlignments(entry) {
+  const set = predictionSetOf(entry);
+  if (set?.tool === 'af3' && set.data) {
+    const data = await readJSONFile(set.data);
+    const items = [];
+    for (const item of data.sequences ?? []) {
+      const protein = item.protein;
+      if (protein?.unpairedMsa) items.push({ text: protein.unpairedMsa, source: `${set.name}_data.json (chain ${[].concat(protein.id).join(', ')})` });
+    }
+    if (items.length) return items;
+  }
+  if (set?.msas?.length) {
+    const items = [];
+    for (const file of set.msas) {
+      const text = await file.text();
+      items.push({ text: /\.csv$/i.test(file.name) ? csvToA3M(text) : text, source: file.name });
+    }
+    return items;
+  }
+  if (entry.msaURL) {
+    const response = await fetch(entry.msaURL);
+    if (!response.ok) {
+      const message = await responseError(response, 'AlphaFold DB did not send its MSA');
+      throw new CommandError(`${message} AlphaFold DB currently refuses MSA downloads; open an alignment file (A3M, FASTA, Stockholm or Clustal) of this protein instead.`);
+    }
+    return [{ text: await response.text(), source: 'AlphaFold DB MSA' }];
+  }
+  return [];
+}
+
+async function openAlignmentFiles(refs, entry = state.active) {
+  if (!entry) throw new Error('Open a structure before an alignment.');
+  const alignments = [];
+  for (const ref of refs) alignments.push({ text: await ref.text(), source: ref.name });
+  // A3M files (AlphaFold-style MSAs) also give MSA depth.
+  const a3m = alignments.filter((item) => /\.a[23]m$/i.test(item.source));
+  if (a3m.length) applyMSA(entry, a3m.map((item) => msaDepth(item.text)), a3m.map((item) => item.source).join(', '), { quiet: true });
+  try {
+    showToast(await computeConservation(entry, { alignments }));
+  } catch (error) {
+    if (!a3m.length) throw error;
+    showToast(`MSA depth from ${a3m.map((item) => item.source).join(', ')}: median ${formatNumber(entry.msa.summary.median)} sequences. Conservation: ${error.message}`, true);
+  }
+}
+
+function isAlignmentFile(name) {
+  return ALIGNMENT_FILE.test(name) || /\.(a3m|a2m|fasta|fa|faa)$/i.test(name);
+}
+
+async function computeConservation(entry = state.active, options = {}) {
+  if (!entry) throw new CommandError('Open a structure first.');
+  // Alignments given, else those the scores came from (so another method rescores an opened
+  // file), else the MSAs the structure's predictions or AlphaFold DB provide.
+  const alignments = options.alignments ?? entry.conservation?.alignments ?? await knownAlignments(entry);
+  if (!alignments.length) {
+    throw new CommandError('No alignment is known for this structure. Open an alignment file (A3M, aligned FASTA, Stockholm or Clustal) whose first sequence is the protein, or a prediction folder with its MSA.');
+  }
+  const { parseAlignment, conservationScores } = await conservationModule();
+  const values = new Map();
+  const grades = new Map();
+  const summaries = [];
+  const problems = [];
+  for (const item of alignments) {
+    const alignment = parseAlignment(item.text, item.source);
+    if (!alignment || alignment.rows.length < 2) {
+      problems.push(`${item.source}: not an alignment of several sequences`);
+      continue;
+    }
+    const result = conservationScores(alignment, { method: options.method ?? 'jsd' });
+    const mapped = mapConservation(entry, alignment, result);
+    if (!mapped.chains.length) {
+      problems.push(`${item.source}: its first sequence matches no chain`);
+      continue;
+    }
+    for (const [key, value] of mapped.values) values.set(key, value);
+    for (const [key, value] of mapped.grades) grades.set(key, value);
+    summaries.push({ source: item.source, chains: mapped.chains, sequences: result.sequences, neff: result.effectiveSequences, method: result.method });
+  }
+  if (!values.size) throw new CommandError(problems.join('; ') || 'The alignment matched no chain.');
+  entry.conservation = { values, grades, summaries, method: summaries[0].method, problems, alignments };
+  setColorScheme('conservation', [entry]);
+  renderConservation();
+  if (entry === state.active) renderProfile();
+  const sequences = summaries.reduce((sum, item) => sum + item.sequences, 0);
+  return `Conservation of ${formatNumber(values.size)} residues from ${summaries.map((item) => item.source).join(', ')} (${formatNumber(sequences)} sequences).`;
+}
+
+// Scores follow the query of each alignment segment (a ColabFold complex MSA has one per chain)
+// onto every protein chain whose sequence it matches.
+function mapConservation(entry, alignment, result) {
+  const segments = result.segments?.length ? result.segments : [{ start: 0, end: alignment.query.length }];
+  const values = new Map();
+  const grades = new Map();
+  const used = new Set();
+  for (const segment of segments) {
+    for (const { chain, pairs } of mapQueryToChains(entry, alignment.query.slice(segment.start, segment.end))) {
+      for (const [q, c] of pairs) {
+        const score = result.scores[segment.start + q];
+        const grade = result.grades[segment.start + q];
+        const key = chain.residues[c].key;
+        if (Number.isFinite(score)) values.set(key, score);
+        if (grade) grades.set(key, grade);
+      }
+      used.add(chain.id);
+    }
+  }
+  return { values, grades, chains: [...used] };
+}
+
+// The protein chains an alignment's query sequence belongs to (≥ 90% identity over at least 20
+// aligned residues, or half the chain), with the aligned (query index, chain residue index) pairs.
+function mapQueryToChains(entry, query) {
+  if (!query || query.length < 10) return [];
+  const model = activeModelOf(entry);
+  const matches = [];
+  for (const chain of polymerChainResidues(model).values()) {
+    if (chain.kind !== 'protein') continue;
+    const sequence = chain.residues.map((residue) => (residue.code?.length === 1 ? residue.code : 'X')).join('');
+    const aligned = alignSequences(query, sequence, { kind: 'protein' });
+    if (aligned.truncated || aligned.identity < 0.9 || aligned.pairs.length < Math.min(20, chain.residues.length * 0.5)) continue;
+    matches.push({ chain, pairs: aligned.pairs });
+  }
+  return matches;
+}
+
+function renderConservation() {
+  const entry = state.active;
+  const conservation = entry?.conservation;
+  els.conservationResult.hidden = !conservation;
+  if (!conservation) return;
+  const model = activeModelOf(entry);
+  const top = [...conservation.grades].filter(([, grade]) => grade === 9).map(([key]) => model.residueMap.get(key)).filter(Boolean).slice(0, 14);
+  const low = conservation.summaries.some((item) => item.sequences < MIN_CONSERVATION_SEQUENCES);
+  els.conservationResult.innerHTML = `${conservation.summaries.map((item) => `<div>${escapeHTML(item.source)} → chain ${escapeHTML(item.chains.join(', '))}: ${formatNumber(item.sequences)} sequences, diversity ${item.neff.toFixed(1)} of 20 (HH-suite Neff)</div>`).join('')}
+    ${low ? `<div class="warn">Fewer than ${MIN_CONSERVATION_SEQUENCES} sequences: grades are not reliable.</div>` : ''}
+    ${top.length ? `<div class="hint">Grade 9: ${top.map((residue) => `<button type="button" class="link" data-focus-residue="${escapeHTML(residue.key)}">${escapeHTML(shortResidueLabel(residue))}</button>`).join(', ')}${[...conservation.grades.values()].filter((grade) => grade === 9).length > top.length ? ', …' : ''}</div>` : ''}
+    ${conservation.problems.length ? `<div class="hint">${escapeHTML(conservation.problems.join('; '))}</div>` : ''}`;
+  for (const button of els.conservationResult.querySelectorAll('[data-focus-residue]')) {
+    button.addEventListener('click', () => focusResidues([button.dataset.focusResidue]));
   }
 }
 
@@ -6256,6 +7404,709 @@ function domainRanges(entry) {
     const note = Number.isFinite(plddt) ? ` · pLDDT ${plddt.toFixed(0)}${plddt < 50 ? ' (disordered)' : ''}` : '';
     return { index, text: parts.slice(0, 6).join(', ') + (parts.length > 6 ? ` … (${parts.length} segments)` : '') + note };
   });
+}
+
+/* ---------- Density maps ---------- */
+
+// The map of the entry's own experiment: X-ray 2Fo-Fc and Fo-Fc maps and EMDB maps come from
+// the PDBe volume server (RCSB's copy as a fallback), and CCP4/MRC files open from disk. A worker
+// holds the map and returns the isosurface inside a region (around the focus, around the view
+// center, or the whole map); the page draws it as a mesh or a surface in the structure's frame.
+
+const MAP_COLORS = { '2fo-fc': [0.33, 0.58, 1], 'fo-fc+': [0.2, 0.82, 0.3], 'fo-fc-': [1, 0.3, 0.25], em: [0.55, 0.75, 0.92], map: [0.55, 0.75, 0.92] };
+// Voxels per request, the volume server's levels: a box around the focus, and a whole map (or,
+// for X-ray entries, a box around the model). Map fits use full-resolution tiles.
+const MAP_BOX_BUDGET = 2 ** 21;
+const MAP_WHOLE_BUDGET = 2 ** 23;
+const MAP_BOX_GRID = 2;
+let volumeWorkerClient = null;
+
+function volumeWorker() {
+  volumeWorkerClient ??= createWorkerClient(new URL('./lib/volume-worker.js', import.meta.url), 'map worker');
+  return volumeWorkerClient;
+}
+
+function volumeServerQuery(density) {
+  return density.source.server ? `&server=${encodeURIComponent(density.source.server)}` : '';
+}
+
+function mapChannelKind(name, source) {
+  const lower = String(name).toLowerCase().replace(/\s/g, '');
+  if (lower.includes('2fo')) return '2fo-fc';
+  if (lower.includes('fo-fc') || lower.includes('fofc')) return 'fo-fc';
+  return source === 'em' ? 'em' : 'map';
+}
+
+function mapChannelLabel(channel) {
+  return { '2fo-fc': '2Fo-Fc', 'fo-fc': 'Fo-Fc', em: 'Cryo-EM map' }[channel.kind] ?? channel.name;
+}
+
+// Contour levels are kept in σ above the map's mean, as Mol* does; cryo-EM maps start at EMDB's
+// recommended level, 2Fo-Fc at 1.5σ and Fo-Fc at ±3σ.
+function mapLevel(channel) {
+  return channel.stats.mean + channel.sigmaLevel * channel.stats.rms;
+}
+
+async function loadDensity(entry = state.active, options = {}) {
+  if (!entry) throw new CommandError('Open a structure first.');
+  const meta = entry.structure.meta;
+  const method = String(meta.method).toUpperCase();
+  const code = validationCode(entry);
+  let source;
+  if (method.includes('ELECTRON MICROSCOPY') || method.includes('CRYO')) {
+    if (!meta.emdb) throw new CommandError(`${code || entry.name} names no EMDB map. Open the map file instead.`);
+    source = { type: 'server', kind: 'em', id: meta.emdb.toLowerCase(), label: meta.emdb };
+  } else if (code && (method.includes('X-RAY') || method.includes('NEUTRON') || method.includes('ELECTRON CRYSTALLOGRAPHY'))) {
+    source = { type: 'server', kind: 'x-ray', id: code.toLowerCase(), label: code };
+  } else {
+    throw new CommandError(`${entry.name} has no map at the PDBe volume server (X-ray and cryo-EM entries do). Open a CCP4/MRC map file instead.`);
+  }
+  showLoading(`Loading the ${source.kind === 'em' ? 'cryo-EM' : 'X-ray'} map of ${source.label}`);
+  try {
+    const response = await fetch(`/api/fetch/volume/${source.kind}/${encodeURIComponent(source.id)}${options.refresh ? '?refresh=1' : ''}`);
+    if (!response.ok) throw new CommandError(await responseError(response, `The map of ${source.label} could not be loaded`));
+    const header = await response.json();
+    // Map data come from the server that sent the header, whose statistics set the levels.
+    source.server = response.headers.get('X-Proteoscope-Volume-Server') || '';
+    let recommended = NaN;
+    if (source.kind === 'em') {
+      try {
+        const emdb = await fetch(`/api/fetch/emdb/${encodeURIComponent(meta.emdb)}`);
+        if (emdb.ok) {
+          const contours = (await emdb.json())?.map?.contour_list?.contour ?? [];
+          recommended = Number((contours.find((item) => item.primary) ?? contours[0])?.level);
+        }
+      } catch {
+        // The map still opens, at 3σ.
+      }
+    }
+    const info = header.sampling?.[0]?.valuesInfo ?? [];
+    const channels = (header.channels ?? []).map((name, index) => {
+      const kind = mapChannelKind(name, source.kind);
+      const stats = { mean: Number(info[index]?.mean) || 0, rms: Number(info[index]?.sigma) || 1 };
+      let sigmaLevel = kind === 'fo-fc' ? 3 : kind === 'em' ? 3 : 1.5;
+      if (kind === 'em' && Number.isFinite(recommended)) sigmaLevel = (recommended - stats.mean) / stats.rms;
+      return { name, kind, index, stats, sigmaLevel, recommended: kind === 'em' ? recommended : NaN, visible: true };
+    });
+    if (!channels.length) throw new CommandError(`The volume server lists no map channels for ${source.label}.`);
+    setDensity(entry, { source, header, channels, emdb: meta.emdb });
+  } finally {
+    hideLoading();
+  }
+}
+
+async function openMapFile(ref, entry = state.active) {
+  if (!entry) throw new Error(`Open a structure before the map ${ref.name}.`);
+  showLoading(`Reading ${ref.name}`);
+  try {
+    const bytes = await ref.read();
+    const key = `${entry.id}:file`;
+    // A member of an uncompressed ZIP is a view into the whole archive; the worker gets its own copy.
+    const buffer = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes.buffer : bytes.slice().buffer;
+    const [summary] = await volumeWorker().run('parse-mrc', { key, name: ref.name, bytes: buffer }, [buffer]);
+    const fofc = /fo-?fc/i.test(ref.name) && !/2fo/i.test(ref.name);
+    const channel = { name: ref.name, kind: fofc ? 'fo-fc' : 'map', index: 0, stats: summary.stats, sigmaLevel: fofc ? 3 : 2, visible: true, key };
+    setDensity(entry, { source: { type: 'file', name: ref.name, label: ref.name }, channels: [channel], summary });
+  } finally {
+    hideLoading();
+  }
+}
+
+function setDensity(entry, fields) {
+  if (entry.density) entry.density.updateToken += 1;
+  clearDensityGeometry(entry);
+  // The other kind of source's volumes are no longer needed.
+  for (const suffix of fields.source.type === 'server' ? ['file'] : ['view', 'fit']) volumeWorker().run('drop', { key: `${entry.id}:${suffix}` }).catch(() => {});
+  const em = fields.source.kind === 'em';
+  const whole = em || (fields.summary && fields.summary.dims.reduce((total, count) => total * count, 1) <= MAP_WHOLE_BUDGET && fields.channels[0].kind === 'map');
+  entry.density = {
+    ...fields,
+    // The Canvas fallback draws lines but no surfaces.
+    style: em && !state.canvasFallback ? 'surface' : 'mesh',
+    opacity: em ? 0.45 : 1,
+    width: 1.2,
+    region: whole ? 'all' : 'focus',
+    radius: 10,
+    zone: 0,
+    loadedKey: '',
+    drawn: new Set(),
+    geometry: new Map(),
+    fit: null,
+    spacing: fields.summary?.spacing ?? NaN,
+    updateToken: 0,
+  };
+  if (entry === state.active) activateTab('analysis');
+  renderDensityPanel();
+  updateDensity(entry);
+}
+
+function removeDensity(entry = state.active) {
+  if (!entry?.density) return;
+  entry.density.updateToken += 1;
+  clearDensityGeometry(entry);
+  volumeWorker().run('drop', { key: String(entry.id) }).catch(() => {});
+  if (entry.color.scheme === 'mapfit') entry.color.scheme = 'chain';
+  entry.density = null;
+  renderDensityPanel();
+  markColorsDirty();
+  requestRender();
+}
+
+function clearDensityGeometry(entry) {
+  for (const id of new Set([...(entry.density?.drawn ?? []), ...(entry.density?.geometry.keys() ?? [])])) {
+    state.renderer.setLines?.(id, null);
+    state.renderer.setMesh(id, null);
+  }
+  if (entry.density) {
+    entry.density.drawn = new Set();
+    entry.density.geometry = new Map();
+  }
+}
+
+// The region to contour, in the map's (deposited) frame: around the focused or selected
+// residues, or around the view center; null for the whole map. Boxes snap to a 2 Å grid so a
+// small move reuses the box already fetched.
+function densityRegion(entry) {
+  const density = entry.density;
+  // An X-ray map is periodic, and its unit cell need not contain the model: "whole map" is then
+  // the model's box, which the server fills by symmetry.
+  if (density.region === 'all') return density.source.kind === 'x-ray' ? modelBox(entry, 5) : null;
+  const model = activeModelOf(entry);
+  const keys = density.region === 'focus' && entry === state.active ? [...(state.focus?.residues ?? state.selection)] : [];
+  const atoms = keys.flatMap((key) => model.residueMap.get(key)?.atoms ?? []).filter((atom) => !atom.isHydrogen);
+  let min;
+  let max;
+  if (atoms.length) {
+    min = [Infinity, Infinity, Infinity];
+    max = [-Infinity, -Infinity, -Infinity];
+    for (const atom of atoms) {
+      const point = [atom.x, atom.y, atom.z];
+      for (let axis = 0; axis < 3; axis += 1) {
+        min[axis] = Math.min(min[axis], point[axis] - density.radius);
+        max[axis] = Math.max(max[axis], point[axis] + density.radius);
+      }
+    }
+  } else {
+    const target = state.camera.target;
+    min = target.map((value) => value - density.radius);
+    max = target.map((value) => value + density.radius);
+  }
+  if (entry.transform) [min, max] = transformedBox(invertTransform(entry.transform), min, max);
+  return {
+    min: min.map((value) => Math.floor(value / MAP_BOX_GRID) * MAP_BOX_GRID),
+    max: max.map((value) => Math.ceil(value / MAP_BOX_GRID) * MAP_BOX_GRID),
+  };
+}
+
+// The box around the model's heavy atoms plus a margin, in the map's (deposited) frame, on the
+// 2 Å grid.
+function modelBox(entry, margin) {
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (const atom of activeModelOf(entry).atoms) {
+    if (atom.isHydrogen || atom.isWater) continue;
+    const point = [atom.x, atom.y, atom.z];
+    for (let axis = 0; axis < 3; axis += 1) {
+      min[axis] = Math.min(min[axis], point[axis] - margin);
+      max[axis] = Math.max(max[axis], point[axis] + margin);
+    }
+  }
+  if (!Number.isFinite(min[0])) return null;
+  const [low, high] = entry.transform ? transformedBox(invertTransform(entry.transform), min, max) : [min, max];
+  return {
+    min: low.map((value) => Math.floor(value / MAP_BOX_GRID) * MAP_BOX_GRID),
+    max: high.map((value) => Math.ceil(value / MAP_BOX_GRID) * MAP_BOX_GRID),
+    whole: true,
+  };
+}
+
+function transformedBox(transform, min, max) {
+  const low = [Infinity, Infinity, Infinity];
+  const high = [-Infinity, -Infinity, -Infinity];
+  for (let corner = 0; corner < 8; corner += 1) {
+    const point = transformPoint(transform, corner & 1 ? max[0] : min[0], corner & 2 ? max[1] : min[1], corner & 4 ? max[2] : min[2]);
+    for (let axis = 0; axis < 3; axis += 1) {
+      low[axis] = Math.min(low[axis], point[axis]);
+      high[axis] = Math.max(high[axis], point[axis]);
+    }
+  }
+  return [low, high];
+}
+
+// Atoms that carve the map ("near atoms"): the focused or selected residues, else the model.
+function densityZone(entry) {
+  const density = entry.density;
+  if (!(density.zone > 0)) return null;
+  const model = activeModelOf(entry);
+  const keys = entry === state.active ? [...(state.focus?.residues ?? state.selection)] : [];
+  const atoms = (keys.length ? keys.flatMap((key) => model.residueMap.get(key)?.atoms ?? []) : model.atoms).filter((atom) => !atom.isHydrogen && !atom.isWater);
+  const inverse = entry.transform ? invertTransform(entry.transform) : null;
+  const points = new Float32Array(atoms.length * 3);
+  atoms.forEach((atom, index) => points.set(inverse ? transformPoint(inverse, atom.x, atom.y, atom.z) : [atom.x, atom.y, atom.z], index * 3));
+  return { points, radius: density.zone };
+}
+
+async function updateDensity(entry = state.active) {
+  const density = entry?.density;
+  if (!density || !state.entries.includes(entry)) return;
+  const token = (density.updateToken += 1);
+  const current = () => token === density.updateToken && entry.density === density && state.entries.includes(entry);
+  const { detailForBudget } = await import('./lib/volume.js');
+  const region = densityRegion(entry);
+  const regionKey = region ? `${region.min.join(',')}/${region.max.join(',')}` : 'all';
+  try {
+    let keyOf = () => `${entry.id}:file`;
+    if (density.source.type === 'server') {
+      const base = `/api/fetch/volume/${density.source.kind}/${encodeURIComponent(density.source.id)}`;
+      if (density.loadedKey !== regionKey) {
+        const budget = region && !region.whole ? MAP_BOX_BUDGET : MAP_WHOLE_BUDGET;
+        const url = region
+          ? `${base}/box?min=${region.min.join(',')}&max=${region.max.join(',')}&detail=${detailForBudget(density.header, budget)}${volumeServerQuery(density)}`
+          : `${base}/cell?detail=${detailForBudget(density.header, budget)}${volumeServerQuery(density)}`;
+        density.status = 'Loading the map…';
+        renderDensityStatus(entry);
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(await responseError(response, 'The map region could not be loaded'));
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (!current()) return;
+        // Whatever region the worker ends up holding is the one loadedKey names, even when a
+        // later update supersedes this one while it parses.
+        density.loadedKey = '';
+        const summaries = await volumeWorker().run('parse-server', { key: `${entry.id}:view`, bytes: bytes.buffer }, [bytes.buffer]);
+        if (entry.density !== density) return;
+        density.loadedKey = regionKey;
+        density.spacing = summaries[0]?.spacing ?? NaN;
+        density.sampleRate = summaries[0]?.sampleRate ?? 1;
+        if (!current()) return;
+      }
+      keyOf = (channel) => `${entry.id}:view:${channel.index}`;
+    }
+    const zone = densityZone(entry);
+    // New geometry is committed only when every channel is contoured and the update is current,
+    // so a superseded update never leaves meshes behind.
+    const geometry = new Map();
+    for (const channel of density.channels) {
+      if (!channel.visible) continue;
+      const request = { key: keyOf(channel), levels: contourLevels(density, channel), zone };
+      if (density.source.type === 'file') {
+        const voxels = density.summary.dims.reduce((total, count) => total * count, 1);
+        if (region) {
+          Object.assign(request, region);
+          // A large region of a fine map is contoured at a coarser stride.
+          const spacing = density.summary.spacing || 1;
+          const regionVoxels = [0, 1, 2].reduce((total, axis) => total * Math.max(1, (region.max[axis] - region.min[axis]) / spacing), 1);
+          request.stride = Math.max(1, Math.ceil(Math.cbrt(Math.min(voxels, regionVoxels) / MAP_BOX_BUDGET)));
+        } else {
+          request.stride = Math.max(1, Math.ceil(Math.cbrt(voxels / MAP_WHOLE_BUDGET)));
+        }
+      }
+      const { meshes, spacing } = await volumeWorker().run('contour', request);
+      if (!current()) return;
+      if (density.source.type === 'file') density.spacing = spacing;
+      meshes.forEach((mesh, index) => {
+        const id = `map:${entry.id}:${channel.index}:${index}`;
+        const color = channel.kind === 'fo-fc' ? MAP_COLORS[index === 0 ? 'fo-fc+' : 'fo-fc-'] : channel.color ?? MAP_COLORS[channel.kind];
+        geometry.set(id, { mesh, color });
+      });
+    }
+    for (const id of new Set([...density.drawn, ...density.geometry.keys()])) {
+      if (geometry.has(id)) continue;
+      state.renderer.setLines?.(id, null);
+      state.renderer.setMesh(id, null);
+    }
+    density.geometry = geometry;
+    density.drawn = new Set(geometry.keys());
+    density.status = '';
+    drawDensity(entry);
+  } catch (error) {
+    if (token !== density.updateToken) return;
+    density.status = error.message;
+    console.warn(error);
+  }
+  renderDensityStatus(entry);
+}
+
+// Contour levels in the values the worker holds. The server downsamples large regions, which
+// narrows the values, so there a level keeps its σ (from the header's statistics at that rate)
+// rather than its value.
+function contourLevels(density, channel) {
+  const rate = density.source.type === 'server' ? density.sampleRate ?? 1 : 1;
+  const info = rate > 1 ? density.header?.sampling?.find((item) => item.rate === rate)?.valuesInfo?.[channel.index] : null;
+  const mean = info && Number.isFinite(Number(info.mean)) ? Number(info.mean) : channel.stats.mean;
+  const rms = info && Number(info.sigma) > 0 ? Number(info.sigma) : channel.stats.rms;
+  const level = mean + channel.sigmaLevel * rms;
+  return channel.kind === 'fo-fc' ? [{ level, below: false }, { level: mean - channel.sigmaLevel * rms, below: true }] : [{ level, below: false }];
+}
+
+// Uploads the contoured geometry in the structure's current frame (after any superposition).
+function drawDensity(entry) {
+  const density = entry.density;
+  if (!density || !state.entries.includes(entry)) return;
+  density.shown = entry.visible;
+  const transform = entry.transform;
+  for (const [id, { mesh, color }] of density.geometry) {
+    if (!entry.visible) {
+      state.renderer.setLines?.(id, null);
+      state.renderer.setMesh(id, null);
+      continue;
+    }
+    const positions = transform ? transformedPositions(transform, mesh.positions) : mesh.positions;
+    if (density.style === 'mesh') {
+      state.renderer.setMesh(id, null);
+      const segments = new Float32Array(mesh.edges.length * 3);
+      for (let index = 0; index < mesh.edges.length; index += 1) {
+        const vertex = mesh.edges[index] * 3;
+        segments[index * 3] = positions[vertex];
+        segments[index * 3 + 1] = positions[vertex + 1];
+        segments[index * 3 + 2] = positions[vertex + 2];
+      }
+      state.renderer.setLines?.(id, { segments, color, opacity: density.opacity, width: density.width });
+    } else {
+      state.renderer.setLines?.(id, null);
+      const vertices = new ArrayBuffer(mesh.vertexCount * MESH_VERTEX_STRIDE);
+      const floats = new Float32Array(vertices);
+      const words = new Uint32Array(vertices);
+      const packed = packColor(color);
+      for (let vertex = 0; vertex < mesh.vertexCount; vertex += 1) {
+        const offset = vertex * 8;
+        floats[offset] = positions[vertex * 3];
+        floats[offset + 1] = positions[vertex * 3 + 1];
+        floats[offset + 2] = positions[vertex * 3 + 2];
+        const normal = transform ? transformDirection(transform, mesh.normals[vertex * 3], mesh.normals[vertex * 3 + 1], mesh.normals[vertex * 3 + 2]) : [mesh.normals[vertex * 3], mesh.normals[vertex * 3 + 1], mesh.normals[vertex * 3 + 2]];
+        floats[offset + 3] = normal[0];
+        floats[offset + 4] = normal[1];
+        floats[offset + 5] = normal[2];
+        words[offset + 6] = 0;
+        words[offset + 7] = packed;
+      }
+      state.renderer.setMesh(id, { vertices: new Uint8Array(vertices), indices: mesh.indices, opacity: density.opacity, noPick: true });
+    }
+  }
+  requestRender();
+}
+
+function transformedPositions(transform, positions) {
+  const out = new Float32Array(positions.length);
+  for (let index = 0; index < positions.length; index += 3) out.set(transformPoint(transform, positions[index], positions[index + 1], positions[index + 2]), index);
+  return out;
+}
+
+// Regions that follow the view or the focus are refetched once the camera or focus settles.
+function followDensity() {
+  const following = state.entries.filter((entry) => entry.density && entry.visible && entry.density.region !== 'all');
+  if (!following.length) return;
+  const target = state.camera.target;
+  const last = state.densityTarget;
+  if (last && Math.hypot(target[0] - last[0], target[1] - last[1], target[2] - last[2]) < 1) return;
+  state.densityTarget = [...target];
+  clearTimeout(state.densityTimer);
+  state.densityTimer = setTimeout(() => {
+    for (const entry of following) {
+      const focused = entry === state.active && (state.focus || state.selection.size) && entry.density.region === 'focus';
+      if (!focused) updateDensity(entry);
+    }
+  }, 300);
+}
+
+function densityFocusChanged() {
+  clearTimeout(state.densityFocusTimer);
+  state.densityFocusTimer = setTimeout(() => {
+    const entry = state.active;
+    if (entry?.density && (entry.density.region === 'focus' || entry.density.zone > 0)) updateDensity(entry);
+  }, 120);
+}
+
+// Map values at the model's heavy atoms: atom inclusion at the contour level for cryo-EM maps,
+// the mean 2Fo-Fc density in σ for X-ray maps; per residue for the "Fit to the loaded map" colors.
+async function fitDensity(entry = state.active) {
+  const density = entry?.density;
+  if (!density) throw new CommandError('Load a density map first.');
+  const model = activeModelOf(entry);
+  const channel = density.channels.find((item) => item.kind !== 'fo-fc') ?? density.channels[0];
+  const atoms = model.atoms.filter((atom) => !atom.isHydrogen && !atom.isWater);
+  if (!atoms.length) throw new CommandError('The structure has no atoms to fit.');
+  const inverse = entry.transform ? invertTransform(entry.transform) : null;
+  const positions = new Float32Array(atoms.length * 3);
+  const groups = new Int32Array(atoms.length);
+  atoms.forEach((atom, index) => {
+    positions.set(inverse ? transformPoint(inverse, atom.x, atom.y, atom.z) : [atom.x, atom.y, atom.z], index * 3);
+    groups[index] = model.atomResidue[atom.id];
+  });
+  const kind = channel.kind === '2fo-fc' ? 'sigma' : 'inclusion';
+  // Levels of the full-resolution map: the fit samples full-resolution data.
+  const level = kind === 'sigma' ? channel.stats.mean + channel.stats.rms : mapLevel(channel);
+  const groupCount = model.residues.length;
+  showLoading('Fitting the model to the map');
+  let fit;
+  try {
+    fit = density.source.type === 'server'
+      ? await fitServerMap(entry, density, channel, positions, groups, groupCount, level)
+      : await volumeWorker().run('fit', { key: `${entry.id}:file`, positions, groups, groupCount, level });
+  } finally {
+    hideLoading();
+  }
+  if (entry.density !== density) return;
+  const values = new Map();
+  model.residues.forEach((residue, index) => {
+    const value = kind === 'sigma' ? fit.sigma[index] : fit.inclusion[index];
+    if (Number.isFinite(value) && residue.kind !== 'water') values.set(residue.key, value);
+  });
+  const worst = [...values].filter(([key]) => {
+    const residue = model.residueMap.get(key);
+    return residue && (residue.kind === 'protein' || residue.kind === 'nucleic' || residue.kind === 'ligand');
+  }).sort((a, b) => a[1] - b[1]).slice(0, 10);
+  density.fit = { kind, level, channel: mapChannelLabel(channel), atomInclusion: fit.atomInclusion, atoms: fit.atoms, outside: fit.outside, downsampled: fit.downsampled, values, worst };
+  setColorScheme('mapfit', [entry]);
+  renderDensityPanel();
+  if (entry === state.active) renderProfile();
+}
+
+// A fit on server data: the model's box in tiles the server sends at full resolution (sample
+// rate 1), each at most its largest request, with the fits of the tiles added up. σ values and
+// EMDB's contour level refer to the full map, which downsampling would shift.
+async function fitServerMap(entry, density, channel, positions, groups, groupCount, level) {
+  const header = density.header ?? {};
+  const precisions = header.availablePrecisions ?? [];
+  let top = precisions[0];
+  for (const item of precisions) if (!top || item.maxVoxels > top.maxVoxels) top = item;
+  // Full-resolution voxel size along each axis (Å): cell edge × fractional extent / samples.
+  const counts = header.sampling?.find((item) => item.rate === 1)?.sampleCount ?? [];
+  let step = 0;
+  (header.axisOrder ?? []).forEach((axis, index) => {
+    const size = Number(header.spacegroup?.size?.[axis]) * Number(header.dimensions?.[index]) / Number(counts[index]);
+    if (Number.isFinite(size)) step = Math.max(step, size);
+  });
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let atom = 0; atom < groups.length; atom += 1) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      const value = positions[atom * 3 + axis];
+      if (value < min[axis]) min[axis] = value;
+      if (value > max[axis]) max[axis] = value;
+    }
+  }
+  for (let axis = 0; axis < 3; axis += 1) {
+    min[axis] = Math.floor(min[axis] - 4);
+    max[axis] = Math.ceil(max[axis] + 4);
+  }
+  // Tiles per axis until each (with a two-voxel margin for interpolation) fits the request limit.
+  const margin = 2 * (step || 1);
+  const tiles = [1, 1, 1];
+  const voxelsOf = (axis) => ((max[axis] - min[axis]) / tiles[axis] + 2 * margin) / (step || 1);
+  if (step > 0 && top) {
+    while (voxelsOf(0) * voxelsOf(1) * voxelsOf(2) > top.maxVoxels * 0.9 && tiles[0] * tiles[1] * tiles[2] < 512) {
+      const axis = [0, 1, 2].reduce((best, candidate) => (voxelsOf(candidate) > voxelsOf(best) ? candidate : best), 0);
+      tiles[axis] += 1;
+    }
+  }
+  const size = [0, 1, 2].map((axis) => (max[axis] - min[axis]) / tiles[axis]);
+  const members = new Map();
+  for (let atom = 0; atom < groups.length; atom += 1) {
+    const cell = [0, 1, 2].map((axis) => Math.min(tiles[axis] - 1, Math.floor((positions[atom * 3 + axis] - min[axis]) / size[axis])));
+    const key = cell.join(',');
+    if (!members.has(key)) members.set(key, []);
+    members.get(key).push(atom);
+  }
+  const total = { sums: new Float64Array(groupCount), sampled: new Int32Array(groupCount), counts: new Int32Array(groupCount), insideCounts: new Int32Array(groupCount), inside: 0, outside: 0, atoms: groups.length, downsampled: false };
+  const round = (value) => Math.round(value * 1000) / 1000;
+  let done = 0;
+  for (const [key, list] of members) {
+    done += 1;
+    if (members.size > 1) setLoading(`Fitting the model to the map · tile ${done} of ${members.size}`);
+    const cell = key.split(',').map(Number);
+    const low = [0, 1, 2].map((axis) => round(min[axis] + cell[axis] * size[axis] - margin));
+    const high = [0, 1, 2].map((axis) => round(min[axis] + (cell[axis] + 1) * size[axis] + margin));
+    const url = `/api/fetch/volume/${density.source.kind}/${encodeURIComponent(density.source.id)}/box?min=${low.join(',')}&max=${high.join(',')}&detail=${top?.precision ?? 0}${volumeServerQuery(density)}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new CommandError(await responseError(response, 'The map could not be loaded for fitting'));
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const summaries = await volumeWorker().run('parse-server', { key: `${entry.id}:fit`, bytes: bytes.buffer }, [bytes.buffer]);
+    if ((summaries[0]?.sampleRate ?? 1) > 1) total.downsampled = true;
+    const tilePositions = new Float32Array(list.length * 3);
+    const tileGroups = new Int32Array(list.length);
+    list.forEach((atom, index) => {
+      tilePositions.set(positions.subarray(atom * 3, atom * 3 + 3), index * 3);
+      tileGroups[index] = groups[atom];
+    });
+    const fit = await volumeWorker().run('fit', { key: `${entry.id}:fit:${channel.index}`, positions: tilePositions, groups: tileGroups, groupCount, level });
+    for (let group = 0; group < groupCount; group += 1) {
+      total.sums[group] += fit.sums[group];
+      total.sampled[group] += fit.sampled[group];
+      total.counts[group] += fit.counts[group];
+      total.insideCounts[group] += fit.insideCounts[group];
+    }
+    total.inside += fit.inside;
+    total.outside += fit.outside;
+  }
+  const sigma = new Float64Array(groupCount).fill(NaN);
+  const inclusion = new Float64Array(groupCount).fill(NaN);
+  for (let group = 0; group < groupCount; group += 1) {
+    if (total.sampled[group]) sigma[group] = total.sums[group] / total.sampled[group];
+    if (total.counts[group]) inclusion[group] = total.insideCounts[group] / total.counts[group];
+  }
+  return { ...total, sigma, inclusion, atomInclusion: total.atoms ? total.inside / total.atoms : NaN };
+}
+
+function renderDensityPanel() {
+  const entry = state.active;
+  const density = entry?.density;
+  els.densityControls.hidden = !density;
+  els.densityRemove.disabled = !density;
+  els.densityLoad.textContent = density ? 'Reload map' : 'Load map';
+  if (!density) {
+    els.densityResult.hidden = true;
+    return;
+  }
+  els.densityRegion.value = density.region;
+  els.densityRadius.value = String(density.radius);
+  els.densityRadiusValue.textContent = `${density.radius} Å`;
+  els.densityStyle.value = density.style;
+  els.densityZone.value = String(density.zone);
+  els.densityChannels.innerHTML = density.channels.map((channel) => {
+    const max = channel.kind === 'em' || channel.kind === 'map' ? Math.max(12, Math.ceil(channel.sigmaLevel * 2)) : 6;
+    return `<div class="map-channel" data-channel="${channel.index}">
+      <label class="check"><input type="checkbox" data-map-visible ${channel.visible ? 'checked' : ''} /> <span class="swatch" style="background:${colorToHex(channel.kind === 'fo-fc' ? MAP_COLORS['fo-fc+'] : channel.color ?? MAP_COLORS[channel.kind])}"></span>${escapeHTML(mapChannelLabel(channel))}</label>
+      <input type="range" data-map-level min="0.3" max="${max}" step="0.1" value="${channel.sigmaLevel.toFixed(1)}" aria-label="${escapeHTML(mapChannelLabel(channel))} contour level" />
+      <output data-map-level-value>${mapLevelText(channel)}</output>
+    </div>`;
+  }).join('');
+  for (const row of els.densityChannels.querySelectorAll('[data-channel]')) {
+    const channel = density.channels[Number(row.dataset.channel)];
+    row.querySelector('[data-map-visible]').addEventListener('change', (event) => {
+      channel.visible = event.target.checked;
+      updateDensity(entry);
+    });
+    const slider = row.querySelector('[data-map-level]');
+    slider.addEventListener('input', () => {
+      channel.sigmaLevel = Number(slider.value);
+      row.querySelector('[data-map-level-value]').textContent = mapLevelText(channel);
+      clearTimeout(state.densityLevelTimer);
+      state.densityLevelTimer = setTimeout(() => updateDensity(entry), 60);
+    });
+  }
+  renderDensityStatus(entry);
+}
+
+function mapLevelText(channel) {
+  const absolute = mapLevel(channel);
+  const sign = channel.kind === 'fo-fc' ? '±' : '';
+  return `${sign}${channel.sigmaLevel.toFixed(1)}σ · ${sign}${formatSignificant(channel.kind === 'fo-fc' ? channel.sigmaLevel * channel.stats.rms : absolute)}`;
+}
+
+function formatSignificant(value) {
+  if (!Number.isFinite(value)) return '–';
+  const magnitude = Math.abs(value);
+  return magnitude >= 100 ? value.toFixed(0) : magnitude >= 1 ? value.toFixed(2) : value.toPrecision(3);
+}
+
+function renderDensityStatus(entry) {
+  if (entry !== state.active) return;
+  const density = entry.density;
+  if (!density) return;
+  const channel = density.channels[0];
+  const facts = [
+    density.source.type === 'server' ? `${density.source.kind === 'em' ? density.emdb : `${density.source.label} (PDBe volume server)`}` : density.source.name,
+    Number.isFinite(density.spacing) ? `grid ${density.spacing.toFixed(2)} Å${density.source.type === 'server' && density.sampleRate > 1 ? ` (downsampled ${density.sampleRate}×, levels matched in σ)` : ''}` : '',
+    Number.isFinite(channel?.recommended) ? `EMDB recommended level ${formatSignificant(channel.recommended)}` : '',
+  ].filter(Boolean);
+  const fit = density.fit;
+  const fitNotes = fit ? [fit.outside ? `${formatNumber(fit.outside)} outside the map count as outside` : '', fit.downsampled ? 'the server sent downsampled data for part of the model' : ''].filter(Boolean).join('; ') : '';
+  const fitText = fit ? (fit.kind === 'sigma'
+    ? `<div>Map fit (${escapeHTML(fit.channel)}): <strong>${formatPercent(fit.atomInclusion)}</strong> of ${formatNumber(fit.atoms)} atoms above 1σ.</div>`
+    : `<div>Atom inclusion: <strong>${formatPercent(fit.atomInclusion)}</strong> of ${formatNumber(fit.atoms)} atoms inside the contour at ${formatSignificant(fit.level)}.</div>`)
+    + (fitNotes ? `<div class="hint">${escapeHTML(fitNotes)}.</div>` : '') : '';
+  const model = activeModelOf(entry);
+  const worst = fit?.worst?.length ? `<div class="hint">Worst fit: ${fit.worst.map(([key, value]) => {
+    const residue = model.residueMap.get(key);
+    return residue ? `<button type="button" class="link" data-focus-residue="${escapeHTML(key)}">${escapeHTML(shortResidueLabel(residue))}</button> ${fit.kind === 'sigma' ? `${value.toFixed(1)}σ` : formatPercent(value)}` : '';
+  }).filter(Boolean).join(', ')}</div>` : '';
+  els.densityResult.hidden = false;
+  els.densityResult.innerHTML = `<div>${escapeHTML(facts.join(' · '))}</div>${density.status ? `<div class="${/fail|could not|error|no map/i.test(density.status) ? 'warn' : 'hint'}">${escapeHTML(density.status)}</div>` : ''}${fitText}${worst}`;
+  for (const button of els.densityResult.querySelectorAll('[data-focus-residue]')) {
+    button.addEventListener('click', () => focusResidues([button.dataset.focusResidue]));
+  }
+}
+
+async function mapCommand(parsed) {
+  const entry = state.active;
+  if (parsed.action === 'load' || parsed.action === 'refresh') {
+    await loadDensity(entry, { refresh: parsed.action === 'refresh' });
+    const channels = entry.density.channels.map((channel) => `${mapChannelLabel(channel)} at ${mapLevelText(channel)}`).join(', ');
+    return `Loaded the map of ${entry.density.source.label}: ${channels}.`;
+  }
+  if (parsed.action === 'off') {
+    removeDensity(entry);
+    return 'Map removed.';
+  }
+  if (!entry.density) await loadDensity(entry);
+  const density = entry.density;
+  switch (parsed.action) {
+    case 'fit': {
+      await fitDensity(entry);
+      const fit = density.fit;
+      return fit.kind === 'sigma'
+        ? `${formatPercent(fit.atomInclusion)} of ${formatNumber(fit.atoms)} atoms are above 1σ in the 2Fo-Fc map. Colored by density at the atoms.`
+        : `Atom inclusion ${formatPercent(fit.atomInclusion)} at ${formatSignificant(fit.level)} (${formatNumber(fit.atoms)} atoms). Colored by inclusion per residue.`;
+    }
+    case 'level': {
+      const wanted = { '2fofc': '2fo-fc', fofc: 'fo-fc', em: 'em', map: 'map' }[parsed.channel];
+      const channels = density.channels.filter((channel) => (wanted ? channel.kind === wanted : channel.kind !== 'fo-fc'));
+      if (!channels.length) throw new CommandError(`This map has no ${parsed.channel} channel.`);
+      for (const channel of channels) channel.sigmaLevel = parsed.value;
+      break;
+    }
+    case 'style':
+      density.style = parsed.value;
+      density.opacity = parsed.value === 'surface' ? 0.45 : 1;
+      renderDensityPanel();
+      drawDensity(entry);
+      return '';
+    case 'region':
+      density.region = parsed.value;
+      break;
+    case 'radius':
+      density.radius = Math.min(30, Math.max(4, parsed.value));
+      break;
+    case 'zone':
+      density.zone = Math.min(10, parsed.value);
+      break;
+    default:
+      break;
+  }
+  renderDensityPanel();
+  await updateDensity(entry);
+  return '';
+}
+
+async function poseCommand(parsed) {
+  const entry = state.active;
+  const docking = dockingOf(entry);
+  if (!docking) throw new CommandError('Open docking poses first: drop an SDF, MOL2 or PDBQT file onto the structure.');
+  switch (parsed.action) {
+    case 'list':
+      return docking.molecules.slice(0, 20).map((molecule, index) => {
+        const column = docking.columns[0];
+        return `#${index + 1} ${molecule.title}${column ? ` ${shortScoreName(column.key)} ${molecule.properties.get(column.key) ?? '–'}` : ''}`;
+      }).join(', ');
+    case 'next':
+    case 'previous':
+      stepPose(parsed.action === 'next' ? 1 : -1);
+      return '';
+    case 'fingerprints':
+      await computePoseFingerprints(entry);
+      return `Interaction fingerprints for ${Math.min(docking.molecules.length, MAX_FINGERPRINT_POSES)} poses.`;
+    case 'off':
+      await clearPoses(entry);
+      return 'Poses removed.';
+    default:
+      if (parsed.index > docking.molecules.length) throw new CommandError(`There are ${docking.molecules.length} poses.`);
+      await showPose(entry, parsed.index - 1);
+      return '';
+  }
+}
+
+function formatPercent(value) {
+  return Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : '–';
 }
 
 /* ---------- Validation reports ---------- */
@@ -7019,7 +8870,7 @@ async function onCrosslinkClick(event) {
       rows.push([`${link.atomA.chain}:${link.atomA.resName}${link.atomA.resSeq}`, `${link.atomB.chain}:${link.atomB.resName}${link.atomB.resSeq}`, link.proteinA ?? '', link.residueA, link.proteinB ?? '', link.residueB,
         link.distance.toFixed(2), link.sasd !== null && link.sasd !== undefined ? link.sasd.toFixed(2) : link.sasdStatus ?? '', link.count ?? '', link.score ?? '']);
     }
-    downloadText(`${fileStem()}-crosslinks.csv`, rows.map((row) => row.join(',')).join('\n'), 'text/csv');
+    downloadText(`${fileStem()}-crosslinks.csv`, csvText(rows), 'text/csv');
     return;
   }
   const row = event.target.closest('[data-xl-link]');
@@ -7091,8 +8942,9 @@ async function importReport(file, entry = state.active) {
     },
   });
   hideLoading();
-  const settings = { qValue: 0.01, localization: 0.75, mode: report.kind === 'sites' ? 'intensity' : 'count', groupA: [], groupB: [] };
-  entry.report = { ...report, size: file.size, accessions, settings };
+  const settings = { qValue: 0.01, localization: 0.75, mode: report.kind === 'sites' ? 'intensity' : 'count', groupA: [], groupB: [], statistics: { ...DEFAULT_STATISTICS } };
+  // The file stays at hand: statistics read all of it (every protein) when asked for.
+  entry.report = { ...report, size: file.size, accessions, sequences, file, settings };
   const summary = summarizeReport(report, settings);
   // Two conditions (Spectronaut R.Condition) make the default comparison.
   const conditions = [...new Set(summary.samples.map((sample) => summary.conditions.get(sample)).filter(Boolean))];
@@ -7152,9 +9004,10 @@ function applyReport(entry = state.active) {
           const key = `${residue.key}|${site.label}`;
           let merged = siteMap.get(key);
           if (!merged) {
-            merged = { residue, label: site.label, terminal: site.position < 0, probability: NaN, count: 0, quantities: {}, peptides: [] };
+            merged = { residue, label: site.label, terminal: site.position < 0, probability: NaN, count: 0, quantities: {}, peptides: [], features: [] };
             siteMap.set(key, merged);
           }
+          merged.features.push(`${peptide.sequence}|${site.position}${site.label}`);
           if (Number.isFinite(site.probability) && !(site.probability <= merged.probability)) merged.probability = site.probability;
           merged.count += site.localized;
           if (!merged.peptides.includes(peptide.sequence)) merged.peptides.push(peptide.sequence);
@@ -7172,20 +9025,31 @@ function applyReport(entry = state.active) {
         const info = entry.structure.sequences.get(chain);
         const [residue] = residuesForUniprotRange(info, site.position, site.position, reference);
         if (!residue) continue;
-        sites.push({ residue, label: site.label, probability: site.probability, count: site.count, quantities: site.quantities, peptides: [], uniprot: site.position, mismatch: Boolean(site.residue) && residue.code !== site.residue });
+        sites.push({ residue, label: site.label, probability: site.probability, count: site.count, quantities: site.quantities, peptides: [], uniprot: site.position, protein: site.protein, mismatch: Boolean(site.residue) && residue.code !== site.residue });
       }
     }
   }
+  const statistics = mode === 'ratio' ? currentStatistics(report) : null;
+  for (const site of sites) site.stats = statistics ? siteStatistics(report, statistics, site) : null;
+  // With a test, only significant sites are colored, by their moderated (or protein-adjusted)
+  // change; without one, peptide reports color residues from their peptides.
+  if (statistics) values.clear();
   for (const site of sites) {
     site.value = mode === 'count' ? site.count : quantValue(site, mode, groupA, groupB);
-    if (report.kind === 'sites' && Number.isFinite(site.value)) values.set(site.residue.key, site.value);
+    if (site.stats) {
+      const result = site.stats.adjusted ?? site.stats;
+      if (Number.isFinite(result.logFC) && result.q <= statistics.options.qLimit) values.set(site.residue.key, result.logFC);
+    } else if (!statistics && report.kind === 'sites' && Number.isFinite(site.value)) {
+      values.set(site.residue.key, site.value);
+    }
   }
   sites.sort((a, b) => a.residue.chain.localeCompare(b.residue.chain) || a.residue.resSeq - b.residue.resSeq);
   const previousMarks = report.mapped?.marks ?? null;
   report.mapped = { sites, chains: chainSummaries, coverage, values };
 
   entry.proteomics.coverage = coverage.size ? coverage : null;
-  entry.proteomics.data = values.size && mode !== 'count' ? values : null;
+  // After a test the values are the significant sites, possibly none (all gray).
+  entry.proteomics.data = (values.size || statistics) && mode !== 'count' ? values : null;
   entry.proteomics.dataLabel = mode === 'ratio' ? 'log2 fold change (B / A)' : mode === 'intensity' ? 'log10 intensity' : '';
   const labelFor = (site) => `${site.residue.code}${uniprotNumber(entry, site.residue) ?? site.residue.resSeq} ${site.label}`;
   report.mapped.marks = sites.map((site) => ({ residue: site.residue, label: labelFor(site), mismatch: site.mismatch }));
@@ -7201,6 +9065,29 @@ function applyReport(entry = state.active) {
     renderReport();
     renderProfile();
   }
+}
+
+// The samples of the structure's rows, then those only the whole report has (known after a test).
+function reportSamples(report) {
+  const samples = [...report.summary.samples];
+  for (const sample of report.allSamples ?? []) if (!samples.includes(sample)) samples.push(sample);
+  return samples;
+}
+
+// Two groups from sample names that differ only in a replicate suffix ("DMSO-R1", "MZ1-R2"), the
+// control-like one first; none when the names do not tell.
+function defaultGroups(samples) {
+  const stems = new Map();
+  for (const sample of samples) {
+    const stem = sample.replace(/[-_. ]?(r|rep|replicate|run)?[-_ ]?\d+$/i, '') || sample;
+    if (!stems.has(stem)) stems.set(stem, []);
+    stems.get(stem).push(sample);
+  }
+  const groups = [...stems.values()];
+  if (groups.length !== 2 || groups.some((group) => group.length < 2)) return null;
+  const control = /dmso|control|ctrl|vehicle|untreated|mock|wild.?type|\bwt\b|baseline|naive|placebo/i;
+  const [first, second] = [...stems.keys()];
+  return control.test(second) && !control.test(first) ? [groups[1], groups[0]] : groups;
 }
 
 function reportSampleOptions(samples, chosen) {
@@ -7221,13 +9108,15 @@ function renderReport() {
   const exposure = entry.exposure;
   const siteRows = mapped.sites.slice(0, 150).map((site, index) => {
     const context = exposure?.get(site.residue.key);
-    const value = Number.isFinite(site.value) ? (settings.mode === 'count' ? String(site.value) : site.value.toFixed(2)) : '–';
+    const tested = site.stats ? site.stats.adjusted ?? site.stats : null;
+    const value = tested ? tested.logFC.toFixed(2) : Number.isFinite(site.value) ? (settings.mode === 'count' ? String(site.value) : site.value.toFixed(2)) : '–';
+    const qCell = report.statistics && settings.mode === 'ratio' ? `<td class="q${tested && tested.q <= settings.statistics.qLimit ? ' good' : ''}">${tested ? formatQ(tested.q) : '–'}</td>` : '';
     const position = uniprotNumber(entry, site.residue) ?? site.residue.resSeq;
     return `<tr data-report-site="${index}" class="clickable">
       <td>${escapeHTML(`${site.residue.code}${position}`)}${state.structure.chains.length > 1 ? ` <small>${escapeHTML(site.residue.chain)}</small>` : ''}</td>
       <td>${escapeHTML(site.label)}</td>
       <td class="${site.mismatch ? 'bad' : ''}">${Number.isFinite(site.probability) ? site.probability.toFixed(2) : '–'}</td>
-      <td>${escapeHTML(value)}</td>
+      <td>${escapeHTML(value)}</td>${qCell}
       <td>${context ? `${context.ppse}${context.exposed ? ' ◦' : ''}` : '–'}</td>
       <td>${context ? (context.idr ? 'IDR' : '') : '–'}</td>
       ${entry.evidence ? `<td>${publicCell(entry, site)}</td>` : ''}
@@ -7249,19 +9138,22 @@ function renderReport() {
       ${modeButton('count', peptides ? 'Peptides' : 'Sites')}${modeButton('intensity', 'Intensity', !quantified)}${modeButton('ratio', 'Fold change', summary.samples.length < 2)}
     </div>
     ${settings.mode !== 'count' && summary.samples.length ? `<div class="field-grid report-groups">
-      <label class="field"><span>${settings.mode === 'ratio' ? 'Group A (reference)' : 'Samples'}</span><select multiple size="4" data-report-group="groupA">${reportSampleOptions(summary.samples, settings.groupA)}</select></label>
-      ${settings.mode === 'ratio' ? `<label class="field"><span>Group B</span><select multiple size="4" data-report-group="groupB">${reportSampleOptions(summary.samples, settings.groupB)}</select></label>` : ''}
+      <label class="field"><span>${settings.mode === 'ratio' ? 'Group A (reference)' : 'Samples'}</span><select multiple size="4" data-report-group="groupA">${reportSampleOptions(reportSamples(report), settings.groupA)}</select></label>
+      ${settings.mode === 'ratio' ? `<label class="field"><span>Group B</span><select multiple size="4" data-report-group="groupB">${reportSampleOptions(reportSamples(report), settings.groupB)}</select></label>` : ''}
     </div>
     <p class="hint">${settings.mode === 'ratio' ? 'log2 of mean B over mean A per peptide, averaged per residue; blue lower in B, red higher.' : 'log10 of the mean intensity over the chosen samples (all when none is chosen).'}</p>` : ''}
-    ${mapped.sites.length ? `<table class="report-sites"><thead><tr><th>Site</th><th>Modification</th><th title="Best localization probability">Loc.</th><th>${settings.mode === 'ratio' ? 'log2 FC' : settings.mode === 'intensity' ? 'log10 int.' : 'PSMs'}</th><th title="Part-sphere exposure (StructureMap): Cα neighbors in a 12 Å, 70° cone; ◦ marks 5 or fewer (highly exposed)">pPSE</th><th title="Intrinsically disordered region from smoothed full-sphere exposure">IDR</th>${entry.evidence ? '<th title="Reported in public data (PTMeXchange confidence when known); new: not in public data">Public</th>' : ''}</tr></thead><tbody>${siteRows}</tbody></table>
+    ${settings.mode === 'ratio' ? statisticsControls(report) : ''}
+    ${mapped.sites.length ? `<table class="report-sites"><thead><tr><th>Site</th><th>Modification</th><th title="Best localization probability">Loc.</th><th>${settings.mode === 'ratio' ? 'log2 FC' : settings.mode === 'intensity' ? 'log10 int.' : 'PSMs'}</th>${report.statistics && settings.mode === 'ratio' ? `<th title="Benjamini–Hochberg q-value of the moderated t-test${report.statistics.adjusted?.size ? ', after adjusting for the protein’s change where it is known' : ''}">q</th>` : ''}<th title="Part-sphere exposure (StructureMap): Cα neighbors in a 12 Å, 70° cone; ◦ marks 5 or fewer (highly exposed)">pPSE</th><th title="Intrinsically disordered region from smoothed full-sphere exposure">IDR</th>${entry.evidence ? '<th title="Reported in public data (PTMeXchange confidence when known); new: not in public data">Public</th>' : ''}</tr></thead><tbody>${siteRows}</tbody></table>
       ${mapped.sites.length > 150 ? `<div class="hint">Showing 150 of ${formatNumber(mapped.sites.length)} sites.</div>` : ''}
       ${exposure ? `<div class="hint">${idrShare} of ${mapped.sites.length} sites lie in disordered regions and ${exposedShare} are highly exposed (pPSE ≤ ${PPSE_EXPOSED}).</div>` : '<div class="button-row"><button type="button" data-report-action="exposure" title="Compute part-sphere exposure and disorder (StructureMap) for the sites">Add structural context</button></div>'}` : ''}
     <div class="button-row"><button type="button" data-report-action="export">Export sites CSV</button><button type="button" data-report-action="clear">Clear</button></div>`;
+  drawReportVolcano(entry);
 }
 
 // Removes a report and what it put on the structure (coverage, values and site marks), leaving
 // cross-links, HDX, custom data and hand-entered sites alone.
 function clearReport(entry) {
+  entry.reportMethods = null;
   const mapped = entry.report?.mapped;
   const proteomics = entry.proteomics;
   if (mapped) {
@@ -7304,12 +9196,33 @@ function onReportControl(event) {
   const report = state.active?.report;
   if (!report) return;
   const target = event.target;
+  if (target.dataset.statSetting) {
+    const key = target.dataset.statSetting;
+    const options = report.settings.statistics;
+    if (target.type === 'checkbox') options[key] = target.checked;
+    else if (key === 'normalize') options[key] = target.value;
+    else if (key === 'minValid') {
+      const value = Math.round(Number(target.value));
+      if (!(value >= 2)) {
+        target.value = String(options.minValid);
+        return;
+      }
+      options.minValid = Math.min(12, value);
+    } else if (Number.isFinite(Number(target.value))) options[key] = Number(target.value);
+    // A changed option makes the last test stale; it runs again on request.
+    report.statistics = null;
+    applyReport(state.active);
+    return;
+  }
   if (target.dataset.reportSetting) {
     const value = Number(target.value);
     if (!Number.isFinite(value)) return;
     report.settings[target.dataset.reportSetting] = Math.min(1, Math.max(0, value));
+    // The test read the report with the old thresholds.
+    report.statistics = null;
   } else if (target.dataset.reportGroup) {
     report.settings[target.dataset.reportGroup] = [...target.selectedOptions].map((option) => option.value);
+    report.statistics = null;
   } else return;
   applyReport(state.active);
 }
@@ -7321,16 +9234,19 @@ async function onReportClick(event) {
   const mode = event.target.closest('[data-report-mode]')?.dataset.reportMode;
   if (mode) {
     report.settings.mode = mode;
-    if (mode === 'ratio' && (!report.settings.groupA.length || !report.settings.groupB.length)) {
-      const samples = report.summary.samples;
-      const half = Math.ceil(samples.length / 2);
-      if (!report.settings.groupA.length) report.settings.groupA = samples.slice(0, half);
-      if (!report.settings.groupB.length) report.settings.groupB = samples.slice(half);
+    if (mode === 'ratio' && !report.settings.groupA.length && !report.settings.groupB.length) {
+      const groups = defaultGroups(reportSamples(report));
+      if (groups) [report.settings.groupA, report.settings.groupB] = groups;
+      else showToast('Choose the samples of groups A and B under Fold change.');
     }
     applyReport(entry);
     return;
   }
   const action = event.target.closest('[data-report-action]')?.dataset.reportAction;
+  if (action === 'test') {
+    await guardedLoad(async () => showToast(await runReportStatistics(entry)));
+    return;
+  }
   if (action === 'exposure') {
     await runCommand('exposure', { quiet: true });
     renderReport();
@@ -7341,14 +9257,20 @@ async function onReportClick(event) {
     return;
   }
   if (action === 'export') {
-    const rows = [['chain', 'residue', 'uniprot', 'modification', 'localization', 'value', 'ppse', 'idr', 'peptides', ...report.summary.samples]];
+    const tested = Boolean(report.statistics);
+    const statColumns = tested ? ['log2fc', 'p', 'q', 'df', 'n_a', 'n_b', 'feature', 'protein_log2fc', 'adjusted_log2fc', 'adjusted_p', 'adjusted_q'] : [];
+    const rows = [['chain', 'residue', 'uniprot', 'modification', 'localization', 'value', ...statColumns, 'ppse', 'idr', 'peptides', ...report.summary.samples]];
+    const number = (value) => (Number.isFinite(value) ? Number(value.toPrecision(6)) : '');
     for (const site of report.mapped.sites) {
       const context = entry.exposure?.get(site.residue.key);
+      const stats = site.stats;
+      const statCells = tested ? [number(stats?.logFC), number(stats?.p), number(stats?.q), number(stats?.df), stats?.nA ?? '', stats?.nB ?? '', stats?.feature ?? '',
+        number(stats?.protein?.logFC), number(stats?.adjusted?.logFC), number(stats?.adjusted?.p), number(stats?.adjusted?.q)] : [];
       rows.push([site.residue.chain, `${site.residue.resName}${site.residue.resSeq}${site.residue.iCode}`, uniprotNumber(entry, site.residue) ?? '', site.label,
-        Number.isFinite(site.probability) ? site.probability : '', Number.isFinite(site.value) ? site.value : '', context?.ppse ?? '', context ? (context.idr ? 1 : 0) : '',
+        Number.isFinite(site.probability) ? site.probability : '', Number.isFinite(site.value) ? site.value : '', ...statCells, context?.ppse ?? '', context ? (context.idr ? 1 : 0) : '',
         site.peptides.join(';'), ...report.summary.samples.map((sample) => site.quantities[sample] ?? '')]);
     }
-    downloadText(`${fileStem()}-sites.csv`, rows.map((row) => row.map((cell) => (/[",\n]/.test(String(cell)) ? `"${String(cell).replace(/"/g, '""')}"` : cell)).join(',')).join('\n'), 'text/csv');
+    downloadText(`${fileStem()}-sites.csv`, csvText(rows), 'text/csv');
     return;
   }
   const row = event.target.closest('[data-report-site]');
@@ -7356,6 +9278,307 @@ async function onReportClick(event) {
     const site = report.mapped.sites[Number(row.dataset.reportSite)];
     if (site) focusResidues([site.residue.key]);
   }
+}
+
+/* ---------- Differential statistics ---------- */
+
+// Moderated t-tests for a report's two sample groups (stats.js, limma's eBayes): every feature of
+// the whole report (modified peptides, or sites of site tables) is normalized and tested, so the
+// variance prior and the Benjamini–Hochberg q-values come from the experiment rather than from
+// the few features of one protein. A site takes the result of its best-quantified modified
+// peptide; with "adjust", its change is corrected for the change of its protein (the median of the
+// protein's unmodified peptides per sample), as MSstatsPTM does.
+
+const DEFAULT_STATISTICS = { normalize: 'median', minValid: 2, impute: false, adjust: true, qLimit: 0.05, foldChange: 1 };
+
+function currentStatistics(report) {
+  return report.statistics && report.statistics.groups === `${report.settings.groupA.join('\n')}|${report.settings.groupB.join('\n')}` ? report.statistics : null;
+}
+
+async function runReportStatistics(entry = state.active) {
+  const report = entry?.report;
+  if (!report) throw new CommandError('Open a search report first.');
+  const settings = report.settings;
+  const options = settings.statistics;
+  const shared = settings.groupA.filter((sample) => settings.groupB.includes(sample));
+  if (shared.length) throw new CommandError(`A sample cannot be in both groups: ${shared.join(', ')}.`);
+  if (settings.groupA.length < 2 || settings.groupB.length < 2) {
+    throw new CommandError('A moderated t-test needs at least two samples in each group: choose them under Fold change.');
+  }
+  const { readReport } = await reportsModule();
+  const stats = await import('./lib/stats.js');
+  lazyModules.stats = stats;
+  const key = `${settings.qValue}|${settings.localization}`;
+  if (!report.features || report.featuresKey !== key) {
+    if (!report.file) throw new CommandError('The report file is no longer available; open it again.');
+    const size = report.file.size || 1;
+    let lastUpdate = 0;
+    showLoading(`Reading all of ${report.name} for statistics`);
+    try {
+      const full = await readReport(report.file, {
+        accessions: report.accessions,
+        sequences: report.sequences,
+        collect: { qValue: settings.qValue, localization: settings.localization },
+        onProgress: (read) => {
+          const now = performance.now();
+          if (now - lastUpdate < 250) return;
+          lastUpdate = now;
+          setLoading(`Reading all of ${report.name} for statistics · ${Math.min(99, Math.round((read / size) * 100))}%`);
+        },
+      });
+      report.features = full.features;
+      report.featuresKey = key;
+    } finally {
+      hideLoading();
+    }
+  }
+  const features = report.features;
+  // The whole report can have samples in which this structure's proteins were not seen.
+  report.allSamples = features.samples;
+  const column = new Map(features.samples.map((sample, index) => [sample, index]));
+  const groupA = settings.groupA.map((sample) => column.get(sample)).filter((index) => index !== undefined);
+  const groupB = settings.groupB.map((sample) => column.get(sample)).filter((index) => index !== undefined);
+  if (groupA.length < 2 || groupB.length < 2) throw new CommandError('Fewer than two samples of a group have quantities in the report.');
+  const minValid = Math.max(2, Math.round(options.minValid) || 2);
+  let matrix = stats.log2Matrix(features.values, features.rows, features.columns);
+  if (options.normalize === 'median') matrix = stats.normalizeMedians(matrix).matrix;
+  const observed = observedValues(matrix, groupA, groupB);
+  if (options.impute) {
+    // As in Perseus, a feature observed at least minValid times in either group is imputed and
+    // tested; the others are left out.
+    matrix = stats.imputeDownshifted(matrix, { seed: 1 }).matrix;
+    for (let row = 0; row < matrix.rows; row += 1) {
+      if (observed.a[row] < minValid && observed.b[row] < minValid) matrix.values.fill(NaN, row * matrix.columns, (row + 1) * matrix.columns);
+    }
+  }
+  const test = stats.moderatedTTest(matrix, groupA, groupB, { minValid });
+  // Modified peptides by (sequence, position, modification), to find each site's peptides.
+  const bySite = new Map();
+  features.keys.forEach((featureKey, row) => {
+    const [kind, sequence, mods] = featureKey.split('|');
+    if (kind !== 'pep' || !mods) return;
+    for (const mod of mods.split(',')) {
+      if (mod.startsWith('?')) continue;
+      const index = `${sequence}|${mod}`;
+      if (!bySite.has(index)) bySite.set(index, []);
+      bySite.get(index).push(row);
+    }
+  });
+  const proteins = proteinChanges(report, features, matrix, groupA, groupB, test, stats, minValid);
+  const adjusted = adjustedChanges(features, test, proteins, stats);
+  // A feature is significant by its protein-adjusted q-value when it has one.
+  let significant = 0;
+  let pLimit = 0;
+  test.results.forEach((result, row) => {
+    if (!result) return;
+    const shown = adjusted.get(row) ?? { p: result.p, q: test.q[row] };
+    if (!(shown.q <= options.qLimit)) return;
+    significant += 1;
+    pLimit = Math.max(pLimit, shown.p);
+  });
+  const inGroups = new Set([...settings.groupA, ...settings.groupB]);
+  report.statistics = {
+    groups: `${settings.groupA.join('\n')}|${settings.groupB.join('\n')}`,
+    test,
+    options: { ...options, minValid },
+    rowOf: new Map(features.keys.map((featureKey, row) => [featureKey, row])),
+    bySite,
+    observed,
+    matrix,
+    groupA,
+    groupB,
+    pLimit,
+    proteins,
+    adjusted,
+    significant,
+    unused: features.samples.filter((sample) => !inGroups.has(sample)),
+  };
+  applyReport(entry);
+  const mapped = report.mapped.sites.filter((site) => site.stats);
+  const local = mapped.filter((site) => (site.stats.adjusted ?? site.stats).q <= options.qLimit).length;
+  return `Moderated t-test on ${formatNumber(test.tested)} features: ${formatNumber(significant)} with q ≤ ${options.qLimit}; ${local} of ${mapped.length} tested sites of this structure${local ? '' : ' (none significant, so the structure is gray)'}.`;
+}
+
+// Values observed (before any imputation) in each group per feature, and their mean.
+function observedValues(matrix, groupA, groupB) {
+  const { rows, columns, values } = matrix;
+  const a = new Int32Array(rows);
+  const b = new Int32Array(rows);
+  const mean = new Float64Array(rows).fill(NaN);
+  for (let row = 0; row < rows; row += 1) {
+    let sum = 0;
+    for (const column of groupA) {
+      const value = values[row * columns + column];
+      if (Number.isFinite(value)) {
+        a[row] += 1;
+        sum += value;
+      }
+    }
+    for (const column of groupB) {
+      const value = values[row * columns + column];
+      if (Number.isFinite(value)) {
+        b[row] += 1;
+        sum += value;
+      }
+    }
+    if (a[row] + b[row]) mean[row] = sum / (a[row] + b[row]);
+  }
+  return { a, b, mean };
+}
+
+function bareAccession(accession) {
+  return String(accession ?? '').replace(/-\d+$/, '');
+}
+
+// The change of every protein in the report with at least two unmodified peptides: per sample,
+// the median of its unmodified peptides (normalized log2), tested with the experiment's prior.
+// MSstatsPTM subtracts it from the changes of the protein's modified peptides.
+function proteinChanges(report, features, matrix, groupA, groupB, test, stats, minValid) {
+  const changes = new Map();
+  if (report.kind !== 'peptides' || !report.settings.statistics.adjust) return changes;
+  const rowsOf = new Map();
+  features.keys.forEach((featureKey, row) => {
+    if (!featureKey.startsWith('pep|') || !featureKey.endsWith('|')) return;
+    const protein = bareAccession(features.proteins?.[row]);
+    if (!protein) return;
+    if (!rowsOf.has(protein)) rowsOf.set(protein, []);
+    rowsOf.get(protein).push(row);
+  });
+  const proteins = [...rowsOf].filter(([, rows]) => rows.length >= 2);
+  if (!proteins.length) return changes;
+  const { columns } = matrix;
+  const values = new Float64Array(proteins.length * columns).fill(NaN);
+  const present = [];
+  proteins.forEach(([, rows], index) => {
+    for (let column = 0; column < columns; column += 1) {
+      present.length = 0;
+      for (const row of rows) {
+        const value = matrix.values[row * columns + column];
+        if (Number.isFinite(value)) present.push(value);
+      }
+      if (!present.length) continue;
+      present.sort((first, second) => first - second);
+      const middle = present.length >> 1;
+      values[index * columns + column] = present.length % 2 ? present[middle] : (present[middle - 1] + present[middle]) / 2;
+    }
+  });
+  const result = stats.moderatedTTest({ values, rows: proteins.length, columns }, groupA, groupB, { minValid, prior: test.prior });
+  proteins.forEach(([protein, rows], index) => {
+    if (result.results[index]) changes.set(protein, { ...result.results[index], peptides: rows.length });
+  });
+  return changes;
+}
+
+// Every tested modified peptide whose protein has a change, adjusted for it, with
+// Benjamini–Hochberg q-values over all of them (MSstatsPTM adjusts over the whole experiment).
+function adjustedChanges(features, test, proteins, stats) {
+  const adjusted = new Map();
+  if (!proteins.size) return adjusted;
+  const rows = [];
+  const pValues = [];
+  features.keys.forEach((featureKey, row) => {
+    const result = test.results[row];
+    if (!result || !featureKey.startsWith('pep|') || featureKey.endsWith('|')) return;
+    const protein = proteins.get(bareAccession(features.proteins?.[row]));
+    if (!protein) return;
+    const value = stats.adjustForProtein(result, protein);
+    if (!value.adjusted) return;
+    adjusted.set(row, value);
+    rows.push(row);
+    pValues.push(value.p);
+  });
+  const q = stats.adjustBH(pValues);
+  rows.forEach((row, index) => {
+    adjusted.get(row).q = q[index];
+  });
+  return adjusted;
+}
+
+// A site's test result: its own row (site tables) or that of its best-quantified modified peptide:
+// most observed values, then the highest intensity; never the p-value, which would favor chance.
+function siteStatistics(report, statistics, site) {
+  const { test, observed } = statistics;
+  let row = -1;
+  if (report.kind === 'sites') {
+    row = statistics.rowOf.get(`site|${site.protein}|${site.uniprot}|${site.label}`) ?? -1;
+  } else {
+    let best = null;
+    for (const feature of site.features ?? []) {
+      for (const candidate of statistics.bySite.get(feature) ?? []) {
+        if (!test.results[candidate]) continue;
+        const count = observed.a[candidate] + observed.b[candidate];
+        const mean = observed.mean[candidate];
+        if (!best || count > best.count || (count === best.count && mean > best.mean)) best = { row: candidate, count, mean };
+      }
+    }
+    row = best?.row ?? -1;
+  }
+  const result = row >= 0 ? test.results[row] : null;
+  if (!result) return null;
+  const stats = { ...result, q: test.q[row], feature: report.features.keys[row] };
+  const adjusted = statistics.adjusted.get(row);
+  if (adjusted) {
+    stats.adjusted = adjusted;
+    stats.protein = statistics.proteins.get(bareAccession(report.features.proteins?.[row]));
+  }
+  return stats;
+}
+
+function formatQ(value) {
+  if (!Number.isFinite(value)) return '–';
+  return value < 0.001 ? value.toExponential(1) : value.toFixed(3);
+}
+
+function statisticsControls(report) {
+  const options = report.settings.statistics;
+  const statistics = currentStatistics(report);
+  let summary = '';
+  if (statistics) {
+    const own = report.accessions.map(bareAccession).filter((accession) => statistics.proteins.has(accession));
+    const adjustment = statistics.adjusted.size
+      ? ` Modified peptides are adjusted for their protein's change (${formatNumber(statistics.proteins.size)} proteins with unmodified peptides), with q-values over all ${formatNumber(statistics.adjusted.size)} adjusted features${own.length ? `; ${own.map((accession) => `${escapeHTML(accession)} ${statistics.proteins.get(accession).logFC.toFixed(2)} (${statistics.proteins.get(accession).peptides} peptides)`).join(', ')}` : ''}.`
+      : '';
+    const unused = statistics.unused.length ? `<div class="hint">In neither group: ${escapeHTML(statistics.unused.join(', '))}.</div>` : '';
+    summary = `<div>Moderated t-test (limma eBayes): <strong>${formatNumber(statistics.test.tested)}</strong> features of the whole report, d₀ ${Number.isFinite(statistics.test.prior.d0) ? statistics.test.prior.d0.toFixed(1) : '∞'}; <strong>${formatNumber(statistics.significant)}</strong> with q ≤ ${options.qLimit}.${adjustment}</div>${unused}<canvas class="plot volcano" width="640" height="300" data-volcano></canvas>`;
+  }
+  return `<div class="field-grid report-statistics">
+      <label class="field"><span>Normalization</span><select data-stat-setting="normalize"><option value="median"${options.normalize === 'median' ? ' selected' : ''}>Median</option><option value="none"${options.normalize === 'none' ? ' selected' : ''}>None (already normalized)</option></select></label>
+      <label class="field" title="Without imputation, each group needs this many values; with it, at least one group does (as in Perseus)"><span>Values per group ≥</span><input type="number" data-stat-setting="minValid" min="2" max="12" step="1" value="${options.minValid}" /></label>
+      <label class="check"><input type="checkbox" data-stat-setting="impute"${options.impute ? ' checked' : ''} /> Impute missing (Perseus)</label>
+      ${report.kind === 'peptides' ? `<label class="check" title="Subtract the protein's change (median of its unmodified peptides) from each site's, as MSstatsPTM does"><input type="checkbox" data-stat-setting="adjust"${options.adjust ? ' checked' : ''} /> Adjust sites for protein</label>` : ''}
+    </div>
+    <div class="button-row"><button type="button" data-report-action="test" title="Moderated t-test of every feature in the report (all proteins), with Benjamini–Hochberg q-values">${statistics ? 'Test again' : 'Test B vs A'}</button></div>
+    ${summary}`;
+}
+
+function drawReportVolcano(entry) {
+  const report = entry?.report;
+  const statistics = report ? currentStatistics(report) : null;
+  const canvas = els.reportResult.querySelector('[data-volcano]');
+  if (!statistics || !canvas) return;
+  const { test } = statistics;
+  const local = new Map();
+  for (const site of report.mapped.sites) if (site.stats) local.set(site.stats.feature, site);
+  const points = [];
+  test.results.forEach((result, row) => {
+    if (!result) return;
+    const site = local.get(report.features.keys[row]);
+    const adjusted = statistics.adjusted.get(row);
+    const shown = adjusted ?? result;
+    points.push({ x: shown.logFC, y: -Math.log10(Math.max(shown.p, 1e-300)), highlight: Boolean(site), significant: (adjusted ? adjusted.q : test.q[row]) <= statistics.options.qLimit, site });
+  });
+  const hits = drawVolcano(canvas, points, { pLimit: statistics.pLimit || undefined, foldChange: statistics.options.foldChange });
+  canvas.onclick = (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+    const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+    let nearest = null;
+    for (const hit of hits) {
+      const distance = Math.hypot(hit.x - x, hit.y - y);
+      if (distance < 14 && (!nearest || distance < nearest.distance)) nearest = { distance, hit };
+    }
+    if (nearest) focusResidues([nearest.hit.point.site.residue.key]);
+  };
 }
 
 /* ---------- HDX-MS ---------- */
@@ -7711,6 +9934,7 @@ function syncStyleControls() {
   els.sidechainMode.value = display.sidechains;
   els.showWater.checked = display.showWater;
   els.showHydrogen.checked = display.showHydrogen;
+  els.bondOrders.value = display.bondOrders ?? 'ligands';
   document.querySelector('#atom-scale').value = String(display.atomScale);
   document.querySelector('#bond-scale').value = String(display.bondScale);
   document.querySelector('#cartoon-width').value = String(display.cartoonWidth);
@@ -8087,6 +10311,8 @@ async function renderImageCanvas() {
   const settings = renderSettings();
   if (els.exportTransparent.checked) settings.background = { ...settings.background, alpha: 0 };
   settings.outline = { ...settings.outline, width: (settings.outline.width ?? 1) * factor / Math.min(window.devicePixelRatio || 1, 2) };
+  // Map mesh lines keep their on-screen width relative to the image.
+  settings.lineScale = factor;
   const image = await state.renderer.capture(view, settings, width, height, els.exportSupersample.checked ? 2 : 1);
   requestRender();
   const canvas = document.createElement('canvas');
@@ -8492,7 +10718,9 @@ globalThis.proteoscope = {
     const find = (value) => state.entries.find((entry) => entry.name === value || entry.id === value);
     const referenceEntry = find(reference) ?? state.entries[0];
     const mobiles = mobile ? [find(mobile)].filter(Boolean) : state.entries.filter((entry) => entry !== referenceEntry);
-    return runSuperposition({ ...options, reference: referenceEntry, mobiles }).map((item) => ({ name: item.mobile.name, stats: item.result?.stats, error: item.error?.message }));
+    const summarize = (results) => results.map((item) => ({ name: item.mobile.name, stats: item.result?.stats, error: item.error?.message }));
+    if (options.method === 'structure') return runStructuralSuperposition({ ...options, reference: referenceEntry, mobiles }).then(summarize);
+    return summarize(runSuperposition({ ...options, reference: referenceEntry, mobiles }));
   },
   compareWithAlphaFold,
   overlayModels: toggleModelOverlay,

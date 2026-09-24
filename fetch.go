@@ -46,6 +46,7 @@ type upstream struct {
 	afdb       string
 	uniprot    string
 	ebi        string
+	rcsbMaps   string
 	modelHosts []string
 	maxBytes   int64
 }
@@ -62,6 +63,10 @@ type payload struct {
 type fetchError struct {
 	status  int
 	message string
+	// upstream is the HTTP status an upstream answered with, when that caused the error.
+	upstream int
+	// cause is a sentinel the error stands for (errTooLarge).
+	cause error
 }
 
 // AlphaFold DB renamed entryId to modelEntityId in October 2025 (the old name is still served for
@@ -96,6 +101,10 @@ func (e *fetchError) Error() string {
 	return e.message
 }
 
+func (e *fetchError) Unwrap() error {
+	return e.cause
+}
+
 func fetchErrorf(status int, format string, args ...any) error {
 	return &fetchError{status: status, message: fmt.Sprintf(format, args...)}
 }
@@ -109,6 +118,7 @@ func defaultUpstream() *upstream {
 		afdb:       "https://alphafold.ebi.ac.uk",
 		uniprot:    "https://rest.uniprot.org",
 		ebi:        "https://www.ebi.ac.uk",
+		rcsbMaps:   "https://maps.rcsb.org",
 		maxBytes:   maxDownloadBytes,
 	}
 }
@@ -327,6 +337,11 @@ func (u *upstream) alphaFoldMSA(ctx context.Context, accession string) (payload,
 		return payload{}, err
 	}
 	body, err := u.alphaFoldFile(ctx, file)
+	var fetchErr *fetchError
+	if errors.As(err, &fetchErr) && fetchErr.upstream == http.StatusForbidden {
+		// Since 2026 AlphaFold DB lists MSA URLs but answers them with 403 Forbidden.
+		return payload{}, fetchErrorf(http.StatusBadGateway, "AlphaFold DB refuses to send the MSA of %s (HTTP 403)", accession)
+	}
 	if err != nil {
 		return payload{}, err
 	}
@@ -454,6 +469,10 @@ func jsonPayload(body []byte, service, source string) (payload, error) {
 }
 
 func (u *upstream) download(ctx context.Context, source, service string) ([]byte, error) {
+	return u.downloadLimit(ctx, source, service, u.maxBytes)
+}
+
+func (u *upstream) downloadLimit(ctx context.Context, source, service string, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 	if err != nil {
 		return nil, err
@@ -468,17 +487,17 @@ func (u *upstream) download(ctx context.Context, source, service string) ([]byte
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, errUpstreamNotFound
 	case resp.StatusCode != http.StatusOK:
-		return nil, fetchErrorf(http.StatusBadGateway, "%s returned HTTP %d", service, resp.StatusCode)
-	case resp.ContentLength > u.maxBytes:
-		return nil, u.tooLarge(service)
+		return nil, &fetchError{status: http.StatusBadGateway, message: fmt.Sprintf("%s returned HTTP %d", service, resp.StatusCode), upstream: resp.StatusCode}
+	case resp.ContentLength > limit:
+		return nil, tooLarge(service, limit)
 	}
 	body, err := decompressIfGzip(resp.Body)
 	if err != nil {
 		return nil, fetchErrorf(http.StatusBadGateway, "%s sent invalid compressed data: %v", service, err)
 	}
-	data, err := readLimited(body, u.maxBytes)
+	data, err := readLimited(body, limit)
 	if errors.Is(err, errTooLarge) {
-		return nil, u.tooLarge(service)
+		return nil, tooLarge(service, limit)
 	}
 	if err != nil {
 		return nil, upstreamFailure(service, err)
@@ -487,8 +506,8 @@ func (u *upstream) download(ctx context.Context, source, service string) ([]byte
 	return data, nil
 }
 
-func (u *upstream) tooLarge(service string) error {
-	return fetchErrorf(http.StatusBadGateway, "%s response is too large (limit %d MB)", service, u.maxBytes>>20)
+func tooLarge(service string, limit int64) error {
+	return &fetchError{status: http.StatusBadGateway, message: fmt.Sprintf("%s response is too large (limit %d MB)", service, limit>>20), cause: errTooLarge}
 }
 
 func upstreamFailure(service string, err error) error {

@@ -1,0 +1,32 @@
+name: Validation
+
+# The suites that download public inputs (PDB entries, an EMDB map region, a wwPDB validation
+# report): weekly, on demand, and when the analysis modules or the references change.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'web/lib/**'
+      - 'validation/**'
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    name: Validation against reference tools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/cache@v4
+        with:
+          path: validation/cache
+          key: validation-inputs-${{ hashFiles('validation/common.mjs', 'validation/run.mjs', 'validation/reference/*.json') }}
+          restore-keys: validation-inputs-
+      - name: node validation/run.mjs
+        run: node validation/run.mjs --verbose

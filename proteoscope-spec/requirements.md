@@ -478,3 +478,90 @@ selection, distance measurement, and PNG export.
 1. WHEN DynamX, HDExaminer or community-format HDX data is opened, THE System SHALL match peptides to the chain sequences and compute uptake per state and exposure
 2. WHEN two states are compared, THE System SHALL test each peptide's difference with the hybrid significance test when replicates are known, or with fixed thresholds otherwise
 3. THE System SHALL draw a Woods plot and color residues by the difference or uptake
+
+## Wave 6 Requirements
+
+### Requirement 38: Density Maps
+
+**User Story:** As a structural biologist, I want to see the experimental density around a ligand or residue and how well the model fits it, so that I can judge what the model claims before I rely on it.
+
+#### Acceptance Criteria
+
+1. WHEN the user loads the map of an X-ray entry, THE System SHALL fetch its 2Fo-Fc and Fo-Fc maps from the PDBe volume server (or RCSB's copy) and contour 2Fo-Fc at 1.5σ and Fo-Fc at ±3σ in distinct colors
+2. WHEN the user loads the map of a cryo-EM entry, THE System SHALL fetch the EMDB map named by the entry and contour it at EMDB's recommended level
+3. WHEN the user opens a CCP4 or MRC file, THE System SHALL read it on the user's computer, honoring its axis order, start indices, origin, data mode and byte order
+4. THE System SHALL draw the map as a mesh or a transparent surface around the focus, around the view center, or whole, and let the user change levels, region radius and a zone around the focused atoms
+5. WHEN the user asks for the map fit, THE System SHALL report atom inclusion at the contour and, per residue, the mean density in σ and the fraction of atoms inside, as a color scheme and a selection keyword
+
+### Requirement 39: Ligand Chemistry
+
+**User Story:** As a medicinal chemist, I want ligands drawn and typed with their real bond orders and charges, so that the pictures and the interactions I read from them are chemically right.
+
+#### Acceptance Criteria
+
+1. THE System SHALL take bond orders, aromaticity and formal charges from the Chemical Component Dictionary: from the file when it carries the dictionary tables, from a built-in table for standard residues, or fetched per ligand
+2. THE System SHALL apply a dictionary entry to a residue only when every heavy atom matches it by name and element
+3. THE System SHALL draw double, triple and aromatic bonds in stick representations, for ligands by default and optionally for all residues
+4. WHEN interactions are computed, THE System SHALL type donors, acceptors, aromatic rings and charged groups from the chemistry, protonating basic groups by rule
+
+### Requirement 40: Docking Poses
+
+**User Story:** As a computational chemist, I want to open my docking results in the receptor and compare the poses, so that I can choose poses by their interactions as well as their scores.
+
+#### Acceptance Criteria
+
+1. WHEN an SDF, MOL2 or PDBQT file is opened with a structure active, THE System SHALL place its molecules as poses in that structure and list them with their scores
+2. THE System SHALL read the scores of common docking tools (SD properties, DOCK comments, Vina remarks, DiffDock file names) and sort poses by any of them
+3. WHEN a pose is shown, THE System SHALL compute its interactions with the receptor without bonding it to other ligands
+4. WHEN fingerprints are requested, THE System SHALL tabulate each pose's interactions with the receptor residues and export them as CSV
+
+### Requirement 41: Structure-Only Alignment
+
+**User Story:** As a structural biologist, I want to superpose proteins that share a fold but little sequence, so that I can compare remote homologs and different complexes.
+
+#### Acceptance Criteria
+
+1. WHEN the user chooses structure-based pairing, THE System SHALL align chains with TM-align and complexes with MM-align, as US-align does
+2. THE System SHALL report both TM-scores, RMSD, aligned length and identity, and support the same coloring, sequence view and sessions as sequence-based superposition
+3. THE System SHALL reproduce US-align's scores on the same inputs
+
+### Requirement 42: Differential Statistics
+
+**User Story:** As a proteomics scientist, I want to test which peptides and sites change between my conditions, so that the structure shows significant changes rather than raw fold changes.
+
+#### Acceptance Criteria
+
+1. WHEN the user tests group B against group A, THE System SHALL run a moderated t-test (limma's empirical Bayes) on every feature of the report, with Benjamini–Hochberg q-values
+2. THE System SHALL offer median normalization, a minimum number of values per group and Perseus-style imputation
+3. WHERE a report has PTM sites and unmodified peptides, THE System SHALL adjust site changes for their protein's change as MSstatsPTM does
+4. THE System SHALL show a volcano plot linked to the structure, color sites by significant changes and include the statistics in exports
+5. THE System SHALL reproduce limma's and MSstatsPTM's results on the same inputs
+
+### Requirement 43: Conservation
+
+**User Story:** As a researcher, I want residue conservation from an alignment on the structure, so that I can see which surfaces and sites evolution has kept.
+
+#### Acceptance Criteria
+
+1. WHEN the user opens an A3M, aligned FASTA, Stockholm or Clustal alignment, or a prediction with an MSA, THE System SHALL score each residue by Jensen–Shannon divergence or entropy as Capra and Singh define them
+2. THE System SHALL map the scores to chains by sequence and show them in ConSurf's nine colors, in tooltips, in the profile plot and in the selection language
+
+### Requirement 44: Methods and Citation
+
+**User Story:** As an author, I want a methods paragraph and references for what I did in a session, so that my paper states the data versions, methods and parameters correctly.
+
+#### Acceptance Criteria
+
+1. WHEN the user asks for methods, THE System SHALL write a paragraph naming the data sources with their IDs, versions and dates, each analysis with its parameters, and the Proteoscope version
+2. THE System SHALL list numbered references with DOIs and offer them as BibTeX
+3. THE repository SHALL describe how to cite Proteoscope in `CITATION.cff`
+
+### Requirement 45: Continuous Integration and Validation
+
+**User Story:** As a maintainer and as a user who publishes with Proteoscope, I want every change tested and the analyses checked against their reference tools, so that errors are caught before they reach results.
+
+#### Acceptance Criteria
+
+1. WHEN a change is pushed or proposed, THE continuous integration SHALL check formatting, run static analysis and all tests, and build every release target
+2. THE repository SHALL include a validation suite that compares the analyses with the numbers of their reference tools, without including those tools
+3. THE validation suite SHALL run offline once its public inputs are cached, and weekly in continuous integration

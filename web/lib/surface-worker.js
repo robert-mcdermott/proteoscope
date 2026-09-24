@@ -1,5 +1,6 @@
 import { coulombicPotential } from './electrostatics.js';
 import { buildSurface, computeGroupedSASA, computeSASA } from './surface.js';
+import { mmAlign } from './tmalign.js';
 
 self.onmessage = (event) => {
   const { id, type, payload = {} } = event.data ?? {};
@@ -32,6 +33,11 @@ self.onmessage = (event) => {
     if (type === 'sasa-groups') {
       const { complex, isolated } = computeGroupedSASA(payload.positions, payload.radii, payload.groups, payload.options ?? {});
       self.postMessage({ id, result: { complex, isolated } }, [complex.buffer, isolated.buffer]);
+      return;
+    }
+    if (type === 'structure-align') {
+      // TM-align for one chain on each side, MM-align for complexes (chain pairs in mobile order).
+      self.postMessage({ id, result: mmAlign(payload.mobile, payload.reference) });
       return;
     }
     if (type === 'potential') {

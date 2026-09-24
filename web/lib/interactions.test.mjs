@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { INTERACTION_TYPES, findInteractions, findInterfaceInteractions, perceiveRings } from './interactions.js';
 import { residueKindFromName } from './residues.js';
-import { examplePDB } from './test-data.mjs';
+import { TIME_SCALE, examplePDB } from './test-data.mjs';
 
 const COVALENT_RADII = {
   H: 0.31, D: 0.31, C: 0.76, N: 0.71, O: 0.66, S: 1.05, P: 1.07, SE: 1.2, F: 0.57, CL: 1.02, BR: 1.2, I: 1.39,
@@ -382,8 +382,8 @@ test('performance: ligand in a ~100k-atom model < 50 ms, ~6k-vs-6k interface < 3
     + ` then ${ligandTime.toFixed(2)} ms`);
   console.log(`performance: 7LYB histones (${sizeA} atoms) vs DNA (${sizeB} atoms) first ${interfaceFirst.toFixed(1)} ms,`
     + ` then ${interfaceTime.toFixed(1)} ms`, countByType(interfaceList));
-  assert.ok(ligandTime < 50, `ligand query took ${ligandTime.toFixed(1)} ms`);
-  assert.ok(interfaceTime < 300, `interface took ${interfaceTime.toFixed(1)} ms`);
+  assert.ok(ligandTime < 50 * TIME_SCALE, `ligand query took ${ligandTime.toFixed(1)} ms`);
+  assert.ok(interfaceTime < 300 * TIME_SCALE, `interface took ${interfaceTime.toFixed(1)} ms`);
 });
 
 function parsePDB(text) {

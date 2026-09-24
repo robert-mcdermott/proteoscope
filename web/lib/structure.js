@@ -12,6 +12,7 @@ import {
   parseIntSafe,
 } from './parse.js';
 import { METAL_ELEMENTS, isModifiedResidue, oneLetterCode, parentResidue } from './residues.js';
+import { applyChemistry } from './chemistry.js';
 
 export const MAX_ASSEMBLY_ATOMS = 300000;
 
@@ -42,6 +43,8 @@ export function deriveModel(model, structure, options = {}) {
   assignSecondary(model, structure, options.secondaryMode ?? 'auto');
   computeBackboneAngles(model.residues);
   model.bonds = buildBonds(model, structure.conect);
+  // Residue names whose chemistry is not known yet (the page fetches them from the CCD).
+  model.missingComponents = applyChemistry(model, structure);
   model.bounds = computeBounds(model.atoms);
   model.bFactorRange = computeBFactorRange(model.atoms);
   // Some predictors write pLDDT to the B-factor column on a 0–1 scale.
@@ -378,16 +381,22 @@ export function buildBonds(model, connections = []) {
   const count = atoms.length;
   const bonds = [];
   const seen = new Set();
-  const addBond = (a, b, kind) => {
+  const addBond = (a, b, kind, source = null) => {
     if (a === b || a === undefined || b === undefined) return;
     const low = a < b ? a : b;
     const high = a < b ? b : a;
     const key = low * count + high;
     if (seen.has(key)) return;
     seen.add(key);
-    bonds.push({ a: low, b: high, kind });
+    const bond = { a: low, b: high, kind };
+    // Orders given by the file (SDF, MOL2) or carried over from a base model (assemblies).
+    if (source?.order > 1 || source?.aromatic) {
+      bond.sourceOrder = source.order ?? 1;
+      bond.sourceAromatic = Boolean(source.aromatic);
+    }
+    bonds.push(bond);
   };
-  for (const bond of model.precomputedBonds ?? []) addBond(bond.a, bond.b, bond.kind ?? 'covalent');
+  for (const bond of model.precomputedBonds ?? []) addBond(bond.a, bond.b, bond.kind ?? 'covalent', bond);
   for (const connection of connections) {
     const [a, b] = resolveConnection(model, connection);
     if (a === undefined || b === undefined) continue;
@@ -802,7 +811,7 @@ function materializeAssemblyModel(baseModel, assembly) {
         if (!selectedIDs.has(bond.a) || !selectedIDs.has(bond.b)) continue;
         const a = atomIDMap.get(bond.a);
         const b = atomIDMap.get(bond.b);
-        if (a !== undefined && b !== undefined) model.precomputedBonds.push({ a, b, kind: bond.kind });
+        if (a !== undefined && b !== undefined) model.precomputedBonds.push({ a, b, kind: bond.kind, order: bond.order, aromatic: bond.aromatic });
       }
     }
   }

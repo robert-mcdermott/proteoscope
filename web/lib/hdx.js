@@ -14,6 +14,10 @@
 // (0.5 D per time point after Houde et al. 2011).
 
 import { detectDelimiter, splitCells, toNumber } from './reports.js';
+import { studentTCDF, studentTQuantile } from './stats.js';
+
+// The t distribution now lives in stats.js; re-exported for existing importers.
+export { studentTCDF, studentTQuantile };
 
 export const HDX_FORMATS = {
   'dynamx-state': 'DynamX state data',
@@ -250,71 +254,4 @@ function welchT(meanA, varianceA, nA, meanB, varianceB, nB) {
   const df = (a + b) ** 2 / (a ** 2 / (nA - 1) + b ** 2 / (nB - 1));
   if (!Number.isFinite(t) || !Number.isFinite(df)) return NaN;
   return 2 * (1 - studentTCDF(Math.abs(t), df));
-}
-
-// Student's t distribution through the regularized incomplete beta function.
-export function studentTCDF(t, df) {
-  const x = df / (df + t * t);
-  const tail = 0.5 * incompleteBeta(x, df / 2, 0.5);
-  return t >= 0 ? 1 - tail : tail;
-}
-
-export function studentTQuantile(probability, df) {
-  let low = 0;
-  let high = 1000;
-  for (let step = 0; step < 100; step += 1) {
-    const middle = (low + high) / 2;
-    if (studentTCDF(middle, df) < probability) low = middle;
-    else high = middle;
-  }
-  return (low + high) / 2;
-}
-
-function incompleteBeta(x, a, b) {
-  if (x <= 0) return 0;
-  if (x >= 1) return 1;
-  const front = Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x));
-  if (x < (a + 1) / (a + b + 2)) return (front * betaFraction(x, a, b)) / a;
-  return 1 - (front * betaFraction(1 - x, b, a)) / b;
-}
-
-// Lentz's continued fraction for the incomplete beta function.
-function betaFraction(x, a, b) {
-  const tiny = 1e-30;
-  let c = 1;
-  let d = 1 - ((a + b) * x) / (a + 1);
-  if (Math.abs(d) < tiny) d = tiny;
-  d = 1 / d;
-  let result = d;
-  for (let m = 1; m <= 300; m += 1) {
-    const m2 = 2 * m;
-    let numerator = (m * (b - m) * x) / ((a + m2 - 1) * (a + m2));
-    d = 1 + numerator * d;
-    if (Math.abs(d) < tiny) d = tiny;
-    c = 1 + numerator / c;
-    if (Math.abs(c) < tiny) c = tiny;
-    d = 1 / d;
-    result *= d * c;
-    numerator = (-(a + m) * (a + b + m) * x) / ((a + m2) * (a + m2 + 1));
-    d = 1 + numerator * d;
-    if (Math.abs(d) < tiny) d = tiny;
-    c = 1 + numerator / c;
-    if (Math.abs(c) < tiny) c = tiny;
-    d = 1 / d;
-    const delta = d * c;
-    result *= delta;
-    if (Math.abs(delta - 1) < 1e-12) break;
-  }
-  return result;
-}
-
-function logGamma(value) {
-  const coefficients = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5];
-  let x = value;
-  let y = value;
-  let tmp = x + 5.5;
-  tmp -= (x + 0.5) * Math.log(tmp);
-  let series = 1.000000000190015;
-  for (const coefficient of coefficients) series += coefficient / ++y;
-  return -tmp + Math.log((2.5066282746310005 * series) / x);
 }

@@ -3,3 +3,4 @@
 *.exe
 *.test
 .DS_Store
+/validation/cache/

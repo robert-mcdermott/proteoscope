@@ -29,8 +29,10 @@ export const COLOR_SCHEMES = [
   { id: 'plddt', label: 'AlphaFold confidence (pLDDT)', group: 'Quality' },
   { id: 'domains', label: 'PAE domains', group: 'Quality' },
   { id: 'msa', label: 'MSA depth', group: 'Quality' },
+  { id: 'conservation', label: 'Conservation (ConSurf-style grades)', group: 'Chemistry' },
   { id: 'validation', label: 'Validation outliers (wwPDB)', group: 'Quality' },
   { id: 'densityfit', label: 'Fit to density (RSRZ / Q-score)', group: 'Quality' },
+  { id: 'mapfit', label: 'Fit to the loaded map', group: 'Quality' },
   { id: 'missense', label: 'AlphaMissense pathogenicity', group: 'Variants' },
   { id: 'exposure', label: 'Solvent exposure (relative SASA)', group: 'Analysis' },
   { id: 'ppse', label: 'Part-sphere exposure (pPSE)', group: 'Analysis' },
@@ -48,6 +50,9 @@ const STRUCTURAL_SCHEMES = new Set(['chain', 'entity', 'rainbow', 'secondary', '
 const COMPARISON_SCHEMES = new Set(['deviation', 'lddt', 'rmsf']);
 export const DEFAULT_DEVIATION_RANGE = { min: 0, max: 4 };
 const NEUTRAL = [0.5, 0.53, 0.57];
+// ConSurf's nine grades, from variable (1, turquoise) to conserved (9, maroon).
+export const CONSERVATION_COLORS = ['#10c8d1', '#8cffff', '#d7ffff', '#eaffff', '#ffffff', '#fcedf4', '#fac9de', '#f07dab', '#a02560'];
+const CONSERVATION_RGB = CONSERVATION_COLORS.map(hexColor);
 const LIGAND_CARBON = [0.36, 0.86, 0.5];
 const VALIDATION_COLORS = VALIDATION_LEVELS.map((level) => hexColor(level.color));
 
@@ -88,6 +93,7 @@ export function computeAtomColors(model, structure, settings, extras = {}) {
         uniform,
         structureColor,
         fitKind: extras.fitKind,
+        mapFitKind: extras.mapFitKind,
       });
       if (heteroByElement && STRUCTURAL_SCHEMES.has(scheme) && atom.element !== 'C' && polymer && !isBackboneForCartoon(atom)) {
         color = [...elementInfo(atom.element).color];
@@ -153,6 +159,14 @@ function schemeColor(scheme, atom, residue, context) {
       const t = context.fitKind === 'qscore' ? (0.8 - value) / 0.6 : (value + 1) / 4;
       return sampleColormap('bwr', Math.min(1, Math.max(0, t)));
     }
+    case 'mapfit': {
+      // Atom inclusion (0–1) for cryo-EM maps, mean density at the atoms in σ for 2Fo-Fc maps;
+      // blue fits, red does not.
+      const value = context.residueValues?.get(residue?.key);
+      if (!Number.isFinite(value)) return [...NEUTRAL];
+      const t = context.mapFitKind === 'sigma' ? (2 - value) / 2 : 1 - value;
+      return sampleColormap('bwr', Math.min(1, Math.max(0, t)));
+    }
     case 'missense': {
       const value = context.residueValues?.get(residue?.key);
       return Number.isFinite(value) ? sampleColormap('alphamissense', value) : [...NEUTRAL];
@@ -160,6 +174,10 @@ function schemeColor(scheme, atom, residue, context) {
     case 'domains': {
       const index = context.residueValues?.get(residue?.key);
       return Number.isFinite(index) && index >= 0 ? chainPaletteColor(index, context.palette) : [...NEUTRAL];
+    }
+    case 'conservation': {
+      const grade = context.residueValues?.get(residue?.key);
+      return Number.isInteger(grade) && grade >= 1 && grade <= 9 ? [...CONSERVATION_RGB[grade - 1]] : [...NEUTRAL];
     }
     case 'msa': {
       const value = context.residueValues?.get(residue?.key);
@@ -349,6 +367,11 @@ function buildLegend(scheme, structure, settings, extras, range) {
       return extras.fitKind === 'qscore'
         ? { type: 'gradient', title: 'Q-score (map fit)', colormap: 'bwr', minLabel: '≥ 0.8 good', maxLabel: '≤ 0.2 poor', note: 'Cryo-EM · gray: not assessed' }
         : { type: 'gradient', title: 'RSRZ (density fit)', colormap: 'bwr', minLabel: '≤ −1 good', maxLabel: '≥ 3 poor', note: 'RSRZ > 2 is an outlier · gray: not assessed' };
+    case 'mapfit':
+      if (!extras.residueValues) return { type: 'note', title: 'Fit to the map', text: 'Load a density map in the Analysis tab and run Map fit.' };
+      return extras.mapFitKind === 'sigma'
+        ? { type: 'gradient', title: 'Density at atoms', colormap: 'bwr', minLabel: '≥ 2σ', maxLabel: '≤ 0σ', note: '2Fo-Fc map, mean in σ per residue · gray: outside the map' }
+        : { type: 'gradient', title: 'Atom inclusion', colormap: 'bwr', minLabel: 'all atoms inside', maxLabel: 'none inside', note: `At the contour level${extras.mapFitLevel ? ` ${formatValue(extras.mapFitLevel)}` : ''} · gray: outside the map` };
     case 'missense':
       return extras.residueValues
         ? { type: 'gradient', title: 'AlphaMissense (mean)', colormap: 'alphamissense', minLabel: '0 benign', maxLabel: '1 pathogenic', note: '< 0.34 likely benign · > 0.564 likely pathogenic' }
@@ -357,6 +380,10 @@ function buildLegend(scheme, structure, settings, extras, range) {
       return extras.domainCount
         ? { type: 'categorical', title: 'PAE domains', items: Array.from({ length: Math.min(extras.domainCount, 16) }, (_, index) => ({ label: `Domain ${index + 1}`, color: chainPaletteColor(index, palette) })), note: 'Gray: not in a domain' }
         : { type: 'note', title: 'PAE domains', text: 'Find domains under Predicted aligned error in the Analysis tab.' };
+    case 'conservation':
+      return extras.residueValues
+        ? { type: 'categorical', title: 'Conservation grade', items: CONSERVATION_COLORS.map((color, index) => ({ label: index === 0 ? '1 variable' : index === 8 ? '9 conserved' : String(index + 1), color: hexColor(color) })), note: `${extras.conservationNote ?? 'Jensen–Shannon divergence'} · gray: not scored` }
+        : { type: 'note', title: 'Conservation', text: 'Compute conservation in the Analysis tab from an alignment.' };
     case 'msa':
       return extras.residueValues
         ? { type: 'gradient', title: 'MSA depth (sequences)', colormap: 'depth', minLabel: '1', maxLabel: '≥ 1000', note: 'Log scale · gray: no alignment' }

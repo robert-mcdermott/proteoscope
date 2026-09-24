@@ -35,6 +35,8 @@ export function createStructure(label, format) {
       rWork: '',
       organism: '',
       depositionDate: '',
+      revisionDate: '',
+      emdb: '',
       numModels: 0,
       keywords: '',
       isPredicted: false,
@@ -46,6 +48,9 @@ export function createStructure(label, format) {
     uniprotSegments: [],
     residueConfidence: new Map(),
     componentNames: new Map(),
+    // Chemical components (bond orders, aromaticity, charges) by residue name: see chemistry.js.
+    components: new Map(),
+    conectOrders: null,
     secondaryRanges: [],
     conect: [],
     assemblies: [],
@@ -96,7 +101,7 @@ export function makeResidueKey(chain, seq, iCode, resName) {
   return `${chain}:${seq}${iCode || ''}:${resName}`;
 }
 
-function finalizeAtom(atom) {
+export function finalizeAtom(atom) {
   const kind = residueKindFromName(atom.resName);
   atom.kind = kind;
   atom.polymerType = kind === 'protein' || kind === 'nucleic' ? kind : 'ligand';
@@ -116,6 +121,7 @@ export function parsePDB(text, label) {
   const source = [];
   const seqres = new Map();
   const remark350 = [];
+  const conectCounts = new Map();
   const lines = text.split(/\r?\n/);
 
   for (const line of lines) {
@@ -229,7 +235,11 @@ export function parsePDB(text, label) {
       const sourceSerial = parseIntSafe(slice(line, 6, 11));
       for (let offset = 11; offset <= 26; offset += 5) {
         const target = parseIntSafe(slice(line, offset, offset + 5));
-        if (sourceSerial && target) structure.conect.push([sourceSerial, target]);
+        if (!sourceSerial || !target) continue;
+        structure.conect.push([sourceSerial, target]);
+        // Multi-model files (Open Babel's poses) repeat CONECT per MODEL with restarted serials.
+        const key = `${structure.models.length}>${sourceSerial}>${target}`;
+        conectCounts.set(key, (conectCounts.get(key) ?? 0) + 1);
       }
     }
   }
@@ -243,12 +253,27 @@ export function parsePDB(text, label) {
   structure.meta.organism = pdbSpecification(source.join(''), 'ORGANISM_SCIENTIFIC');
   for (const [chain, residues] of seqres.entries()) structure.chainSequences.set(chain, { residues, source: 'SEQRES' });
   structure.assemblies = pdbAssemblies(remark350);
+  structure.conectOrders = conectBondOrders(conectCounts);
   detectPrediction(structure, `${structure.meta.title} ${structure.meta.method} ${structure.meta.keywords}`);
   for (const model of structure.models) applyAltLocationPolicy(model);
   structure.models = structure.models.filter((model) => model.atoms.length > 0);
   if (!structure.models.length) throw new Error('No ATOM or HETATM records were found in this PDB file.');
   structure.meta.numModels = structure.models.length;
   return structure;
+}
+
+// RDKit, Open Babel and PyMOL write a partner twice (or three times) in CONECT records for double
+// (triple) bonds; the wwPDB never repeats one. Orders are keyed by serial pair (chemistry.js).
+function conectBondOrders(counts) {
+  let orders = null;
+  for (const [key, count] of counts) {
+    if (count < 2) continue;
+    const [, a, b] = key.split('>').map(Number);
+    const pair = a < b ? `${a}-${b}` : `${b}-${a}`;
+    orders ??= new Map();
+    orders.set(pair, Math.max(orders.get(pair) ?? 0, Math.min(3, count)));
+  }
+  return orders;
 }
 
 function parsePDBRemark(structure, line, remark350) {
@@ -409,6 +434,7 @@ export function parseMMCIF(text, label) {
   applyMMCIFConnections(structure, cif);
   structure.assemblies = parseMMCIFAssemblies(cif);
   applyMMCIFConfidence(structure, cif);
+  structure.components = readChemComp(cif);
 
   const table = cifTable(cif, 'atom_site');
   if (!table.rowCount) throw new Error('No _atom_site records were found in this PDBx/mmCIF file.');
@@ -589,6 +615,12 @@ function applyMMCIFMetadata(structure, cif, label) {
   structure.meta.rFree = getCIFValue(cif, ['_refine.ls_r_factor_r_free']);
   structure.meta.rWork = getCIFValue(cif, ['_refine.ls_r_factor_r_work', '_refine.ls_r_factor_obs']);
   structure.meta.depositionDate = getCIFValue(cif, ['_pdbx_database_status.recvd_initial_deposition_date']);
+  // The EMDB map of a cryo-EM entry, and the latest revision (for methods and provenance).
+  const related = getCIFRows(cif, 'pdbx_database_related').filter((row) => cleanCIFValue(row.db_name).toUpperCase() === 'EMDB');
+  const map = related.find((row) => /associated EM volume/i.test(cleanCIFValue(row.content_type))) ?? (related.length === 1 ? related[0] : null);
+  structure.meta.emdb = map ? cleanCIFValue(map.db_id).toUpperCase() : '';
+  const revisions = getCIFRows(cif, 'pdbx_audit_revision_history').map((row) => cleanCIFValue(row.revision_date)).filter(Boolean).sort();
+  structure.meta.revisionDate = revisions.at(-1) ?? '';
   structure.meta.organism = [
     ...getCIFColumnValues(cif, 'entity_src_gen', 'pdbx_gene_src_scientific_name'),
     ...getCIFColumnValues(cif, 'entity_src_nat', 'pdbx_organism_scientific'),
@@ -930,6 +962,80 @@ function multiplyMatrixVector3(matrix, vector) {
 export function applyOperationToPoint(operation, atom) {
   const rotated = multiplyMatrixVector3(operation.matrix, [atom.x, atom.y, atom.z]);
   return [rotated[0] + operation.vector[0], rotated[1] + operation.vector[1], rotated[2] + operation.vector[2]];
+}
+
+// Chemical component definitions (_chem_comp_atom, _chem_comp_bond), as in CCD entries and in
+// the mmCIF files RCSB and PDBe distribute: per component, its atoms (element, formal charge when
+// given, aromatic and leaving flags, and the hydrogens bonded to each heavy atom, leaving
+// hydrogens excluded) and its bonds by sorted name pair.
+export function readChemComp(cif) {
+  const components = new Map();
+  const component = (id) => {
+    let item = components.get(id);
+    if (!item) {
+      item = { id, source: 'file', atoms: new Map(), bonds: new Map() };
+      components.set(id, item);
+    }
+    return item;
+  };
+  const atoms = cifTable(cif, 'chem_comp_atom');
+  if (atoms.rowCount) {
+    const compId = atoms.column('comp_id');
+    const atomId = atoms.column('atom_id');
+    const type = atoms.column('type_symbol');
+    const charge = atoms.column('charge');
+    const aromatic = atoms.column('pdbx_aromatic_flag');
+    const leaving = atoms.column('pdbx_leaving_atom_flag');
+    for (let row = 0; row < atoms.rowCount; row += 1) {
+      const id = cleanCIFValue(compId(row)).toUpperCase();
+      const name = cleanCIFValue(atomId(row)).toUpperCase();
+      if (!id || !name) continue;
+      const formal = cleanCIFValue(charge(row));
+      component(id).atoms.set(name, {
+        element: cleanCIFValue(type(row)).toUpperCase(),
+        charge: /^[+-]?\d+$/.test(formal) ? Number(formal) : null,
+        aromatic: cleanCIFValue(aromatic(row)).toUpperCase() === 'Y',
+        leaving: cleanCIFValue(leaving(row)).toUpperCase() === 'Y',
+        hydrogens: 0,
+        allHydrogens: 0,
+      });
+    }
+  }
+  const bonds = cifTable(cif, 'chem_comp_bond');
+  if (bonds.rowCount) {
+    const compId = bonds.column('comp_id');
+    const first = bonds.column('atom_id_1');
+    const second = bonds.column('atom_id_2');
+    const order = bonds.column('value_order');
+    const aromatic = bonds.column('pdbx_aromatic_flag');
+    for (let row = 0; row < bonds.rowCount; row += 1) {
+      const id = cleanCIFValue(compId(row)).toUpperCase();
+      const a = cleanCIFValue(first(row)).toUpperCase();
+      const b = cleanCIFValue(second(row)).toUpperCase();
+      if (!id || !a || !b) continue;
+      const item = component(id);
+      const atomA = item.atoms.get(a);
+      const atomB = item.atoms.get(b);
+      const hydrogenA = atomA?.element === 'H' || atomA?.element === 'D';
+      const hydrogenB = atomB?.element === 'H' || atomB?.element === 'D';
+      if (hydrogenA !== hydrogenB) {
+        const heavy = hydrogenA ? atomB : atomA;
+        const hydrogen = hydrogenA ? atomA : atomB;
+        if (heavy && !hydrogen.leaving) heavy.hydrogens += 1;
+        // With leaving hydrogens (and RCSB entry files, which do not flag them): the count before
+        // bonds to other residues take their place.
+        if (heavy) heavy.allHydrogens += 1;
+      }
+      const value = cleanCIFValue(order(row)).toUpperCase();
+      item.bonds.set(a < b ? `${a}|${b}` : `${b}|${a}`, {
+        order: value.startsWith('DOUB') ? 2 : value.startsWith('TRIP') ? 3 : value.startsWith('QUAD') ? 4 : 1,
+        aromatic: cleanCIFValue(aromatic(row)).toUpperCase() === 'Y' || value.startsWith('AROM'),
+      });
+    }
+  }
+  // A component whose atoms were not listed cannot be checked for completeness.
+  for (const [id, item] of components) if (!item.atoms.size) components.delete(id);
+  return components;
 }
 
 export function splitCIFList(value) {

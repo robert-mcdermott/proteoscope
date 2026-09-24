@@ -1,4 +1,5 @@
 import { buildCartoon } from './cartoon.js';
+import { bondDecorations } from './chemistry.js';
 import { elementInfo } from './elements.js';
 import { CYLINDER_STRIDE, CYLINDER_STYLE, SPHERE_STRIDE, createInstanceWriter, packColor } from './renderer.js';
 
@@ -63,20 +64,24 @@ export function buildScene(model, structure, display, context = {}) {
   }
 
   const cylinders = createInstanceWriter(CYLINDER_STRIDE, Math.max(64, model.bonds.length));
-  for (const bond of model.bonds) {
+  const decorations = multipleBondDecorations(model, display);
+  model.bonds.forEach((bond, index) => {
     const styleA = styles[bond.a];
     const styleB = styles[bond.b];
-    if (!styleA || !styleB) continue;
+    if (!styleA || !styleB) return;
     const radius = bondRadius(styleA, styleB, display);
-    if (radius <= 0) continue;
+    if (radius <= 0) return;
     const a = atoms[bond.a];
     const b = atoms[bond.b];
+    const decoration = decorations?.get(index);
     if (bond.kind === 'metal') {
       writeCylinder(cylinders, [a.x, a.y, a.z], [b.x, b.y, b.z], Math.min(radius, 0.07), bond.a + offset, bond.b + offset, CYLINDER_STYLE.dashed);
+    } else if (decoration && showsBondOrder(model, bond, display)) {
+      writeMultipleBond(cylinders, a, b, radius, bond, decoration, bond.a + offset, bond.b + offset);
     } else {
       writeCylinder(cylinders, [a.x, a.y, a.z], [b.x, b.y, b.z], radius, bond.a + offset, bond.b + offset, 0);
     }
-  }
+  });
   if (display.polymer === 'trace') writeTrace(cylinders, model, display, residueVisible, offset);
   if (cartoon) {
     for (const connector of cartoon.cylinders) {
@@ -200,6 +205,53 @@ function bondRadius(styleA, styleB, display) {
   if ((stick(styleA) || ball(styleA)) && (stick(styleB) || ball(styleB))) return 0.13 * bondScale;
   if (styleA === STYLE.ion || styleB === STYLE.ion) return 0.1 * bondScale;
   return 0;
+}
+
+// Double, triple and aromatic bonds ("bondOrders": 'ligands' by default, 'all' or 'off'). Ring
+// bonds keep a full stick and gain a shorter inner line toward the ring center (dashed when
+// aromatic), as in chemical drawings; other double bonds split into two thinner sticks.
+function multipleBondDecorations(model, display) {
+  if ((display.bondOrders ?? 'ligands') === 'off') return null;
+  const items = bondDecorations(model);
+  return items.length ? new Map(items.map((item) => [item.index, item])) : null;
+}
+
+function showsBondOrder(model, bond, display) {
+  if ((display.bondOrders ?? 'ligands') === 'all') return true;
+  const residueA = model.residues[model.atomResidue[bond.a]];
+  const residueB = model.residues[model.atomResidue[bond.b]];
+  const nonstandard = (residue) => residue && (residue.kind === 'ligand' || residue.modified);
+  return nonstandard(residueA) && nonstandard(residueB);
+}
+
+function writeMultipleBond(cylinders, a, b, radius, bond, decoration, atomA, atomB) {
+  const start = [a.x, a.y, a.z];
+  const end = [b.x, b.y, b.z];
+  const [dx, dy, dz] = decoration.direction;
+  const shifted = (point, distance) => [point[0] + dx * distance, point[1] + dy * distance, point[2] + dz * distance];
+  const along = (t, distance) => shifted([start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t, start[2] + (end[2] - start[2]) * t], distance);
+  const caps = CYLINDER_STYLE.roundCaps;
+  if (bond.order === 3) {
+    const thin = radius * 0.42;
+    writeCylinder(cylinders, start, end, thin, atomA, atomB, caps);
+    writeCylinder(cylinders, shifted(start, radius * 1.3), shifted(end, radius * 1.3), thin, atomA, atomB, caps);
+    writeCylinder(cylinders, shifted(start, -radius * 1.3), shifted(end, -radius * 1.3), thin, atomA, atomB, caps);
+    return;
+  }
+  if (decoration.ring) {
+    writeCylinder(cylinders, start, end, radius, atomA, atomB, 0);
+    const inner = radius * 2.2;
+    writeCylinder(cylinders, along(0.18, inner), along(0.82, inner), radius * 0.45, atomA, atomB, bond.aromatic ? CYLINDER_STYLE.dashed : caps);
+    return;
+  }
+  if (bond.aromatic && bond.order < 2) {
+    writeCylinder(cylinders, start, end, radius, atomA, atomB, 0);
+    writeCylinder(cylinders, along(0.18, radius * 2.2), along(0.82, radius * 2.2), radius * 0.45, atomA, atomB, CYLINDER_STYLE.dashed);
+    return;
+  }
+  const thin = radius * 0.55;
+  writeCylinder(cylinders, shifted(start, radius), shifted(end, radius), thin, atomA, atomB, caps);
+  writeCylinder(cylinders, shifted(start, -radius), shifted(end, -radius), thin, atomA, atomB, caps);
 }
 
 function writeTrace(cylinders, model, display, residueVisible, offset = 0) {

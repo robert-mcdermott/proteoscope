@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -race ./...
+      - name: Cross-compile
+        run: |
+          GOOS=darwin GOARCH=arm64 go build -o /dev/null .
+          GOOS=darwin GOARCH=amd64 go build -o /dev/null .
+          GOOS=linux GOARCH=amd64 go build -o /dev/null .
+          GOOS=windows GOARCH=amd64 go build -o /dev/null .
+
+  web:
+    name: Browser modules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check
+        run: for file in web/app.js web/lib/*.js; do node --check "$file"; done
+      - name: node --test
+        env:
+          # Shared runners are several times slower than a workstation; the performance tests
+          # scale their wall-clock limits by this factor.
+          PROTEOSCOPE_TIME_SCALE: '5'
+        run: node --test "web/lib/*.test.mjs"
+      - name: Validation against reference tools (offline suites)
+        run: node validation/run.mjs limma msstatsptm conservation

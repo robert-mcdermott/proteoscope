@@ -9,13 +9,14 @@ The backend serves static assets, the bundled structures, a sample manifest,
 files named on the command line, and a small fetch proxy for public databases.
 The browser frontend owns the scientific workflow:
 
-- Parsing and structure derivation.
+- Parsing and structure derivation, including ligand chemistry.
 - Secondary structure.
 - Representation and color building.
 - WebGPU rendering.
-- Analysis: interactions, surfaces, SASA, plots.
-- Proteomics overlays.
-- Export.
+- Analysis: interactions, surfaces, SASA, density maps, structure alignment,
+  conservation, plots.
+- Proteomics overlays and statistics.
+- Export, including a methods paragraph with references.
 
 Key design principles:
 
@@ -24,7 +25,8 @@ Key design principles:
 - **Local-first privacy.**
   - User files are parsed in the browser and are never uploaded.
   - Remote requests go only to fixed public databases (RCSB, AlphaFold DB,
-    UniProt), through the local proxy.
+    UniProt, and EBI services such as PDBe, EMDB and 3D-Beacons), through
+    the local proxy.
   - `--offline` disables remote requests.
 - **Scientific competence before spectacle.** Chemical and biological
   semantics come first: residue typing, bonds, DSSP, numbering, confidence
@@ -45,7 +47,7 @@ graph TB
     Browser[Browser client]
     Embed[(Embedded web + data)]
     Cache[(Fetch cache)]
-    Remote[RCSB / AlphaFold DB / UniProt / EBI: PDBe, 3D-Beacons, Proteins API / model providers]
+    Remote[RCSB / AlphaFold DB / UniProt / EBI: PDBe, volume server, EMDB, 3D-Beacons, Proteins API / model providers]
     Local[Local files, prediction folders and CLI arguments]
 
     User -->|runs| Binary
@@ -72,7 +74,13 @@ graph LR
     Canvas[renderer-canvas.js]
     Camera[camera.js]
     Interactions[interactions.js]
-    Surface[surface-worker.js<br/>surface.js + electrostatics.js]
+    Surface[surface-worker.js<br/>surface.js + electrostatics.js<br/>tmalign.js]
+    Chem[chemistry.js]
+    Molfile[molfile.js]
+    Maps[volume-worker.js<br/>volume.js]
+    Stats[stats.js]
+    Conserve[conservation.js]
+    Cite[provenance.js]
     Proteomics[proteomics.js]
     Compare[compare.js<br/>align.js + superpose.js]
     Select[select.js + commands.js]
@@ -89,6 +97,7 @@ graph LR
     HDX[hdx.js]
 
     App --> Parse --> Structure --> DSSP
+    Structure --> Chem
     App --> Scene --> Cartoon
     App --> Color
     App --> Renderer
@@ -110,13 +119,20 @@ graph LR
     App -. lazy .-> Reports
     App -. lazy .-> XL
     App -. lazy .-> HDX
+    App -. lazy .-> Molfile
+    App -. worker .-> Maps
+    App -. lazy .-> Stats
+    App -. lazy .-> Conserve
+    App -. lazy .-> Cite
 ```
 
 Modules in `web/lib/` are pure (no DOM access) except `renderer*.js`,
 `sequence-view.js` and `plots.js`. Pure modules run in the browser, in Web
 Workers and in Node tests. Interactions, proteomics, electrostatics, the
-Top8000 Ramachandran tables, and the report, cross-link and HDX importers load
-lazily on first use.
+Top8000 Ramachandran tables, the report, cross-link, HDX and docking-pose
+readers, statistics, conservation and the methods text load lazily on first
+use. Maps are parsed, contoured and fitted in their own worker; TM-align runs
+in the surface worker.
 
 ## Host Application Design
 
@@ -139,12 +155,17 @@ embedded. `--dev` serves `web/` and `data/` from disk instead.
 | `/api/fetch/pdb/{id}` | RCSB PDBx/mmCIF by PDB ID, including extended `pdb_` IDs |
 | `/api/fetch/afdb/{accession}` | AlphaFold DB model; the file URL comes from the prediction API |
 | `/api/fetch/afdb/{accession}/pae` | AlphaFold DB PAE JSON |
-| `/api/fetch/afdb/{accession}/msa` | AlphaFold DB alignment (A3M) for the model |
+| `/api/fetch/afdb/{accession}/msa` | AlphaFold DB alignment (A3M) for the model; AlphaFold DB currently refuses these (HTTP 403), which the route reports |
 | `/api/fetch/afdb/{accession}/missense` | AlphaMissense substitutions (CSV), human proteins |
 | `/api/fetch/uniprot/{accession}` | UniProtKB entry with feature annotations |
 | `/api/fetch/validation/{id}` | wwPDB validation report, reduced from XML to per-residue JSON |
 | `/api/fetch/model?url=` | A model file listed by 3D-Beacons, from an allowed provider host |
 | `/api/fetch/proteomics/{accession}` | Public peptides and PTM sites (EBI Proteins API), merged |
+| `/api/fetch/ccd/{id}` | A Chemical Component Dictionary entry (RCSB), for ligand bond orders, aromaticity and charges |
+| `/api/fetch/volume/{source}/{id}` | Volume-server header for an X-ray entry (`x-ray`, PDB ID) or a cryo-EM map (`em`, EMDB ID): sampling levels, statistics and cell. PDBe first, RCSB's copy second |
+| `/api/fetch/volume/{source}/{id}/box?min=&max=&detail=` | The map inside a Cartesian box, as BinaryCIF (at most 1,000 Å a side) |
+| `/api/fetch/volume/{source}/{id}/cell?detail=` | The whole map, as BinaryCIF |
+| `/api/fetch/emdb/{id}` | EMDB map metadata, for the recommended contour level |
 | `/api/search/text`, `/api/search/sequence` | RCSB full-text and sequence search, with entry summaries from RCSB GraphQL |
 | `/api/search/uniprot` | UniProt protein search (exact gene matches first; optional organism) |
 | `/api/search/protein/{accession}` | PDBe best structures and 3D-Beacons models of a protein |
@@ -178,7 +199,9 @@ and the active entry. An entry holds the structure plus everything that
 belongs to it: display and color settings, surface, selection, focus, labels,
 interactions, SASA, proteomics overlays, PAE, visibility, its cumulative rigid
 transform, and the last superposition in which it moved (pairs, per-residue
-deviation and lDDT, statistics). The per-structure fields on the state object
+deviation and lDDT, statistics). Wave 6 adds a density map (source, channels
+and their levels, region and fit), docking poses, conservation scores and a
+search report's statistics. The per-structure fields on the state object
 (`state.structure`, `state.display`, `state.selection`, …) are accessors for
 the active entry, so single-structure code paths are unchanged.
 
@@ -190,11 +213,17 @@ A **structure** holds:
   `entity_poly_seq`).
 - UniProt segments, per-residue confidence (ModelCIF), component names, and
   secondary-structure ranges.
+- Chemical components (`components`: CCD atoms with charges and hydrogen
+  counts, bonds with orders and aromatic flags) read from the file or fetched,
+  and bond orders from duplicated CONECT records.
 - Explicit connections, assemblies, models, chains and sequences.
 
 A **model** holds atoms, residues, `residueMap`, `atomResidue` (atom →
-residue index), bonds (`{a, b, kind}`, where kind is `covalent` or `metal`),
-bounds, the B-factor range and a cartoon cache.
+residue index), bonds (`{a, b, kind, order, aromatic}`, where kind is
+`covalent` or `metal`), bounds, the B-factor range and a cartoon cache. Its
+`chemistryVersion` changes whenever chemistry is applied again (a fetched
+component arrived, poses were added), which invalidates cached bond
+decorations and interaction typing.
 
 An **atom** carries:
 
@@ -205,6 +234,8 @@ An **atom** carries:
   element.
 - Classification: `kind` (protein, nucleic, ligand, ion or water) and
   secondary structure.
+- Chemistry: `aromatic`, and `hydrogens`, the number of attached hydrogens
+  (explicit in the dictionary, or implicit from valence).
 
 A **residue** carries:
 
@@ -234,6 +265,16 @@ A **residue** carries:
   - Only covalent, disulfide and metal-coordination `_struct_conn` records
     become bonds; hydrogen-bond records do not.
   - ModelCIF `_ma_qa_metric_local` supplies per-residue pLDDT.
+  - `_chem_comp_atom` and `_chem_comp_bond`, when present, supply the
+    ligands' chemistry; `pdbx_formal_charge` supplies charges.
+- **Ligand files** (`molfile.js`): SDF V2000 and V3000 (charges from the atom
+  block, `M  CHG` or `CHG=`), MOL2 (SYBYL types, aromatic and amide bonds) and
+  PDBQT (AutoDock types; bonds inferred by distance), with scores from
+  properties, comments and remarks.
+- **Maps** (`volume.js`): CCP4/MRC 2014 (axis order, start indices, origin,
+  modes 0, 1, 2, 6 and 12, either byte order) and the volume server's
+  BinaryCIF (one data block per channel, 8-bit interval quantization), both to
+  an affine grid: origin plus integer steps along three axis vectors.
 - **Alternate locations.** The highest-occupancy conformer is kept
   (deterministic ties). Aliases keep CONECT serial numbers resolvable.
 
@@ -255,6 +296,15 @@ A **residue** carries:
   - Declared sequences are aligned to modeled residues: by `label_seq_id` for
     mmCIF, and by Needleman–Wunsch for PDB SEQRES.
   - UniProt segments map between author and UniProt numbering.
+- **Chemistry** (`chemistry.js`). Each residue's component comes from the
+  file, from the built-in standard-residue table or from a fetched CCD entry.
+  A component applies only when every heavy atom matches it by name and
+  element. Then intra-residue bonds follow the dictionary (bonds it lacks are
+  dropped, missing ones added when the atoms are within 3 Å) with their
+  orders and aromatic flags. Components marked isolated (docking poses) are
+  never bonded to other residues. Atoms get aromatic flags and implicit
+  hydrogen counts from valence and charge. The page fetches missing
+  components after the first draw and applies chemistry again.
 
 ## Rendering Design
 
@@ -265,7 +315,7 @@ graph LR
     G[Geometry pass<br/>color + normal + atom id + depth] --> AO[SSAO] --> B[Depth-aware blur]
     G --> C[Composite<br/>AO, outlines, fog, background]
     B --> C
-    C --> O[Overlay<br/>transparent surfaces, glow]
+    C --> O[Overlay<br/>map lines, transparent surfaces, glow]
     O --> F[FXAA or 2x downsample]
     F --> S[Swap chain or capture texture]
 ```
@@ -279,7 +329,16 @@ graph LR
   lines.
 - **Meshes.** Cartoon and surfaces are indexed triangle lists with smooth
   normals. The per-vertex atom index looks up the atom's color and
-  selection flags, so recoloring and selection never rebuild geometry.
+  selection flags, so recoloring and selection never rebuild geometry. Map
+  surfaces carry their own vertex colors and are not pickable.
+- **Multiple bonds.** Sticks draw double bonds as two thinner cylinders,
+  triple bonds as three, and ring bonds as the full bond plus a shortened
+  inner cylinder toward the ring center (dashed when aromatic); the offsets
+  come from the ring or the substituent plane.
+- **Lines.** Map meshes are screen-space wide lines: each segment becomes a
+  quad in the vertex shader, with anti-aliased coverage, fog, and depth
+  tested against the scene without writing depth. They are drawn first in the
+  overlay pass, and their width scales with supersampled captures.
 - **Per-atom buffers.** Color and flags (selected, hovered, dimmed) are
   storage buffers indexed by atom ID. Several structures share them: every
   rendered model (the active model of each entry, or all models of an
@@ -354,6 +413,67 @@ ambient occlusion or outlines.
 - **Correspondence.** Residue-key maps between entries (direct, or through a
   shared reference) drive mirrored selection, hover and focus, deviation and
   lDDT coloring of both structures, and the aligned sequence row.
+
+- **Structure-only pairing** (`tmalign.js`). A port of US-align's TM-align
+  (Cα, or C3′ for nucleic acids) and MM-align for complexes, run in the
+  surface worker. Its residue pairs and transform replace the sequence
+  alignment and pruning; RMSD, aligned length and both TM-scores come from
+  its result, and lDDT and deviations are computed on its pairs as usual.
+
+## Density Maps
+
+- **Loading.** An X-ray entry gets its 2Fo-Fc and Fo-Fc channels and a
+  cryo-EM entry its EMDB map (ID from the file's related-entry records). The
+  page reads the volume server's header and picks the finest detail level
+  whose voxel count fits the budget: 2²¹ voxels for a box around the focus,
+  2²³ for a whole map. Map data come from the server that sent the header
+  (`server=`), whose statistics set the levels. Local CCP4/MRC files are held
+  whole by the worker.
+- **Downsampled data.** The server downsamples a large region, which narrows
+  its values; the contour level then keeps its σ, using the header's
+  statistics at that sampling rate, and the status says so.
+- **Regions.** *Around the focus* and *Follow the view* request a box on a
+  2 Å grid around the focus (or the selection) or the view center, in the
+  deposited frame (the inverse of the entry's transform), and ask again once
+  the camera, focus or selection settles. *Whole map* contours once; for an
+  X-ray entry it is the box around the model, which the server fills by
+  symmetry. Geometry is committed only when an update is still current, so a
+  superseded update leaves nothing behind.
+- **Contouring** (`volume-worker.js`). Surface Nets on the region: one
+  vertex per cell that the level crosses, placed at the mean of its edge
+  crossings; quads join the cells around each crossed edge. It gives smooth
+  surfaces with fewer triangles than marching cubes, and the quad edges draw
+  as the mesh. A negative level (Fo-Fc) contours the region below
+  it. *Near atoms* keeps vertices within the zone of the focused or selected
+  atoms.
+- **Fit.** `mapFit` samples the map trilinearly at each heavy atom: atom
+  inclusion at the contour level (atoms outside the map count as outside, as
+  in EMDB's count), and per residue the mean value in σ and the fraction of
+  atoms inside. Server maps are fitted at full resolution, in tiles of at
+  most the server's largest request, whose results are added up.
+- **Sessions** keep the source, channel levels and style; maps from the
+  server are fetched again, files must be opened again.
+
+## Ligands and Docking Poses
+
+- **Poses.** A docking file becomes a set of molecules. The shown pose is a
+  residue `LIG` (`LG1`… when the receptor uses that name, so their dictionary
+  entries never mix) in chain L or another letter the receptor does not use.
+  It is spliced into the receptor's model at the file's coordinates moved by
+  the entry's transform, and marked isolated so no bond joins it to a crystal
+  ligand in the same place. Switching poses replaces its atoms and rebuilds
+  the model's derived data. PDBQT poses, which have no bond orders, are
+  typed from geometry.
+- **Fingerprints.** Each pose's interactions are computed on a small model
+  of the receptor residues within 9 Å of any pose, so hundreds of poses cost
+  little more than one. Waters are left out, and so is a ligand the poses sit
+  on (most of its atoms within 1.5 Å of a pose); cofactors such as heme stay
+  as partners.
+- **Typing.** Interactions use the chemistry when it is known: donors need
+  a hydrogen (explicit, or implicit from valence), acceptors a lone pair;
+  aromatic rings are those the dictionary marks or that are planar with sp2
+  atoms; charged groups follow protonation rules (amines by cluster and
+  basicity, carboxylates, acylsulfonamides, tetrazoles, permanent charges).
 
 ## Selections, Commands and Sessions
 
@@ -430,6 +550,21 @@ ambient occlusion or outlines.
 - **HDX** (`hdx.js`) parses to peptides per state and exposure, then
   computes differences, significance and residue values on demand for the
   chosen states and exposure.
+- **Statistics** (`stats.js`). When asked for, the report is read again in
+  full, with a collector that sums intensities per feature (precursor,
+  peptide or site) and sample across all proteins, since the empirical Bayes
+  prior needs many features. The test runs on log2 values after median
+  normalization and optional imputation; results are keyed back to the
+  structure's sites. Protein-level changes for the MSstatsPTM adjustment use
+  the unmodified peptides of the structure's proteins with the same prior.
+- **Conservation** (`conservation.js`). Alignments are parsed to rows over
+  all columns; scores are computed per column of the first sequence and
+  mapped to chains by sequence alignment (identity at least 0.9 over at least
+  20 aligned residues, or half the chain if it is shorter).
+- **Methods** (`provenance.js`). The page collects what the session used
+  (entries with their sources, versions and dates; analyses with their
+  parameters) and the module writes the paragraph and numbered references
+  with DOIs.
 - **Discovery** (`discover.js`) classifies the query in the page; the Go
   routes do the upstream calls, merge their answers into compact JSON and
   cache them, so the page never contacts the services directly.
@@ -481,12 +616,15 @@ The canvas fills the window, and panels float over it.
 
 ## Known Limitations
 
-See `roadmap.md` §11. In particular:
+See `roadmap.md` §12. In particular:
 
-- Superposition needs sequence (or UniProt) correspondence; there is no
-  structure-only alignment yet.
+- Structure-only superposition is rigid.
 - Electrostatics are qualitative (formal charges, ε = 4r).
-- Ligand chemistry is inferred from geometry.
+- Protonation follows rules, not computed pKa values; ligands without a
+  matching dictionary entry are typed from geometry.
+- Maps from the volume server are 8-bit and sampled to a voxel budget; map
+  files are not kept in sessions.
+- Differential statistics compare two unpaired groups.
 - Rotamer outliers and clashscore come only from validation reports.
 - Chai-1 prediction folders were checked only against the documented
   layout; the other predictors against real outputs.
