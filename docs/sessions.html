@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sessions, figures and methods · Proteoscope</title>
+  <meta name="description" content="Export images, spin videos and CSV tables, save and share sessions, open the view in Mol*, and draft a methods paragraph with references." />
+  <meta name="theme-color" content="#050708" />
+  <link rel="icon" href="../assets/img/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/css/site.css" />
+  <script>try { const t = localStorage.getItem('proteoscope-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+      <nav class="site-nav" id="site-nav" aria-label="Main">
+        <a href="../#features">Features</a>
+        <a href="./" aria-current="page">Documentation</a>
+        <a href="../install.html">Install</a>
+        <a href="../science.html">Science</a>
+      </nav>
+      <div class="header-actions">
+        <a class="icon-button" href="https://github.com/robert-mcdermott/proteoscope" aria-label="Proteoscope on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        </a>
+        <button class="icon-button theme-toggle" type="button" aria-label="Switch between light and dark">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <button class="icon-button nav-toggle" type="button" aria-label="Menu" aria-controls="site-nav" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <aside class="docs-sidebar" aria-label="Documentation">
+      <button class="btn docs-menu-toggle" type="button" aria-expanded="false">Documentation menu <span aria-hidden="true">▾</span></button>
+      <nav>
+        <h4>Start</h4>
+        <ul>
+          <li><a href="./">Overview</a></li>
+          <li><a href="getting-started.html">Getting started</a></li>
+          <li><a href="finding.html">Finding structures</a></li>
+        </ul>
+        <h4>Viewing</h4>
+        <ul>
+          <li><a href="viewing.html">Viewing and interactions</a></li>
+          <li><a href="commands.html">Selections and commands</a></li>
+          <li><a href="comparing.html">Comparing structures</a></li>
+        </ul>
+        <h4>Checking models</h4>
+        <ul>
+          <li><a href="predictions.html">Predictions and AlphaFold</a></li>
+          <li><a href="validation.html">Validation and density maps</a></li>
+          <li><a href="ligands.html">Ligands and docking</a></li>
+          <li><a href="analysis.html">Analysis</a></li>
+        </ul>
+        <h4>Your data</h4>
+        <ul>
+          <li><a href="proteomics.html">Proteomics</a></li>
+        </ul>
+        <h4>Share and automate</h4>
+        <ul>
+          <li><a href="sessions.html" aria-current="page">Sessions, figures and methods</a></li>
+          <li><a href="scripting.html">Scripting and command line</a></li>
+        </ul>
+        <h4>Reference</h4>
+        <ul>
+          <li><a href="formats.html">Supported files</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main id="main" class="doc">
+      <h1>Sessions, figures and methods</h1>
+      <p class="doc-lede">Export images, videos and tables, save the whole workspace as a session, share a view as a link or in Mol*, and draft a methods paragraph for what you did.</p>
+
+      <h2 id="images">Images and spin videos</h2>
+      <p><strong>Export image</strong> (the camera button in the toolbar, or <kbd>P</kbd>) renders the current view off screen as a PNG. You can choose:</p>
+      <ul>
+        <li><strong>Resolution:</strong> 1× to 4× of the viewport, optionally supersampled for smooth edges.</li>
+        <li><strong>What to include:</strong> optionally a transparent background, the color legend, labels and measurements.</li>
+      </ul>
+      <p><strong>Copy</strong> puts the image on the clipboard. <strong>Spin video</strong> records one full rotation of the view as WebM. The <code>png</code> command exports an image from the search box; see <a href="scripting.html">Scripting and command line</a> for exporting from a script.</p>
+
+      <h2 id="csv">Tables as CSV</h2>
+      <p>Interaction tables, docking scores and fingerprints, prediction rankings, and proteomics sites with their statistics export as CSV, for a spreadsheet or your own analysis.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Table</th><th>What the CSV holds</th><th>More</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Interactions</strong></td><td>The interaction table</td><td><a href="viewing.html">Viewing and interactions</a></td></tr>
+            <tr><td><strong>Docking poses</strong></td><td>The scores and interaction fingerprints of every pose</td><td><a href="ligands.html">Ligands and docking</a></td></tr>
+            <tr><td><strong>Prediction ranking</strong></td><td>Every model and chain pair with its scores</td><td><a href="predictions.html">Predictions and AlphaFold</a></td></tr>
+            <tr><td><strong>Proteomics sites</strong></td><td>Every localized site with its probability, value, part-sphere exposure and whether it lies in a disordered region; after a differential test, also each site's fold change, p, q and degrees of freedom, and for adjusted sites the protein's change</td><td><a href="proteomics.html">Proteomics</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="sessions">Sessions</h2>
+      <p>A session saves the whole workspace so you can reopen it later. <strong>Save session</strong> (Structure tab, or the <code>save</code> command) writes a <code>.proteoscope.json</code> file. To reopen it, open it like any file, or drop it on the window.</p>
+
+      <h3 id="session-contents">What a session records</h3>
+      <ul>
+        <li><strong>Where each structure came from:</strong> a fetched PDB ID or UniProt accession, a bundled example, or the local file itself, embedded and compressed.</li>
+        <li><strong>How it looks:</strong> styles, per-residue styling and colors, surfaces, superpositions (refitted when the session opens), ensemble overlays and trimming.</li>
+        <li><strong>What you marked:</strong> selections, focus, labels, proteomics overlays and measurements.</li>
+        <li><strong>The view:</strong> the camera, lighting, background, clipping and secondary-structure source.</li>
+        <li><strong>Prediction data:</strong> PAE matrices and contact probabilities you opened (stored at 0.125 Å and 1/255 steps), prediction scores, and MSA depth.</li>
+        <li><strong>Docking and maps:</strong> docking poses, with their files embedded, and the density map's settings.</li>
+      </ul>
+
+      <h3 id="session-refetch">What is fetched or computed again</h3>
+      <p>Some results are not stored in the file. When the session opens:</p>
+      <ul>
+        <li>solvent accessibility, PAE domains, validation reports and AlphaMissense are recomputed or fetched again;</li>
+        <li>AlphaFold DB PAE matrices are fetched again;</li>
+        <li>maps from the server are fetched again.</li>
+      </ul>
+      <div class="callout"><p><strong>Map files.</strong> A map you opened from a file on your computer is not stored in the session. Open the map file again after opening the session.</p></div>
+
+      <h2 id="links">Share a link</h2>
+      <p><strong>Copy link</strong> (or the <code>link</code> command) puts the whole session in the URL, as <code>#session=…</code>. This works when every structure was fetched or is a bundled example; when a structure came from a local file, save a session instead.</p>
+      <p>The link opens in Proteoscope at the same address and port. To open a structure from a link without a session, use a <code>#fetch=</code> link; see <a href="scripting.html#deep-links">Links that open structures</a>.</p>
+
+      <h2 id="molviewspec">Open the view in Mol*</h2>
+      <p><strong>MolViewSpec</strong> (or the <code>mvs</code> command) exports the view for the <a href="https://molstar.org/viewer/">Mol* viewer</a>. Drop the exported file onto the Mol* viewer to open it.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>File</th><th>When</th><th>Contents</th></tr></thead>
+          <tbody>
+            <tr><td><code>.mvsj</code></td><td>No structure is a local file</td><td>The view; the structures are downloaded from RCSB PDB and AlphaFold DB</td></tr>
+            <tr><td><code>.mvsx</code></td><td>Some structures are local files</td><td>An archive with the view and the files inside</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The export carries representations, per-residue colors, sticks, surfaces, labels, superposition transforms, the camera and the background. Proteoscope's lighting effects are not part of the format.</p>
+
+      <h2 id="methods">Methods paragraph</h2>
+      <p><strong>Methods</strong> (Structure tab, next to <strong>Save session</strong>) drafts a methods paragraph from what the session used:</p>
+      <ul>
+        <li>each structure's source with its ID, experimental method, resolution and revision date, or the model's database version;</li>
+        <li>each analysis with its method and parameters: superposition, interactions, surfaces, density fit, conservation, statistics and others;</li>
+        <li>the Proteoscope version.</li>
+      </ul>
+      <figure>
+        <div class="shot"><img src="../assets/img/methods.webp" width="1600" height="1000" loading="lazy" alt="The Methods and references dialog with a drafted methods paragraph for 1M17 that names the structure source, the ligand chemistry, the interaction criteria, the validation report and the density maps, followed by a numbered reference list with DOIs" /></div>
+        <figcaption>The methods paragraph drafted for a session on EGFR with erlotinib (1M17) with its validation report and density map, with numbered references and DOIs.</figcaption>
+      </figure>
+      <p>Citations are numbered, with DOIs checked against Crossref. <strong>Copy references</strong> or <strong>Download BibTeX</strong> takes them to your manuscript.</p>
+      <div class="callout"><p><strong>Check the draft.</strong> The paragraph is a starting point. Check the text against what you did before using it.</p></div>
+
+      <h2 id="cite">Citing Proteoscope</h2>
+      <p>To cite Proteoscope itself, use its <a href="https://github.com/robert-mcdermott/proteoscope/blob/main/CITATION.cff">CITATION.cff</a> file; GitHub offers it under <em>Cite this repository</em> on the <a href="https://github.com/robert-mcdermott/proteoscope">repository page</a>. See <a href="../science.html#cite">Cite Proteoscope</a> for details.</p>
+
+      <nav class="doc-pager" aria-label="Pages">
+        <a class="prev" href="proteomics.html"><span>Previous</span>Proteomics</a>
+        <a class="next" href="scripting.html"><span>Next</span>Scripting and command line</a>
+      </nav>
+    </main>
+
+    <aside class="toc" aria-label="On this page">
+      <h4>On this page</h4>
+      <ul></ul>
+    </aside>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-about">
+          <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+          <p>A 3D viewer and analysis workbench for protein structures and structural proteomics. Free and open source under the Apache License 2.0.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul>
+            <li><a href="../#features">Features</a></li>
+            <li><a href="../install.html">Install</a></li>
+            <li><a href="../science.html">Science</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/blob/main/CHANGELOG.md">Changelog</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Documentation</h4>
+          <ul>
+            <li><a href="getting-started.html">Getting started</a></li>
+            <li><a href="commands.html">Commands</a></li>
+            <li><a href="scripting.html">Scripting</a></li>
+            <li><a href="troubleshooting.html">Troubleshooting</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope">GitHub</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/releases">Releases</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/issues">Issues</a></li>
+            <li><a href="../science.html#cite">Cite Proteoscope</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">Proteoscope is licensed under the Apache License 2.0. Structures shown are from the PDB (wwPDB) and AlphaFold DB; see <a href="../science.html#credits">data credits</a>.</div>
+    </div>
+  </footer>
+</body>
+</html>

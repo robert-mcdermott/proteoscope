@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Supported files · Proteoscope</title>
+  <meta name="description" content="Every file type Proteoscope opens, and how it reads PDB, PDBx/mmCIF and BinaryCIF structures, predicted models, ligand files, density maps and proteomics files." />
+  <meta name="theme-color" content="#050708" />
+  <link rel="icon" href="../assets/img/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/css/site.css" />
+  <script>try { const t = localStorage.getItem('proteoscope-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+      <nav class="site-nav" id="site-nav" aria-label="Main">
+        <a href="../#features">Features</a>
+        <a href="./" aria-current="page">Documentation</a>
+        <a href="../install.html">Install</a>
+        <a href="../science.html">Science</a>
+      </nav>
+      <div class="header-actions">
+        <a class="icon-button" href="https://github.com/robert-mcdermott/proteoscope" aria-label="Proteoscope on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        </a>
+        <button class="icon-button theme-toggle" type="button" aria-label="Switch between light and dark">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <button class="icon-button nav-toggle" type="button" aria-label="Menu" aria-controls="site-nav" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <aside class="docs-sidebar" aria-label="Documentation">
+      <button class="btn docs-menu-toggle" type="button" aria-expanded="false">Documentation menu <span aria-hidden="true">▾</span></button>
+      <nav>
+        <h4>Start</h4>
+        <ul>
+          <li><a href="./">Overview</a></li>
+          <li><a href="getting-started.html">Getting started</a></li>
+          <li><a href="finding.html">Finding structures</a></li>
+        </ul>
+        <h4>Viewing</h4>
+        <ul>
+          <li><a href="viewing.html">Viewing and interactions</a></li>
+          <li><a href="commands.html">Selections and commands</a></li>
+          <li><a href="comparing.html">Comparing structures</a></li>
+        </ul>
+        <h4>Checking models</h4>
+        <ul>
+          <li><a href="predictions.html">Predictions and AlphaFold</a></li>
+          <li><a href="validation.html">Validation and density maps</a></li>
+          <li><a href="ligands.html">Ligands and docking</a></li>
+          <li><a href="analysis.html">Analysis</a></li>
+        </ul>
+        <h4>Your data</h4>
+        <ul>
+          <li><a href="proteomics.html">Proteomics</a></li>
+        </ul>
+        <h4>Share and automate</h4>
+        <ul>
+          <li><a href="sessions.html">Sessions, figures and methods</a></li>
+          <li><a href="scripting.html">Scripting and command line</a></li>
+        </ul>
+        <h4>Reference</h4>
+        <ul>
+          <li><a href="formats.html" aria-current="page">Supported files</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main id="main" class="doc">
+      <h1>Supported files</h1>
+      <p class="doc-lede">The files Proteoscope opens, and how it reads structure files, ligand files and density maps.</p>
+
+      <h2 id="at-a-glance">File types at a glance</h2>
+      <p>Most files can be dragged onto the window; the notes say where else to open them. Files you open are parsed in your browser and never uploaded.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Kind</th><th>Files</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Structures</strong></td><td><code>.pdb</code>, <code>.ent</code>, <code>.cif</code>, <code>.mmcif</code>, BinaryCIF <code>.bcif</code>, each optionally compressed with gzip (<code>.gz</code>) or Zstandard (<code>.zst</code>)</td><td>Click <strong>Open local file</strong>, drag onto the window, or name on the command line. Several files open together. See <a href="#pdb">below</a> for how each format is read.</td></tr>
+            <tr><td><strong>Prediction output</strong></td><td>A prediction folder, or an AlphaFold Server <code>.zip</code></td><td>AlphaFold 3 (including <code>.zst</code>-compressed outputs), AlphaFold Server, Boltz-1/2, Chai-1, ColabFold, Protenix and OpenFold3 layouts. Drop the folder or <code>.zip</code>, click <strong>Open prediction folder…</strong>, or name the folder on the command line. See <a href="predictions.html">Predictions and AlphaFold</a>.</td></tr>
+            <tr><td><strong>Predicted aligned error</strong></td><td>AlphaFold DB, AlphaFold 3 and ColabFold <code>.json</code>, Boltz <code>.npz</code>, or a NumPy <code>.npy</code> matrix</td><td>Drop onto a loaded model.</td></tr>
+            <tr><td><strong>Alignments</strong></td><td><code>.a3m</code> and <code>.a2m</code>; aligned FASTA (<code>.fasta</code>, <code>.fa</code>, <code>.faa</code>, <code>.afa</code>, <code>.mfa</code>, <code>.msa</code>); Stockholm (<code>.sto</code>, <code>.stockholm</code>); Clustal (<code>.aln</code>, <code>.clustal</code>)</td><td>Give MSA depth and conservation. For conservation, the first sequence must be the protein. See <a href="analysis.html">Analysis</a>.</td></tr>
+            <tr><td><strong>Docking poses</strong></td><td><code>.sdf</code>, <code>.sd</code> and <code>.mol</code> (V2000 and V3000), <code>.mol2</code>, <code>.pdbqt</code></td><td>Open or drop with the receptor active; the molecules become poses in it. See <a href="ligands.html">Ligands and docking</a>.</td></tr>
+            <tr><td><strong>Density maps</strong></td><td><code>.map</code>, <code>.mrc</code>, <code>.ccp4</code>, optionally gzipped</td><td>Open or drop with the structure active, or use <strong>Open a map file…</strong>. See <a href="validation.html">Validation and density maps</a>.</td></tr>
+            <tr><td><strong>Sessions</strong></td><td><code>.proteoscope.json</code></td><td>Open like any file, or drop on the window. See <a href="sessions.html">Sessions, figures and methods</a>.</td></tr>
+            <tr><td><strong>Search reports</strong></td><td>MaxQuant, DIA-NN (TSV or Parquet), Spectronaut, FragPipe, mzTab and Proteome Discoverer</td><td>Open in the Proteomics tab or drop on the window. See <a href="#proteomics">Proteomics files</a>.</td></tr>
+            <tr><td><strong>Cross-links</strong></td><td>Exports of xiFDR, xiVIEW, pLink 2/3, MeroX, XlinkX, MS Annika and MaxLynx, or a CSV of residue pairs</td><td>See <a href="#proteomics">Proteomics files</a>.</td></tr>
+            <tr><td><strong>HDX-MS</strong></td><td>DynamX, HDExaminer, or an HDX data table in the community format</td><td>See <a href="#proteomics">Proteomics files</a>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout"><p><strong>Open the structure first.</strong> Docking poses, maps, alignments and PAE files open into the active structure, so open the receptor or model before them. Validation reports and PDFs are not coordinate files; <strong>Load report</strong> fetches the wwPDB validation report of a PDB entry for you.</p></div>
+
+      <h2 id="pdb">Legacy PDB</h2>
+      <p>From PDB-format files (<code>.pdb</code>, <code>.ent</code>), Proteoscope reads:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Records</th><th>What is read</th></tr></thead>
+          <tbody>
+            <tr><td>Atom records, <code>MODEL</code>/<code>ENDMDL</code></td><td>Coordinates and models</td></tr>
+            <tr><td><code>HELIX</code>/<code>SHEET</code></td><td>Secondary structure</td></tr>
+            <tr><td><code>CONECT</code>, <code>SSBOND</code></td><td>Bonds and disulfides</td></tr>
+            <tr><td><code>HEADER</code>, <code>TITLE</code>, <code>COMPND</code>, <code>SOURCE</code>, <code>EXPDTA</code>, <code>KEYWDS</code></td><td>Header metadata</td></tr>
+            <tr><td><code>REMARK 2</code>, <code>REMARK 3</code></td><td>Resolution and R-free</td></tr>
+            <tr><td><code>REMARK 350</code></td><td>Biological assemblies</td></tr>
+            <tr><td><code>SEQRES</code></td><td>The deposited sequence</td></tr>
+            <tr><td><code>DBREF</code>/<code>DBREF1</code>/<code>DBREF2</code></td><td>UniProt mappings</td></tr>
+            <tr><td>Element columns</td><td>Elements and formal charges</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>When the element column is missing, the element is inferred from the PDB atom-name alignment, so an alpha carbon is never mistaken for calcium.</p>
+
+      <h2 id="mmcif">PDBx/mmCIF</h2>
+      <p>From PDBx/mmCIF files (<code>.cif</code>, <code>.mmcif</code>), Proteoscope reads:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Categories</th><th>What is read</th></tr></thead>
+          <tbody>
+            <tr><td><code>_atom_site</code></td><td>Coordinates, with author and label identifiers, entity IDs, models and formal charges</td></tr>
+            <tr><td><code>_entity</code>, <code>_entity_poly</code>, <code>_entity_poly_seq</code></td><td>Entities and polymer sequences</td></tr>
+            <tr><td><code>_struct_conf</code>, <code>_struct_sheet_range</code></td><td>Secondary structure</td></tr>
+            <tr><td><code>_struct_conn</code></td><td>Bonds: only covalent, disulfide and metal-coordination records become bonds</td></tr>
+            <tr><td><code>_pdbx_struct_assembly*</code>, <code>_pdbx_struct_oper_list</code></td><td>Biological assemblies</td></tr>
+            <tr><td><code>_struct_ref</code>, <code>_struct_ref_seq</code></td><td>UniProt numbering</td></tr>
+            <tr><td><code>_refine</code>, <code>_reflns</code>, <code>_em_3d_reconstruction</code></td><td>Resolution and R-factors</td></tr>
+            <tr><td>Organism and deposition-date categories</td><td>Organism and deposition date</td></tr>
+            <tr><td>ModelCIF <code>_ma_qa_metric_local</code></td><td>Per-residue pLDDT</td></tr>
+            <tr><td><code>_chem_comp_atom</code>, <code>_chem_comp_bond</code></td><td>Ligand bond orders, aromaticity and charges</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="bcif">BinaryCIF</h2>
+      <p>BinaryCIF (<code>.bcif</code>), as served by RCSB's and PDBe's model servers, is decoded in the browser and read like PDBx/mmCIF.</p>
+
+      <h2 id="predicted-models">Predicted models</h2>
+      <p>A structure is treated as a predicted model when it is recognized from:</p>
+      <ul>
+        <li>ModelCIF records;</li>
+        <li>the method and software names: AlphaFold, ColabFold, ESMFold, Boltz, Chai-1 or OpenFold;</li>
+        <li>Protenix's data block name.</li>
+      </ul>
+      <p>Every model opened from a prediction folder is one too. For predicted models, the B-factor column is read as pLDDT, rescaled when a predictor writes it on a 0–1 scale. ModelCIF confidences on a 0–1 scale (SWISS-MODEL) are rescaled too.</p>
+
+      <h2 id="interpretation">How structures are interpreted</h2>
+      <ul>
+        <li><strong>Format.</strong> The file name decides between PDB and PDBx/mmCIF, except that a file named <code>.cif</code> without a data block but with PDB atom records is read as PDB.</li>
+        <li><strong>Chain and residue identifiers.</strong> Author chain and residue IDs are used for display.</li>
+        <li><strong>Alternate conformers.</strong> The highest-occupancy conformer is kept.</li>
+        <li><strong>Bonds</strong> come from explicit records plus geometry, using element covalent radii. The geometric step also finds inter-chain disulfides and metal coordination.</li>
+        <li><strong>Bond orders</strong> come from the Chemical Component Dictionary, and from duplicated <code>CONECT</code> records in PDB files.</li>
+      </ul>
+
+      <h2 id="ligand-files">Ligand files</h2>
+      <p>SDF and molfiles (V2000 and V3000), MOL2 and PDBQT are read for docking poses. Open one with the receptor active and its molecules become poses in the receptor. Scores are read from:</p>
+      <ul>
+        <li>SD properties: Vina, smina and GNINA affinities and CNN scores, Glide, GOLD and rDock;</li>
+        <li>DOCK's MOL2 comments;</li>
+        <li>Vina's PDBQT remarks;</li>
+        <li>DiffDock's file names, such as <code>rank1_confidence-0.52.sdf</code>.</li>
+      </ul>
+      <p>See <a href="ligands.html">Ligands and docking</a> for working with poses.</p>
+
+      <h2 id="maps">Density maps</h2>
+      <p>Proteoscope reads CCP4 and MRC 2014 maps (<code>.map</code>, <code>.mrc</code>, <code>.ccp4</code>, optionally gzipped):</p>
+      <ul>
+        <li>modes 0, 1, 2, 6 and 12;</li>
+        <li>any axis order;</li>
+        <li>either byte order.</li>
+      </ul>
+      <p>It also reads the PDBe volume server's BinaryCIF. To load the map of a PDB entry rather than a file, see <a href="validation.html">Validation and density maps</a>.</p>
+
+      <h2 id="proteomics">Proteomics files</h2>
+      <p>Proteomics files are read in the browser, and your data is never uploaded. See <a href="proteomics.html">Proteomics</a> for what Proteoscope does with each.</p>
+
+      <h3 id="search-reports">Search reports</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tool</th><th>Files</th></tr></thead>
+          <tbody>
+            <tr><td><strong>MaxQuant</strong></td><td><code>evidence.txt</code>, <code>peptides.txt</code>, site tables such as <code>Phospho (STY)Sites.txt</code></td></tr>
+            <tr><td><strong>DIA-NN</strong></td><td><code>report.tsv</code>, <code>report.parquet</code> (1.9 and 2.x), <code>pr_matrix.tsv</code>, site reports</td></tr>
+            <tr><td><strong>Spectronaut</strong></td><td>Normal and PTM site reports</td></tr>
+            <tr><td><strong>FragPipe</strong></td><td><code>psm.tsv</code>, peptide and site tables</td></tr>
+            <tr><td><strong>mzTab</strong></td><td>Peptide (PEP) and PSM sections, with modification probabilities</td></tr>
+            <tr><td><strong>Proteome Discoverer</strong></td><td>PSM and peptide group exports with ptmRS probabilities</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Proteoscope keeps the rows of the active structure's proteins, matched by UniProt accession or by sequence, so a multi-gigabyte report of a whole proteome is streamed rather than loaded. Semicolon-separated exports with decimal commas are read as such.</p>
+
+      <h3 id="crosslink-files">Cross-links</h3>
+      <ul>
+        <li>The export of xiFDR, xiVIEW, pLink 2/3, MeroX, XlinkX (Proteome Discoverer), MS Annika or MaxLynx.</li>
+        <li>CSV with Protein1, Residue1, Protein2 and Residue2 columns.</li>
+        <li>Pasted links such as <code>A:K123-B:K45</code>.</li>
+      </ul>
+
+      <h3 id="hdx-files">HDX-MS</h3>
+      <ul>
+        <li>DynamX state or cluster data.</li>
+        <li>HDExaminer results or uptake summaries.</li>
+        <li>An HDX data table in the community format (Masson et al. 2019).</li>
+      </ul>
+
+      <h3 id="pasted-data">Pasted data</h3>
+      <p>Some inputs are typed or pasted rather than opened: peptide lists (one per line, with an optional value), sites and variants such as <code>R175H</code> or <code>pS15</code>, and custom per-residue data as <code>chain,residue,value</code> rows.</p>
+
+      <nav class="doc-pager" aria-label="Pages">
+        <a class="prev" href="scripting.html"><span>Previous</span>Scripting and command line</a>
+        <a class="next" href="troubleshooting.html"><span>Next</span>Troubleshooting</a>
+      </nav>
+    </main>
+
+    <aside class="toc" aria-label="On this page">
+      <h4>On this page</h4>
+      <ul></ul>
+    </aside>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-about">
+          <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+          <p>A 3D viewer and analysis workbench for protein structures and structural proteomics. Free and open source under the Apache License 2.0.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul>
+            <li><a href="../#features">Features</a></li>
+            <li><a href="../install.html">Install</a></li>
+            <li><a href="../science.html">Science</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/blob/main/CHANGELOG.md">Changelog</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Documentation</h4>
+          <ul>
+            <li><a href="getting-started.html">Getting started</a></li>
+            <li><a href="commands.html">Commands</a></li>
+            <li><a href="scripting.html">Scripting</a></li>
+            <li><a href="troubleshooting.html">Troubleshooting</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope">GitHub</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/releases">Releases</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/issues">Issues</a></li>
+            <li><a href="../science.html#cite">Cite Proteoscope</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">Proteoscope is licensed under the Apache License 2.0. Structures shown are from the PDB (wwPDB) and AlphaFold DB; see <a href="../science.html#credits">data credits</a>.</div>
+    </div>
+  </footer>
+</body>
+</html>

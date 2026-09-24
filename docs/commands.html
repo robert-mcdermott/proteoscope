@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Selections and commands · Proteoscope</title>
+  <meta name="description" content="The Proteoscope selection language and a complete reference of the commands you can type in the search box." />
+  <meta name="theme-color" content="#050708" />
+  <link rel="icon" href="../assets/img/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/css/site.css" />
+  <script>try { const t = localStorage.getItem('proteoscope-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+      <nav class="site-nav" id="site-nav" aria-label="Main">
+        <a href="../#features">Features</a>
+        <a href="./" aria-current="page">Documentation</a>
+        <a href="../install.html">Install</a>
+        <a href="../science.html">Science</a>
+      </nav>
+      <div class="header-actions">
+        <a class="icon-button" href="https://github.com/robert-mcdermott/proteoscope" aria-label="Proteoscope on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        </a>
+        <button class="icon-button theme-toggle" type="button" aria-label="Switch between light and dark">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <button class="icon-button nav-toggle" type="button" aria-label="Menu" aria-controls="site-nav" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <aside class="docs-sidebar" aria-label="Documentation">
+      <button class="btn docs-menu-toggle" type="button" aria-expanded="false">Documentation menu <span aria-hidden="true">▾</span></button>
+      <nav>
+        <h4>Start</h4>
+        <ul>
+          <li><a href="./">Overview</a></li>
+          <li><a href="getting-started.html">Getting started</a></li>
+          <li><a href="finding.html">Finding structures</a></li>
+        </ul>
+        <h4>Viewing</h4>
+        <ul>
+          <li><a href="viewing.html">Viewing and interactions</a></li>
+          <li><a href="commands.html" aria-current="page">Selections and commands</a></li>
+          <li><a href="comparing.html">Comparing structures</a></li>
+        </ul>
+        <h4>Checking models</h4>
+        <ul>
+          <li><a href="predictions.html">Predictions and AlphaFold</a></li>
+          <li><a href="validation.html">Validation and density maps</a></li>
+          <li><a href="ligands.html">Ligands and docking</a></li>
+          <li><a href="analysis.html">Analysis</a></li>
+        </ul>
+        <h4>Your data</h4>
+        <ul>
+          <li><a href="proteomics.html">Proteomics</a></li>
+        </ul>
+        <h4>Share and automate</h4>
+        <ul>
+          <li><a href="sessions.html">Sessions, figures and methods</a></li>
+          <li><a href="scripting.html">Scripting and command line</a></li>
+        </ul>
+        <h4>Reference</h4>
+        <ul>
+          <li><a href="formats.html">Supported files</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main id="main" class="doc">
+      <h1>Selections and commands</h1>
+      <p class="doc-lede">The search box finds residues and atoms, and it is also a command line. This page covers the selection language and every command.</p>
+
+      <h2 id="command-line">The search box is a command line</h2>
+      <p>Press <kbd>/</kbd> to jump to the search box in the top bar.</p>
+      <ul>
+        <li><strong>Type a selection</strong> and Proteoscope previews the match live, for example "22 residues, 108 atoms". Press <kbd>Enter</kbd> to select and frame it.</li>
+        <li><strong>Type a command</strong> and press <kbd>Enter</kbd> to run it.</li>
+        <li><kbd>↑</kbd> and <kbd>↓</kbd> recall earlier commands, and <kbd>Tab</kbd> completes a command name.</li>
+        <li>The help dialog (<kbd>?</kbd>, or the <code>help</code> command) lists the syntax of each command.</li>
+      </ul>
+      <figure>
+        <div class="shot"><img src="../assets/img/command-line.webp" width="1600" height="1000" loading="lazy" alt="Erlotinib in the EGFR kinase pocket (1M17) styled from the command line, with side-chain sticks within 4.5 Å, the hinge hydrogen bond from Met769 measured at 2.70 Å, and a live selection preview in the search box" /></div>
+        <figcaption>Erlotinib in the EGFR kinase pocket (1M17), styled from the command line: side-chain sticks within 4.5 Å, the hinge hydrogen bond from Met769 measured at 2.70 Å, and a live selection preview in the search box.</figcaption>
+      </figure>
+
+      <h2 id="examples">Examples</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Type</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td><code>chain A and resi 40-80</code></td><td>Selects residues 40–80 of chain A.</td></tr>
+            <tr><td><code>within 5 of resn STI</code></td><td>Everything within 5 Å of imatinib.</td></tr>
+            <tr><td><code>show sticks byres (within 4.5 of ligand) and protein</code></td><td>Side-chain sticks around every ligand, on the cartoon.</td></tr>
+            <tr><td><code>color magenta /A:315</code></td><td>Colors residue 315 of chain A.</td></tr>
+            <tr><td><code>hide water</code></td><td>Hides the solvent.</td></tr>
+            <tr><td><code>hide chain B</code></td><td>Hides a chain.</td></tr>
+            <tr><td><code>show everything</code></td><td>Shows everything again.</td></tr>
+            <tr><td><code>distance /A:769@N to :AQ4@N2</code></td><td>The hinge hydrogen bond to erlotinib in 1M17 (2.70 Å).</td></tr>
+            <tr><td><code>superpose 1AKE onto 4AKE fit /A:1-29+60-121+160-214</code></td><td>Fits on the adenylate kinase CORE domain.</td></tr>
+            <tr><td><code>select deviation &gt; 5</code></td><td>Residues that moved more than 5 Å after superposing.</td></tr>
+            <tr><td><code>focus resn HEM and chain A</code></td><td>Focuses a ligand.</td></tr>
+            <tr><td><code>label sele</code></td><td>Labels the selection.</td></tr>
+            <tr><td><code>zoom #2</code></td><td>Frames a structure.</td></tr>
+            <tr><td><code>tmalign 1A5R onto 1UBQ</code></td><td>Superposes SUMO-1 on ubiquitin by structure alone.</td></tr>
+            <tr><td><code>map load</code>, <code>map level 1.2</code>, <code>map fit</code></td><td>Loads the density map, contours it at 1.2σ, and fits the model.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="selection-language">Selection language</h2>
+      <p>Selections use PyMOL-style keywords with ChimeraX-style atom specs. Type one on its own in the search box, or use it in any command that takes a selection.</p>
+
+      <h3 id="identifiers">Identifiers</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Keyword</th><th>Example</th><th>Matches</th></tr></thead>
+          <tbody>
+            <tr><td><strong>chain</strong></td><td><code>chain A+B</code></td><td>Chains A and B.</td></tr>
+            <tr><td><strong>resi</strong></td><td><code>resi 40-80+100A</code></td><td>Residue numbers, in author numbering with insertion codes.</td></tr>
+            <tr><td><strong>resn</strong></td><td><code>resn STI</code></td><td>Residue names.</td></tr>
+            <tr><td><strong>name</strong></td><td><code>name CA</code></td><td>Atom names.</td></tr>
+            <tr><td><strong>elem</strong></td><td><code>elem FE</code></td><td>Elements.</td></tr>
+            <tr><td><strong>uniprot</strong></td><td><code>uniprot 175</code></td><td>Residues in UniProt numbering.</td></tr>
+            <tr><td><strong>ss</strong></td><td><code>ss helix</code></td><td>Secondary structure: <code>helix</code>, <code>sheet</code>, <code>turn</code> or <code>coil</code> (DSSP letters such as <code>h</code> and <code>e</code> work too).</td></tr>
+            <tr><td><strong>entity</strong></td><td><code>entity 1</code></td><td>Entity IDs of the structure file.</td></tr>
+            <tr><td><strong>model</strong></td><td><code>model 1</code></td><td>Models of an ensemble.</td></tr>
+            <tr><td><strong>id</strong>, <strong>serial</strong></td><td><code>id 1234</code></td><td>Atom serial numbers.</td></tr>
+            <tr><td><strong>#</strong>, <strong>structure</strong></td><td><code>#2</code>, <code>structure 1AKE</code></td><td>A structure in the scene.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Identifiers accept <code>*</code> wildcards.</p>
+
+      <h3 id="atom-specs">Atom specs</h3>
+      <p>Atom specs name chains, residues and atoms in one compact form:</p>
+      <ul>
+        <li><code>/A:40-80@CA,CB</code>: chain A, residues 40 to 80, atoms CA and CB;</li>
+        <li><code>/A:315</code>: residue 315 of chain A;</li>
+        <li><code>:HEM</code> or <code>:AQ4@N2</code>: a residue by name, or one of its atoms;</li>
+        <li><code>#2/B</code>: chain B of structure 2.</li>
+      </ul>
+
+      <h3 id="classes">Classes</h3>
+      <p><code>protein</code>, <code>nucleic</code>, <code>polymer</code>, <code>ligand</code>, <code>ion</code>, <code>metal</code>, <code>water</code>, <code>hetatm</code>, <code>hydrogen</code>, <code>backbone</code>, <code>sidechain</code>, <code>helix</code>, <code>sheet</code>, <code>turn</code> and <code>coil</code>, and <code>all</code> and <code>none</code>.</p>
+
+      <h3 id="logic">Logic and neighborhoods</h3>
+      <ul>
+        <li><strong>Logic:</strong> <code>and</code>, <code>or</code>, <code>not</code> and parentheses. Words next to each other mean "and", so <code>chain A ligand</code> is the same as <code>chain A and ligand</code>.</li>
+        <li><strong>Neighborhoods:</strong> <code>within 5 of X</code> is everything within 5 Å of X; <code>around 5 of X</code> is the same but excludes X; <code>beyond 10 of X</code> is everything farther than 10 Å from X.</li>
+        <li><strong>Expansion:</strong> <code>byres X</code> and <code>bychain X</code> expand X to whole residues or whole chains.</li>
+      </ul>
+      <p>Distances reach across structures, so <code>within 5 of (#1 and ligand)</code> finds residues of a superposed structure near another structure's ligand.</p>
+
+      <h3 id="values">Values</h3>
+      <p>Select by a number with a comparison, as in these examples:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Example</th><th>Value</th></tr></thead>
+          <tbody>
+            <tr><td><code>b &gt; 60</code></td><td>B-factor.</td></tr>
+            <tr><td><code>q &lt; 1</code></td><td>Occupancy.</td></tr>
+            <tr><td><code>plddt &lt; 70</code></td><td>AlphaFold confidence (pLDDT).</td></tr>
+            <tr><td><code>deviation &gt; 2</code></td><td>Cα distance to the aligned residue after superposition, in Å.</td></tr>
+            <tr><td><code>lddt &lt; 0.7</code></td><td>Local agreement (lDDT) with the compared structure.</td></tr>
+            <tr><td><code>rmsf &gt; 2</code></td><td>RMSF across overlaid models.</td></tr>
+            <tr><td><code>rsa &gt; 0.4</code></td><td>Relative solvent accessibility, after <strong>Compute SASA</strong>.</td></tr>
+            <tr><td><code>ppse &lt; 6</code></td><td>Part-sphere exposure (pPSE).</td></tr>
+            <tr><td><code>am &gt; 0.564</code></td><td>AlphaMissense pathogenicity.</td></tr>
+            <tr><td><code>msa &lt; 30</code></td><td>MSA depth.</td></tr>
+            <tr><td><code>rsrz &gt; 2</code>, <code>rscc &lt; 0.8</code>, <code>qscore &lt; 0.4</code></td><td>Fit to density, from the wwPDB validation report.</td></tr>
+            <tr><td><code>conservation &gt; 0.6</code>, <code>grade &gt;= 8</code></td><td>Conservation score and grade.</td></tr>
+            <tr><td><code>mapfit &lt; 1</code></td><td>Fit to a loaded density map.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="sets">Named sets</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Set</th><th>Contains</th></tr></thead>
+          <tbody>
+            <tr><td><code>sele</code></td><td>The current selection.</td></tr>
+            <tr><td><code>focus</code></td><td>The focused residue or ligand.</td></tr>
+            <tr><td><code>sites</code></td><td>Proteomics sites.</td></tr>
+            <tr><td><code>covered</code></td><td>Residues covered by peptides.</td></tr>
+            <tr><td><code>aligned</code></td><td>Residues paired in a comparison.</td></tr>
+            <tr><td><code>outliers</code></td><td>Outliers from the validation report.</td></tr>
+            <tr><td><code>idr</code></td><td>Disordered regions, after the pPSE analysis.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="reference">Command reference</h2>
+      <p>Every command, grouped by what it does. In the syntax, <code>&lt;…&gt;</code> is a value you fill in, <code>[…]</code> is optional, and <code>|</code> separates alternatives. Where a command has other names, they are listed after its description; they work the same way.</p>
+
+      <h3 id="cmd-select">Selecting and framing</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>Syntax</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><strong>select</strong></td><td><code>select &lt;selection&gt;</code></td><td>Selects the residues that match a selection. Also <code>sele</code>, <code>sel</code>.</td></tr>
+            <tr><td><strong>zoom</strong></td><td><code>zoom [&lt;selection&gt;]</code></td><td>Frames the selection, or everything. Also <code>view</code>, <code>frame</code>.</td></tr>
+            <tr><td><strong>orient</strong></td><td><code>orient [&lt;selection&gt;]</code></td><td>Frames along the principal axes of the selection.</td></tr>
+            <tr><td><strong>focus</strong></td><td><code>focus &lt;selection&gt;</code></td><td>Focuses residues or a ligand: side chains within 5 Å and interactions.</td></tr>
+            <tr><td><strong>label</strong></td><td><code>label [&lt;selection&gt;]</code></td><td>Labels residues (the selection by default).</td></tr>
+            <tr><td><strong>unlabel</strong></td><td><code>unlabel [&lt;selection&gt;]</code></td><td>Removes labels.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="cmd-style">Styling</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>Syntax</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><strong>show</strong></td><td><code>show &lt;sticks|<wbr />ball-stick|<wbr />spheres|<wbr />cartoon|<wbr />surface|<wbr />water|<wbr />hydrogens&gt; [&lt;selection&gt;]</code></td><td>Shows a representation, for a selection or everywhere. <code>show everything</code> shows everything again.</td></tr>
+            <tr><td><strong>hide</strong></td><td><code>hide [&lt;representation&gt;|<wbr />everything] [&lt;selection&gt;]</code></td><td>Hides residues or a representation, for example <code>hide water</code> or <code>hide chain B</code>.</td></tr>
+            <tr><td><strong>color</strong></td><td><code>color &lt;color|<wbr />scheme|<wbr />default&gt; [&lt;selection&gt;]</code></td><td>Colors a selection with a name (<code>red</code>, <code>slate</code>, …) or a hex value (<code>#ff8800</code>), applies a scheme (<code>chain</code>, <code>plddt</code>, <code>deviation</code>, …), or returns to the default colors. Schemes apply to whole structures, so use them without a selection. Also <code>colour</code>.</td></tr>
+            <tr><td><strong>preset</strong></td><td><code>preset &lt;cartoon|<wbr />ball-stick|<wbr />sticks|<wbr />spacefill|<wbr />trace|<wbr />surface&gt;</code></td><td>Applies a representation preset. Also <code>style</code>, <code>rep</code>.</td></tr>
+            <tr><td><strong>lighting</strong></td><td><code>lighting &lt;standard|<wbr />soft|<wbr />illustrative|<wbr />glossy|<wbr />neon|<wbr />flat&gt;</code></td><td>Applies a lighting preset. See <a href="viewing.html#lighting">Lighting and effects</a>. Also <code>light</code>.</td></tr>
+            <tr><td><strong>bg</strong></td><td><code>bg &lt;dark|<wbr />black|<wbr />gray|<wbr />white&gt;</code></td><td>Sets the background. Also <code>background</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="cmd-structures">Opening and managing structures</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>Syntax</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><strong>fetch</strong></td><td><code>fetch &lt;PDB ID|<wbr />UniProt accession&gt;</code></td><td>Fetches a structure, replacing the scene. Also <code>open</code>, <code>load</code>.</td></tr>
+            <tr><td><strong>add</strong></td><td><code>add &lt;PDB ID|<wbr />UniProt accession&gt;</code></td><td>Fetches a structure and adds it to the scene.</td></tr>
+            <tr><td><strong>search</strong></td><td><code>search &lt;gene|<wbr />protein|<wbr />UniProt|<wbr />keywords|<wbr />sequence&gt;</code></td><td>Finds structures and models in RCSB PDB, UniProt, PDBe and 3D-Beacons. See <a href="finding.html">Finding structures</a>. Also <code>lookup</code>, <code>discover</code>.</td></tr>
+            <tr><td><strong>example</strong></td><td><code>example [add] [&lt;id&gt;]</code></td><td>Opens a bundled example with its opening view. With <code>add</code>, adds it next to the open structures, without the view. With no ID, lists them. Also <code>examples</code>, <code>sample</code>, <code>demo</code>.</td></tr>
+            <tr><td><strong>list</strong></td><td><code>list</code></td><td>Lists the structures in the scene. Also <code>structures</code>, <code>ls</code>.</td></tr>
+            <tr><td><strong>activate</strong></td><td><code>activate &lt;structure&gt;</code></td><td>Makes a structure the active one. Also <code>use</code>.</td></tr>
+            <tr><td><strong>remove</strong></td><td><code>remove &lt;structure&gt;</code></td><td>Removes a structure from the scene. Also <code>delete</code>, <code>close</code>.</td></tr>
+            <tr><td><strong>refresh</strong></td><td><code>refresh</code></td><td>Downloads the active structure again, bypassing the cache. Also <code>reload</code>.</td></tr>
+            <tr><td><strong>assembly</strong></td><td><code>assembly [&lt;id&gt;|<wbr />au]</code></td><td>Builds a biological assembly of the active structure (<code>au</code>: the asymmetric unit), or lists them. Also <code>assemblies</code>, <code>biounit</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="cmd-compare">Comparing structures and predictions</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>Syntax</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><strong>superpose</strong></td><td><code>superpose &lt;moving|<wbr />all&gt; [onto &lt;reference&gt;] [fit &lt;selection&gt;]</code></td><td>Superposes structures and reports RMSD, TM-score and lDDT. <code>fit</code> sets the residues to fit on. See <a href="comparing.html">Comparing structures</a>. Also <code>super</code>, <code>align</code>, <code>matchmaker</code>, <code>mm</code>.</td></tr>
+            <tr><td><strong>tmalign</strong></td><td><code>tmalign &lt;moving|<wbr />all&gt; [onto &lt;reference&gt;]</code></td><td>Superposes by structure alone (TM-align; MM-align for complexes), for remote homologs and different complexes. Also <code>usalign</code>, <code>structalign</code>, <code>tm-align</code>.</td></tr>
+            <tr><td><strong>alphafold</strong></td><td><code>alphafold</code></td><td>Compares the active structure with its AlphaFold DB model. Also <code>af</code>.</td></tr>
+            <tr><td><strong>overlay</strong></td><td><code>overlay [on|<wbr />off]</code></td><td>Overlays all models of an ensemble.</td></tr>
+            <tr><td><strong>ranking</strong></td><td><code>ranking [&lt;rank&gt;]</code></td><td>Lists the models of an opened prediction, or shows the one at a rank. See <a href="predictions.html">Predictions and AlphaFold</a>. Also <code>models</code>, <code>predictions</code>.</td></tr>
+            <tr><td><strong>domains</strong></td><td><code>domains</code></td><td>Finds rigid domains in the PAE matrix and colors by them. Also <code>paedomains</code>.</td></tr>
+            <tr><td><strong>msa</strong></td><td><code>msa</code></td><td>Colors by MSA depth (AlphaFold DB models, prediction folders, dropped <code>.a3m</code> files).</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="cmd-validation">Validation, maps and docking</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>Syntax</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><strong>validate</strong></td><td><code>validate [clashes|<wbr />fit|<wbr />refresh|<wbr />off]</code></td><td>Loads the wwPDB validation report and colors outliers, shows clashes or density fit. See <a href="validation.html">Validation and density maps</a>. Also <code>validation</code>, <code>report</code>.</td></tr>
+            <tr><td><strong>map</strong></td><td><code>map [load|<wbr />refresh|<wbr />fit|<wbr />off]</code><br /><code>map level &lt;σ&gt; [2fofc|<wbr />fofc|<wbr />em]</code><br /><code>map style mesh|<wbr />surface</code><br /><code>map region focus|<wbr />view|<wbr />all</code><br /><code>map radius &lt;Å&gt;</code><br /><code>map zone &lt;Å&gt;|<wbr />off</code></td><td>Loads the X-ray or cryo-EM map of a PDB entry, contours it, and fits the model to it. Also <code>density</code>, <code>volume</code>.</td></tr>
+            <tr><td><strong>pose</strong></td><td><code>pose [&lt;n&gt;|<wbr />next|<wbr />previous|<wbr />fingerprints|<wbr />off]</code></td><td>Shows a docking pose (opened from SDF, MOL2 or PDBQT), computes interaction fingerprints, or removes the poses. See <a href="ligands.html">Ligands and docking</a>. Also <code>poses</code>, <code>docking</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="cmd-analysis">Analysis and proteomics</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>Syntax</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><strong>interface</strong></td><td><code>interface &lt;chain&gt; &lt;chain&gt;</code></td><td>Lists the contacts between two chains and frames their interface. Also <code>contacts</code>.</td></tr>
+            <tr><td><strong>conservation</strong></td><td><code>conservation [jsd|<wbr />entropy|<wbr />off]</code></td><td>Colors by conservation from the prediction's MSA, AlphaFold DB's, or a dropped alignment (Jensen–Shannon divergence, ConSurf-style grades). Also <code>consurf</code>, <code>conserved</code>.</td></tr>
+            <tr><td><strong>missense</strong></td><td><code>missense [&lt;UniProt accession&gt;]</code></td><td>Colors by AlphaMissense pathogenicity (human proteins). Also <code>alphamissense</code>, <code>am</code>.</td></tr>
+            <tr><td><strong>exposure</strong></td><td><code>exposure</code></td><td>Computes part-sphere exposure (pPSE) and disorder as in StructureMap, and colors by pPSE. Also <code>ppse</code>, <code>structuremap</code>.</td></tr>
+            <tr><td><strong>evidence</strong></td><td><code>evidence</code></td><td>Loads public peptides and PTM sites (EBI Proteins API) and colors their coverage. See <a href="proteomics.html">Proteomics</a>. Also <code>public</code>, <code>peptideatlas</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="cmd-view">View, measure and save</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>Syntax</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><strong>distance</strong></td><td><code>distance &lt;atom&gt; to &lt;atom&gt;</code></td><td>Measures the distance between two atoms. Also <code>dist</code>, <code>measure</code>.</td></tr>
+            <tr><td><strong>turn</strong></td><td><code>turn &lt;x|<wbr />y|<wbr />z&gt; [degrees]</code></td><td>Rotates the view about a screen axis, by 90° unless you give an angle. Also <code>rotate</code>.</td></tr>
+            <tr><td><strong>spin</strong></td><td><code>spin [on|<wbr />off]</code></td><td>Spins the view; on its own, turns spinning on or off.</td></tr>
+            <tr><td><strong>reset</strong></td><td><code>reset</code></td><td>Resets the view.</td></tr>
+            <tr><td><strong>png</strong></td><td><code>png [1-4] [transparent]</code></td><td>Saves an image at 1× to 4× (2× unless you give a scale), optionally with a transparent background. Also <code>image</code>, <code>snapshot</code>, <code>export</code>.</td></tr>
+            <tr><td><strong>save</strong></td><td><code>save</code></td><td>Saves the session as a file. See <a href="sessions.html">Sessions, figures and methods</a>. Also <code>session</code>.</td></tr>
+            <tr><td><strong>link</strong></td><td><code>link</code></td><td>Copies a link that reopens this view. Also <code>share</code>.</td></tr>
+            <tr><td><strong>mvs</strong></td><td><code>mvs</code></td><td>Exports the view as MolViewSpec for Mol*. Also <code>molviewspec</code>.</td></tr>
+            <tr><td><strong>help</strong></td><td><code>help [command]</code></td><td>Lists commands. Also <code>?</code>, <code>commands</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="selection-card">Styling from the Selection card</h2>
+      <p>You do not have to type to style residues. <strong>Sticks</strong>, <strong>Color</strong>, <strong>Hide</strong> and <strong>Reset</strong> on the <strong>Selection</strong> card apply to the selected residues, and <strong>All</strong> in the Chains card shows hidden residues again. See <a href="viewing.html#selection">Selection, focus and interactions</a>.</p>
+
+      <h2 id="scripting">Running commands from scripts</h2>
+      <p>Every command also runs from code. In the browser console, <code>proteoscope.run()</code> executes a command and returns <code>{ ok, message, data }</code>:</p>
+      <div class="code"><span class="code-label">js</span><pre><code>await proteoscope.run('show sticks byres (within 4.5 of resn STI) and protein');</code></pre></div>
+      <p>From Python or Jupyter, start Proteoscope with <code>--remote-control</code> and send the same commands over HTTP. See <a href="scripting.html">Scripting and command line</a>.</p>
+
+      <nav class="doc-pager" aria-label="Pages">
+        <a class="prev" href="viewing.html"><span>Previous</span>Viewing and interactions</a>
+        <a class="next" href="comparing.html"><span>Next</span>Comparing structures</a>
+      </nav>
+    </main>
+
+    <aside class="toc" aria-label="On this page">
+      <h4>On this page</h4>
+      <ul></ul>
+    </aside>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-about">
+          <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+          <p>A 3D viewer and analysis workbench for protein structures and structural proteomics. Free and open source under the Apache License 2.0.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul>
+            <li><a href="../#features">Features</a></li>
+            <li><a href="../install.html">Install</a></li>
+            <li><a href="../science.html">Science</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/blob/main/CHANGELOG.md">Changelog</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Documentation</h4>
+          <ul>
+            <li><a href="getting-started.html">Getting started</a></li>
+            <li><a href="commands.html">Commands</a></li>
+            <li><a href="scripting.html">Scripting</a></li>
+            <li><a href="troubleshooting.html">Troubleshooting</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope">GitHub</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/releases">Releases</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/issues">Issues</a></li>
+            <li><a href="../science.html#cite">Cite Proteoscope</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">Proteoscope is licensed under the Apache License 2.0. Structures shown are from the PDB (wwPDB) and AlphaFold DB; see <a href="../science.html#credits">data credits</a>.</div>
+    </div>
+  </footer>
+</body>
+</html>

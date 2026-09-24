@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Documentation · Proteoscope</title>
+  <meta name="description" content="The Proteoscope user guide: viewing, comparing and checking structures, predicted complexes, density maps, docking, proteomics, sessions and scripting." />
+  <meta name="theme-color" content="#050708" />
+  <link rel="icon" href="../assets/img/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/css/site.css" />
+  <script>try { const t = localStorage.getItem('proteoscope-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+      <nav class="site-nav" id="site-nav" aria-label="Main">
+        <a href="../#features">Features</a>
+        <a href="./" aria-current="page">Documentation</a>
+        <a href="../install.html">Install</a>
+        <a href="../science.html">Science</a>
+      </nav>
+      <div class="header-actions">
+        <a class="icon-button" href="https://github.com/robert-mcdermott/proteoscope" aria-label="Proteoscope on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        </a>
+        <button class="icon-button theme-toggle" type="button" aria-label="Switch between light and dark">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <button class="icon-button nav-toggle" type="button" aria-label="Menu" aria-controls="site-nav" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <aside class="docs-sidebar" aria-label="Documentation">
+      <button class="btn docs-menu-toggle" type="button" aria-expanded="false">Documentation menu <span aria-hidden="true">▾</span></button>
+      <nav>
+        <h4>Start</h4>
+        <ul>
+          <li><a href="./" aria-current="page">Overview</a></li>
+          <li><a href="getting-started.html">Getting started</a></li>
+          <li><a href="finding.html">Finding structures</a></li>
+        </ul>
+        <h4>Viewing</h4>
+        <ul>
+          <li><a href="viewing.html">Viewing and interactions</a></li>
+          <li><a href="commands.html">Selections and commands</a></li>
+          <li><a href="comparing.html">Comparing structures</a></li>
+        </ul>
+        <h4>Checking models</h4>
+        <ul>
+          <li><a href="predictions.html">Predictions and AlphaFold</a></li>
+          <li><a href="validation.html">Validation and density maps</a></li>
+          <li><a href="ligands.html">Ligands and docking</a></li>
+          <li><a href="analysis.html">Analysis</a></li>
+        </ul>
+        <h4>Your data</h4>
+        <ul>
+          <li><a href="proteomics.html">Proteomics</a></li>
+        </ul>
+        <h4>Share and automate</h4>
+        <ul>
+          <li><a href="sessions.html">Sessions, figures and methods</a></li>
+          <li><a href="scripting.html">Scripting and command line</a></li>
+        </ul>
+        <h4>Reference</h4>
+        <ul>
+          <li><a href="formats.html">Supported files</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main id="main" class="doc">
+      <h1>Documentation</h1>
+      <p class="doc-lede">How to use Proteoscope, from opening a first structure to statistics on a proteomics report. New here? Start with <a href="getting-started.html">Getting started</a>.</p>
+
+      <h2 id="quick-start">Quick start</h2>
+      <ol>
+        <li><a href="../install.html">Install Proteoscope</a> with one command.</li>
+        <li>Run <code>proteoscope</code> in a terminal. It opens in your browser.</li>
+        <li>Pick one of the <strong>Bundled examples</strong>, type a PDB ID or UniProt accession in <strong>Open structure</strong>, or drop your own files on the window.</li>
+        <li>Double-click a ligand or residue to focus it, and press <kbd>/</kbd> to type selections and commands.</li>
+      </ol>
+
+      <h2 id="start">Start</h2>
+      <div class="card-grid">
+        <a class="card" href="getting-started.html"><h3>Getting started</h3><p>Start Proteoscope, the workspace, navigation, opening files and the bundled examples.</p></a>
+        <a class="card" href="finding.html"><h3>Finding structures</h3><p>Search by gene, name, accession, keywords or sequence for structures and models.</p></a>
+      </div>
+
+      <h2 id="viewing">Viewing</h2>
+      <div class="card-grid">
+        <a class="card" href="viewing.html"><h3>Viewing and interactions</h3><p>Representations, color schemes, lighting, binding sites, measurements and assemblies.</p></a>
+        <a class="card" href="commands.html"><h3>Selections and commands</h3><p>The selection language and every command of the command line.</p></a>
+        <a class="card" href="comparing.html"><h3>Comparing structures</h3><p>Several structures in one scene, superposition, TM-align and AlphaFold comparison.</p></a>
+      </div>
+
+      <h2 id="checking">Checking models</h2>
+      <div class="card-grid">
+        <a class="card" href="predictions.html"><h3>Predictions and AlphaFold</h3><p>AlphaFold DB models, PAE, and prediction folders ranked with interface scores.</p></a>
+        <a class="card" href="validation.html"><h3>Validation and density maps</h3><p>wwPDB validation reports, Ramachandran classes, density maps and map fit.</p></a>
+        <a class="card" href="ligands.html"><h3>Ligands and docking</h3><p>Ligand chemistry from the CCD, interactions, and docking poses with fingerprints.</p></a>
+        <a class="card" href="analysis.html"><h3>Analysis</h3><p>Secondary structure, solvent accessibility, exposure, profiles and conservation.</p></a>
+      </div>
+
+      <h2 id="your-data">Your data</h2>
+      <div class="card-grid">
+        <a class="card" href="proteomics.html"><h3>Proteomics</h3><p>Search reports, differential statistics, PTM sites, variants, cross-links and HDX-MS.</p></a>
+      </div>
+
+      <h2 id="share">Share and automate</h2>
+      <div class="card-grid">
+        <a class="card" href="sessions.html"><h3>Sessions, figures and methods</h3><p>Images, sessions, links, MolViewSpec, and a methods paragraph with references.</p></a>
+        <a class="card" href="scripting.html"><h3>Scripting and command line</h3><p>Command-line options, the console API, and remote control from Python.</p></a>
+      </div>
+
+      <h2 id="reference">Reference</h2>
+      <div class="card-grid">
+        <a class="card" href="formats.html"><h3>Supported files</h3><p>Every file type Proteoscope opens, and how each is read.</p></a>
+        <a class="card" href="troubleshooting.html"><h3>Troubleshooting</h3><p>Renderer, network, port and file problems, and where to get help.</p></a>
+      </div>
+
+      <nav class="doc-pager" aria-label="Pages">
+        <a class="next" href="getting-started.html"><span>Next</span>Getting started</a>
+      </nav>
+    </main>
+
+    <aside class="toc" aria-label="On this page">
+      <h4>On this page</h4>
+      <ul></ul>
+    </aside>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-about">
+          <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+          <p>A 3D viewer and analysis workbench for protein structures and structural proteomics. Free and open source under the Apache License 2.0.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul>
+            <li><a href="../#features">Features</a></li>
+            <li><a href="../install.html">Install</a></li>
+            <li><a href="../science.html">Science</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/blob/main/CHANGELOG.md">Changelog</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Documentation</h4>
+          <ul>
+            <li><a href="getting-started.html">Getting started</a></li>
+            <li><a href="commands.html">Commands</a></li>
+            <li><a href="scripting.html">Scripting</a></li>
+            <li><a href="troubleshooting.html">Troubleshooting</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope">GitHub</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/releases">Releases</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/issues">Issues</a></li>
+            <li><a href="../science.html#cite">Cite Proteoscope</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">Proteoscope is licensed under the Apache License 2.0. Structures shown are from the PDB (wwPDB) and AlphaFold DB; see <a href="../science.html#credits">data credits</a>.</div>
+    </div>
+  </footer>
+</body>
+</html>

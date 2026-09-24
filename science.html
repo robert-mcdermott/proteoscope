@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Science · Proteoscope</title>
+  <meta name="description" content="The published methods Proteoscope implements, how its results are checked against the reference tools, data credits and how to cite it." />
+  <link rel="canonical" href="https://robert-mcdermott.github.io/proteoscope/science.html" />
+  <meta name="theme-color" content="#050708" />
+  <link rel="icon" href="assets/img/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="assets/css/site.css" />
+  <script>try { const t = localStorage.getItem('proteoscope-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <script src="assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="./"><img src="assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+      <nav class="site-nav" id="site-nav" aria-label="Main">
+        <a href="./#features">Features</a>
+        <a href="docs/">Documentation</a>
+        <a href="install.html">Install</a>
+        <a href="science.html" aria-current="page">Science</a>
+      </nav>
+      <div class="header-actions">
+        <a class="icon-button" href="https://github.com/robert-mcdermott/proteoscope" aria-label="Proteoscope on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        </a>
+        <button class="icon-button theme-toggle" type="button" aria-label="Switch between light and dark">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <button class="icon-button nav-toggle" type="button" aria-label="Menu" aria-controls="site-nav" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+    <div class="page-layout">
+    <main id="main" class="doc">
+      <h1>The science behind Proteoscope</h1>
+      <p class="doc-lede">Proteoscope reimplements published methods rather than inventing its own. This page lists them with their references, shows how Proteoscope's results are checked against the tools the methods come from, and explains how to cite Proteoscope.</p>
+
+      <h2 id="validation">How the analyses are checked</h2>
+      <p>A validation suite in the repository, <a href="https://github.com/robert-mcdermott/proteoscope/tree/main/validation"><code>validation/</code></a>, recomputes numbers produced by the reference implementations and compares them with Proteoscope's. The reference tools are not part of Proteoscope; only their outputs are stored. Continuous integration runs the offline suites on every change and all of them weekly.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Analysis</th><th>Reference</th><th>Inputs</th><th>Agreement</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Moderated t-test</strong></td><td>limma 3.68.5 (<code>lmFit</code>, <code>eBayes</code>, BH)</td><td>Three simulated experiments: complete data, 20% missing values with unequal degrees of freedom, and an infinite prior</td><td class="agree">9×10⁻¹¹ or better</td></tr>
+            <tr><td><strong>PTM adjustment</strong></td><td>MSstatsPTM 2.14.0</td><td>60 simulated sites, including a site without its protein, infinite changes and a protein with zero standard error</td><td class="agree">7×10⁻¹⁴</td></tr>
+            <tr><td><strong>TM-align, MM-align</strong></td><td>US-align</td><td>17 chain pairs (proteins, tRNAs, a riboswitch) and 16 complex pairs; four complex cases use a US-align build with a bug in its complex mode fixed</td><td class="agree">All 33 identical</td></tr>
+            <tr><td><strong>Conservation</strong></td><td>Capra and Singh's <code>score_conservation.py</code></td><td>Pfam seeds of ubiquitin and the p53 DNA-binding domain, with seven option sets each</td><td class="agree">5×10⁻¹³</td></tr>
+            <tr><td><strong>Map fit</strong></td><td>EMDB validation</td><td>Model 8GUB in map EMD-34272 at the recommended contour</td><td class="agree">0.8935 vs 0.896</td></tr>
+            <tr><td><strong>Ramachandran classes</strong></td><td>MolProbity, through the wwPDB report</td><td>1M17</td><td class="agree">308 of 308</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Other checks were run while each feature was built:</p>
+      <ul>
+        <li><strong>Interface scores</strong> reproduce Dunbrack's <code>ipsae.py</code> (version 4) to its printed precision on the AlphaFold 3 (Aurora A–TPX2) and AlphaFold 2 multimer (RAF1–KSR1–MEK1) examples of the IPSAE repository and on a Boltz-2 prediction.</li>
+        <li><strong>TM-align</strong> matches US-align on 606 all-against-all pairs of 25 protein chains and 3 RNAs, and on edge cases from 3-residue chains to the 959-residue SARS-CoV-2 spike.</li>
+        <li><strong>Superposition</strong> gives the expected results on known cases: adenylate kinase closed onto open, 1.08 Å over 112 core pairs; SUMO-1 onto ubiquitin by structure alone, TM-score 0.654, as US-align gives.</li>
+        <li><strong>Conservation</strong> of p53 from 1,384 sequences ranks the zinc ligands C176, H179, C238 and C242 first, then S241, R175, R248 and R273.</li>
+      </ul>
+      <p>The <a href="https://github.com/robert-mcdermott/proteoscope/blob/main/validation/README.md">validation README</a> has every detail, including where Proteoscope and a reference tool differ and why.</p>
+
+      <h2 id="methods">Methods and their references</h2>
+      <p>These are the methods Proteoscope implements or data it uses, with the publications they come from. The <strong>Methods</strong> dialog cites the ones a session actually used (see <a href="docs/sessions.html">Sessions, figures and methods</a>).</p>
+      <h3>Structure and chemistry</h3>
+      <div class="table-wrap">
+        <table class="refs">
+          <thead><tr><th>Method</th><th>Reference</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Secondary structure (DSSP)</strong></td><td>Kabsch W, Sander C. Dictionary of protein secondary structure: pattern recognition of hydrogen-bonded and geometrical features. Biopolymers. 1983;22:2577–2637. <a href="https://doi.org/10.1002/bip.360221211">doi:10.1002/bip.360221211</a></td></tr>
+            <tr><td><strong>Solvent accessibility</strong></td><td>Shrake A, Rupley JA. Environment and exposure to solvent of protein atoms. Lysozyme and insulin. J Mol Biol. 1973;79:351–371. <a href="https://doi.org/10.1016/0022-2836(73)90011-9">doi:10.1016/0022-2836(73)90011-9</a><br />Tien MZ, Meyer AG, Sydykova DK, Spielman SJ, Wilke CO. Maximum allowed solvent accessibilites of residues in proteins. PLoS One. 2013;8:e80635. <a href="https://doi.org/10.1371/journal.pone.0080635">doi:10.1371/journal.pone.0080635</a></td></tr>
+            <tr><td><strong>Interactions</strong></td><td>Salentin S, Schreiber S, Haupt VJ, Adasme MF, Schroeder M. PLIP: fully automated protein–ligand interaction profiler. Nucleic Acids Res. 2015;43:W443–W447. <a href="https://doi.org/10.1093/nar/gkv315">doi:10.1093/nar/gkv315</a><br />Adasme MF, et al. PLIP 2021: expanding the scope of the protein–ligand interaction profiler to DNA and RNA. Nucleic Acids Res. 2021;49:W530–W534. <a href="https://doi.org/10.1093/nar/gkab294">doi:10.1093/nar/gkab294</a></td></tr>
+            <tr><td><strong>Ligand chemistry</strong></td><td>Westbrook JD, Shao C, Feng Z, Zhuravleva M, Velankar S, Young J. The chemical component dictionary: complete descriptions of constituent molecules in experimentally determined 3D macromolecules in the Protein Data Bank. Bioinformatics. 2015;31:1274–1278. <a href="https://doi.org/10.1093/bioinformatics/btu789">doi:10.1093/bioinformatics/btu789</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Comparison</h3>
+      <div class="table-wrap">
+        <table class="refs">
+          <thead><tr><th>Method</th><th>Reference</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Least-squares superposition</strong></td><td>Horn BKP. Closed-form solution of absolute orientation using unit quaternions. J Opt Soc Am A. 1987;4:629–642. <a href="https://doi.org/10.1364/JOSAA.4.000629">doi:10.1364/JOSAA.4.000629</a></td></tr>
+            <tr><td><strong>TM-score</strong></td><td>Zhang Y, Skolnick J. Scoring function for automated assessment of protein structure template quality. Proteins. 2004;57:702–710. <a href="https://doi.org/10.1002/prot.20264">doi:10.1002/prot.20264</a></td></tr>
+            <tr><td><strong>Structure-only alignment</strong></td><td>Zhang Y, Skolnick J. TM-align: a protein structure alignment algorithm based on the TM-score. Nucleic Acids Res. 2005;33:2302–2309. <a href="https://doi.org/10.1093/nar/gki524">doi:10.1093/nar/gki524</a><br />Mukherjee S, Zhang Y. MM-align: a quick algorithm for aligning multiple-chain protein complex structures using iterative dynamic programming. Nucleic Acids Res. 2009;37:e83. <a href="https://doi.org/10.1093/nar/gkp318">doi:10.1093/nar/gkp318</a><br />Zhang C, Shine M, Pyle AM, Zhang Y. US-align: universal structure alignments of proteins, nucleic acids, and macromolecular complexes. Nat Methods. 2022;19:1109–1115. <a href="https://doi.org/10.1038/s41592-022-01585-1">doi:10.1038/s41592-022-01585-1</a></td></tr>
+            <tr><td><strong>lDDT</strong></td><td>Mariani V, Biasini M, Barbato A, Schwede T. lDDT: a local superposition-free score for comparing protein structures and models using distance difference tests. Bioinformatics. 2013;29:2722–2728. <a href="https://doi.org/10.1093/bioinformatics/btt473">doi:10.1093/bioinformatics/btt473</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Predicted structures</h3>
+      <div class="table-wrap">
+        <table class="refs">
+          <thead><tr><th>Method</th><th>Reference</th></tr></thead>
+          <tbody>
+            <tr><td><strong>ipSAE</strong></td><td>Dunbrack RL Jr. Rēs ipSAE loquuntur: what’s wrong with AlphaFold’s ipTM score and how to fix it. bioRxiv. 2025:2025.02.10.637595. <a href="https://doi.org/10.1101/2025.02.10.637595">doi:10.1101/2025.02.10.637595</a></td></tr>
+            <tr><td><strong>pDockQ and pDockQ2</strong></td><td>Bryant P, Pozzati G, Elofsson A. Improved prediction of protein-protein interactions using AlphaFold2. Nat Commun. 2022;13:1265. <a href="https://doi.org/10.1038/s41467-022-28865-w">doi:10.1038/s41467-022-28865-w</a><br />Zhu W, Shenoy A, Kundrotas P, Elofsson A. Evaluation of AlphaFold-Multimer prediction on multi-chain protein complexes. Bioinformatics. 2023;39:btad424. <a href="https://doi.org/10.1093/bioinformatics/btad424">doi:10.1093/bioinformatics/btad424</a></td></tr>
+            <tr><td><strong>LIS</strong></td><td>Kim AR, et al. Enhanced protein-protein interaction discovery via AlphaFold-Multimer. bioRxiv. 2024:2024.02.19.580970. <a href="https://doi.org/10.1101/2024.02.19.580970">doi:10.1101/2024.02.19.580970</a></td></tr>
+            <tr><td><strong>PAE domains</strong></td><td>Goddard TD, et al. UCSF ChimeraX: meeting modern challenges in visualization and analysis. Protein Sci. 2018;27:14–25. <a href="https://doi.org/10.1002/pro.3235">doi:10.1002/pro.3235</a></td></tr>
+            <tr><td><strong>AlphaMissense</strong></td><td>Cheng J, et al. Accurate proteome-wide missense variant effect prediction with AlphaMissense. Science. 2023;381:eadg7492. <a href="https://doi.org/10.1126/science.adg7492">doi:10.1126/science.adg7492</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Validation and density</h3>
+      <div class="table-wrap">
+        <table class="refs">
+          <thead><tr><th>Method</th><th>Reference</th></tr></thead>
+          <tbody>
+            <tr><td><strong>wwPDB validation reports</strong></td><td>Gore S, et al. Validation of structures in the Protein Data Bank. Structure. 2017;25:1916–1927. <a href="https://doi.org/10.1016/j.str.2017.10.009">doi:10.1016/j.str.2017.10.009</a></td></tr>
+            <tr><td><strong>Ramachandran (Top8000)</strong></td><td>Williams CJ, et al. MolProbity: more and better reference data for improved all-atom structure validation. Protein Sci. 2018;27:293–315. <a href="https://doi.org/10.1002/pro.3330">doi:10.1002/pro.3330</a></td></tr>
+            <tr><td><strong>Cryo-EM maps</strong></td><td>wwPDB Consortium. EMDB—the Electron Microscopy Data Bank. Nucleic Acids Res. 2024;52:D456–D465. <a href="https://doi.org/10.1093/nar/gkad1019">doi:10.1093/nar/gkad1019</a><br />Cheng A, et al. MRC2014: extensions to the MRC format header for electron cryo-microscopy and tomography. J Struct Biol. 2015;192:146–150. <a href="https://doi.org/10.1016/j.jsb.2015.04.002">doi:10.1016/j.jsb.2015.04.002</a></td></tr>
+            <tr><td><strong>Isosurfaces (Surface Nets)</strong></td><td>Gibson SFF. Constrained elastic surface nets: generating smooth surfaces from binary segmented data. Lecture Notes in Computer Science (MICCAI 1998). 1998;1496:888–898. <a href="https://doi.org/10.1007/BFb0056277">doi:10.1007/BFb0056277</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Proteomics</h3>
+      <div class="table-wrap">
+        <table class="refs">
+          <thead><tr><th>Method</th><th>Reference</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Moderated t-test</strong></td><td>Smyth GK. Linear models and empirical Bayes methods for assessing differential expression in microarray experiments. Stat Appl Genet Mol Biol. 2004;3:Article 3. <a href="https://doi.org/10.2202/1544-6115.1027">doi:10.2202/1544-6115.1027</a><br />Ritchie ME, et al. limma powers differential expression analyses for RNA-sequencing and microarray studies. Nucleic Acids Res. 2015;43:e47. <a href="https://doi.org/10.1093/nar/gkv007">doi:10.1093/nar/gkv007</a></td></tr>
+            <tr><td><strong>False discovery rate</strong></td><td>Benjamini Y, Hochberg Y. Controlling the false discovery rate: a practical and powerful approach to multiple testing. J R Stat Soc Series B. 1995;57:289–300. <a href="https://doi.org/10.1111/j.2517-6161.1995.tb02031.x">doi:10.1111/j.2517-6161.1995.tb02031.x</a></td></tr>
+            <tr><td><strong>PTM adjustment</strong></td><td>Kohler D, et al. MSstatsPTM: statistical relative quantification of posttranslational modifications in bottom-up mass spectrometry-based proteomics. Mol Cell Proteomics. 2023;22:100477. <a href="https://doi.org/10.1016/j.mcpro.2022.100477">doi:10.1016/j.mcpro.2022.100477</a></td></tr>
+            <tr><td><strong>Imputation</strong></td><td>Tyanova S, et al. The Perseus computational platform for comprehensive analysis of (prote)omics data. Nat Methods. 2016;13:731–740. <a href="https://doi.org/10.1038/nmeth.3901">doi:10.1038/nmeth.3901</a></td></tr>
+            <tr><td><strong>Part-sphere exposure and disorder</strong></td><td>Bludau I, et al. The structural context of posttranslational modifications at a proteome-wide scale. PLoS Biol. 2022;20:e3001636. <a href="https://doi.org/10.1371/journal.pbio.3001636">doi:10.1371/journal.pbio.3001636</a></td></tr>
+            <tr><td><strong>Surface distances for cross-links</strong></td><td>Bullock JMA, Schwab J, Thalassinos K, Topf M. The importance of non-accessible crosslinks and solvent accessible surface distance in modeling proteins with restraints from crosslinking mass spectrometry. Mol Cell Proteomics. 2016;15:2491–2500. <a href="https://doi.org/10.1074/mcp.M116.058560">doi:10.1074/mcp.M116.058560</a></td></tr>
+            <tr><td><strong>HDX-MS hybrid test</strong></td><td>Hageman TS, Weis DD. Reliable identification of significant differences in differential hydrogen exchange-mass spectrometry measurements using a hybrid significance testing approach. Anal Chem. 2019;91:8008–8016. <a href="https://doi.org/10.1021/acs.analchem.9b01325">doi:10.1021/acs.analchem.9b01325</a></td></tr>
+            <tr><td><strong>Public proteomics evidence</strong></td><td>Nightingale A, et al. The Proteins API: accessing key integrated protein and genome information. Nucleic Acids Res. 2017;45:W539–W544. <a href="https://doi.org/10.1093/nar/gkx237">doi:10.1093/nar/gkx237</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Evolution and docking</h3>
+      <div class="table-wrap">
+        <table class="refs">
+          <thead><tr><th>Method</th><th>Reference</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Conservation</strong></td><td>Capra JA, Singh M. Predicting functionally important residues from sequence conservation. Bioinformatics. 2007;23:1875–1882. <a href="https://doi.org/10.1093/bioinformatics/btm270">doi:10.1093/bioinformatics/btm270</a><br />Henikoff S, Henikoff JG. Position-based sequence weights. J Mol Biol. 1994;243:574–578. <a href="https://doi.org/10.1016/0022-2836(94)90032-9">doi:10.1016/0022-2836(94)90032-9</a></td></tr>
+            <tr><td><strong>Conservation colors</strong></td><td>Ashkenazy H, et al. ConSurf 2016: an improved methodology to estimate and visualize evolutionary conservation in macromolecules. Nucleic Acids Res. 2016;44:W344–W350. <a href="https://doi.org/10.1093/nar/gkw408">doi:10.1093/nar/gkw408</a></td></tr>
+            <tr><td><strong>Interaction fingerprints</strong></td><td>Marcou G, Rognan D. Optimizing fragment and scaffold docking by use of molecular interaction fingerprints. J Chem Inf Model. 2007;47:195–207. <a href="https://doi.org/10.1021/ci600342e">doi:10.1021/ci600342e</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="credits">Data sources and credits</h2>
+      <ul>
+        <li>Structures, validation reports and density maps come from the Protein Data Bank and EMDB archives (wwPDB, CC0), through RCSB PDB and PDBe.</li>
+        <li>Predicted models and AlphaMissense predictions come from AlphaFold DB (CC BY 4.0; Jumper et al., <em>Nature</em> 2021; Varadi et al., <em>Nucleic Acids Research</em> 2024; Cheng et al., <em>Science</em> 2023).</li>
+        <li>The MolProbity Top8000 Ramachandran distributions come from the Richardson Lab's <a href="https://github.com/rlabduke/reference_data">reference_data</a> (CC BY 4.0; Williams et al., <em>Protein Science</em> 2018).</li>
+        <li>Ligand chemistry comes from the wwPDB Chemical Component Dictionary (Westbrook et al., <em>Bioinformatics</em> 2015; CC0).</li>
+        <li>Searches use RCSB PDB, UniProt, PDBe and 3D-Beacons (Varadi et al., <em>GigaScience</em> 2022); models downloaded from a 3D-Beacons provider carry that provider's terms.</li>
+        <li>Public proteomics evidence comes from the EBI Proteins API (Nightingale et al., <em>Nucleic Acids Research</em> 2017), which collects PeptideAtlas, ProteomicsDB, PRIDE and PTMeXchange data.</li>
+        <li>The bundled examples are PDB entries and the AlphaFold DB model of p53 with its PAE (AF-P04637-F1); each example's citation is shown with it.</li>
+        <li>Screenshots on this site use public data: PDB entries, the AlphaFold Server example of the <a href="https://github.com/DunbrackLab/IPSAE">IPSAE repository</a>, AutoDock Vina's tutorial poses, and the example data of MSstatsPTM, xiVIEW and HaDeX.</li>
+      </ul>
+
+      <h2 id="cite">Cite Proteoscope</h2>
+      <p>If you use Proteoscope in your research, please cite it, together with the methods and data you used (the <strong>Methods</strong> dialog lists them):</p>
+      <div class="callout"><p>McDermott R. Proteoscope: a viewer and analysis workbench for protein structures and structural proteomics. Version 0.6.0. 2026. <a href="https://github.com/robert-mcdermott/proteoscope">https://github.com/robert-mcdermott/proteoscope</a></p></div>
+      <div class="code"><span class="code-label">bibtex</span><pre><code>@software{proteoscope2026,
+  author = {McDermott, R.},
+  title = {Proteoscope: a viewer and analysis workbench for protein structures and structural proteomics},
+  version = {0.6.0},
+  year = {2026},
+  url = {https://github.com/robert-mcdermott/proteoscope}
+}</code></pre></div>
+      <p>GitHub also offers a citation under <strong>Cite this repository</strong>, from the repository's <a href="https://github.com/robert-mcdermott/proteoscope/blob/main/CITATION.cff"><code>CITATION.cff</code></a>.</p>
+
+      <h2 id="license">License</h2>
+      <p>Proteoscope is free and open source under the <a href="https://github.com/robert-mcdermott/proteoscope/blob/main/LICENSE">Apache License 2.0</a>.</p>
+    </main>
+
+    <aside class="toc" aria-label="On this page">
+      <h4>On this page</h4>
+      <ul></ul>
+    </aside>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-about">
+          <a class="brand" href="./"><img src="assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+          <p>A 3D viewer and analysis workbench for protein structures and structural proteomics. Free and open source under the Apache License 2.0.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul>
+            <li><a href="./#features">Features</a></li>
+            <li><a href="install.html">Install</a></li>
+            <li><a href="science.html">Science</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/blob/main/CHANGELOG.md">Changelog</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Documentation</h4>
+          <ul>
+            <li><a href="docs/getting-started.html">Getting started</a></li>
+            <li><a href="docs/commands.html">Commands</a></li>
+            <li><a href="docs/scripting.html">Scripting</a></li>
+            <li><a href="docs/troubleshooting.html">Troubleshooting</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope">GitHub</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/releases">Releases</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/issues">Issues</a></li>
+            <li><a href="science.html#cite">Cite Proteoscope</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">Proteoscope is licensed under the Apache License 2.0. Structures shown are from the PDB (wwPDB) and AlphaFold DB; see <a href="science.html#credits">data credits</a>.</div>
+    </div>
+  </footer>
+</body>
+</html>

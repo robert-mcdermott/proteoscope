@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Proteoscope: explore, check and explain protein structures</title>
+  <meta name="description" content="A 3D viewer and analysis workbench for protein and nucleic-acid structures, predicted complexes, density maps and structural proteomics data. Runs on your own computer with nothing to install; your files stay on your machine." />
+  <link rel="canonical" href="https://robert-mcdermott.github.io/proteoscope/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Proteoscope" />
+  <meta property="og:description" content="Explore, check and explain protein structures, predicted complexes, density maps and proteomics data, on your own computer." />
+  <meta property="og:url" content="https://robert-mcdermott.github.io/proteoscope/" />
+  <meta property="og:image" content="https://robert-mcdermott.github.io/proteoscope/assets/img/og-image.jpg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="theme-color" content="#050708" />
+  <link rel="icon" href="assets/img/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="assets/css/site.css" />
+  <script>try { const t = localStorage.getItem('proteoscope-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <script src="assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="./"><img src="assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+      <nav class="site-nav" id="site-nav" aria-label="Main">
+        <a href="#features">Features</a>
+        <a href="docs/">Documentation</a>
+        <a href="install.html">Install</a>
+        <a href="science.html">Science</a>
+      </nav>
+      <div class="header-actions">
+        <a class="icon-button" href="https://github.com/robert-mcdermott/proteoscope" aria-label="Proteoscope on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        </a>
+        <button class="icon-button theme-toggle" type="button" aria-label="Switch between light and dark">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <button class="icon-button nav-toggle" type="button" aria-label="Menu" aria-controls="site-nav" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <div class="container hero-grid">
+        <a class="eyebrow" href="https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.6.0"><span class="pill">v0.6.0</span> Density maps, docking poses, statistics and more</a>
+        <h1>Explore, check and explain <span class="accent">protein structures</span></h1>
+        <p class="lede">Proteoscope is a 3D viewer and analysis workbench for protein and nucleic-acid structures, predicted complexes, density maps and structural proteomics data. It runs on your own computer, with nothing to install and no account, and your files never leave your machine.</p>
+        <div class="btn-row">
+          <a class="btn btn-primary" href="install.html">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            Install Proteoscope
+          </a>
+          <a class="btn" href="docs/">Read the guide</a>
+        </div>
+
+        <div class="install-card">
+          <div class="tablist" role="tablist" aria-label="Operating system" data-os>
+            <button class="tab" role="tab" id="hero-tab-unix" aria-controls="hero-panel-unix" aria-selected="true" data-os="macos linux">macOS and Linux</button>
+            <button class="tab" role="tab" id="hero-tab-win" aria-controls="hero-panel-win" aria-selected="false" tabindex="-1" data-os="windows">Windows</button>
+          </div>
+          <div class="tabpanel" role="tabpanel" id="hero-panel-unix" aria-labelledby="hero-tab-unix">
+            <div class="code wrap"><pre><code><span class="prompt">$ </span>curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/robert-mcdermott/proteoscope/main/install.sh | sh</code></pre></div>
+            <p class="note">Installs the latest release in <code>~/.local/bin</code> after checking its SHA-256 checksum, then prints how to start it. <a href="install.html">Other options</a></p>
+          </div>
+          <div class="tabpanel" role="tabpanel" id="hero-panel-win" aria-labelledby="hero-tab-win" hidden>
+            <div class="code wrap"><pre><code><span class="prompt">PS&gt; </span>irm https://raw.githubusercontent.com/robert-mcdermott/proteoscope/main/install.ps1 | iex</code></pre></div>
+            <p class="note">Run in PowerShell. No administrator rights needed. Then open a new terminal and run <code>proteoscope</code>. <a href="install.html">Other options</a></p>
+          </div>
+        </div>
+        <p class="hero-meta">Free and open source (Apache 2.0) · macOS, Linux and Windows · x64 and ARM64</p>
+
+        <figure class="hero-shot">
+          <div class="shot shot-window" data-url="127.0.0.1:8765">
+            <img src="assets/img/workspace.webp" width="2000" height="1250" alt="The Proteoscope workspace showing the nucleosome with BRCA1–BARD1 (7LYB) as a cartoon, with the Structure panel, chain list and sequence panel" fetchpriority="high" />
+          </div>
+          <figcaption>The nucleosome with BRCA1–BARD1 and UbcH5c (7LYB), one of 27 bundled examples.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="why-title">
+      <div class="container">
+        <h2 id="why-title" class="visually-hidden" hidden>Why Proteoscope</h2>
+        <div class="pillars">
+          <div class="pillar">
+            <h3><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Private by design</h3>
+            <p>Files are read in your browser and never uploaded; searches send only what you search for. Only public databases are contacted, and <code>--offline</code> turns even that off.</p>
+          </div>
+          <div class="pillar">
+            <h3><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5Z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>Nothing to install</h3>
+            <p>One program for macOS, Linux and Windows. No account, no API key and no administrator rights.</p>
+          </div>
+          <div class="pillar">
+            <h3><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12l2 2 4-4"/><path d="M12 3l7 3v6c0 4.5-3 8-7 9-4-1-7-4.5-7-9V6Z"/></svg>Checked against the originals</h3>
+            <p>Statistics, alignments, conservation, map fit and Ramachandran classes reproduce limma, MSstatsPTM, US-align, Capra and Singh's scorer, EMDB and MolProbity.</p>
+          </div>
+          <div class="pillar">
+            <h3><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2Z"/><path d="M4 21V5M8 7h6M8 11h6"/></svg>Ready to cite</h3>
+            <p>A methods paragraph with references for what you did, and a citation file for Proteoscope itself.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-alt" id="features" aria-labelledby="features-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="kicker">What it does</span>
+          <h2 id="features-title">The everyday structural biology loop, in one place</h2>
+          <p>Find a structure, style it, see how a ligand binds, judge the model, compare it, and bring in your own data, then export the figure and a methods paragraph to go with it.</p>
+        </div>
+
+        <article class="feature">
+          <div class="feature-text">
+            <span class="kicker">Find and open</span>
+            <h3>Every structure and model of your protein</h3>
+            <p>Search by gene, protein name, UniProt accession, keywords or a pasted sequence. The experimental structures are ranked by coverage and resolution, under a track of how many structures cover each residue, next to the models from AlphaFold DB, SWISS-MODEL and other 3D-Beacons providers.</p>
+            <ul class="checklist">
+              <li>Open any of them, or add it superposed on the active structure</li>
+              <li>PDB, PDBx/mmCIF and BinaryCIF, gzip or Zstandard compressed</li>
+              <li>27 bundled examples that work offline, each with an opening view</li>
+            </ul>
+            <a class="more-link" href="docs/finding.html">Finding structures</a>
+          </div>
+          <figure>
+            <div class="shot"><img src="assets/img/find-structures.webp" width="1600" height="1000" loading="lazy" alt="Find structures for KRAS: the matching UniProt proteins and the PDB entries of human KRAS, below a coverage track" /></div>
+            <figcaption>KRAS: 252 PDB entries in PDBe's order, with the coverage track above them.</figcaption>
+          </figure>
+        </article>
+
+        <article class="feature reverse">
+          <div class="feature-text">
+            <span class="kicker">Binding sites</span>
+            <h3>See how a ligand binds</h3>
+            <p>Double-click a ligand to frame its binding site, show the side chains around it and draw its interactions with PLIP's criteria: hydrogen bonds, salt bridges, π-stacking, cation–π, hydrophobic, halogen and metal contacts. Bond orders, aromatic rings and charges come from the wwPDB Chemical Component Dictionary.</p>
+            <ul class="checklist">
+              <li>Chain–chain interfaces, with buried surface area</li>
+              <li>Molecular, solvent-accessible and Gaussian surfaces with electrostatics</li>
+              <li>A command line: <code>show sticks within 5 of resn STI</code></li>
+            </ul>
+            <a class="more-link" href="docs/viewing.html">Viewing and interactions</a>
+          </div>
+          <figure>
+            <div class="shot"><img src="assets/img/binding-site.webp" width="1600" height="1000" loading="lazy" alt="Imatinib in the ABL kinase pocket (2HYY) with hydrogen bonds, salt bridges, π-stacking and hydrophobic contacts drawn as dashed lines" /></div>
+            <figcaption>Imatinib in ABL (2HYY): hydrogen bonds to Met318, Thr315, Glu286 and Asp381.</figcaption>
+          </figure>
+        </article>
+
+        <article class="feature">
+          <div class="feature-text">
+            <span class="kicker">Predicted complexes</span>
+            <h3>Decide which predicted interfaces to believe</h3>
+            <p>Drop an output folder from AlphaFold 3, AlphaFold Server, Boltz, Chai-1, ColabFold, Protenix or OpenFold3. Proteoscope ranks the models by the tool's own score and scores every chain pair from its PAE: ipTM, ipSAE, pDockQ, pDockQ2 and LIS, reproducing Dunbrack's <code>ipsae.py</code>.</p>
+            <ul class="checklist">
+              <li>A PAE plot linked to the 3D view, and rigid domains clustered from it</li>
+              <li>pLDDT, contact probabilities and MSA depth</li>
+              <li>How many of your cross-links each model satisfies</li>
+            </ul>
+            <a class="more-link" href="docs/predictions.html">Predictions and AlphaFold</a>
+          </div>
+          <figure>
+            <div class="shot"><img src="assets/img/predicted-complex.webp" width="1600" height="1000" loading="lazy" alt="An AlphaFold Server prediction of Aurora A with TPX2 colored by pLDDT, with the ranking table, the chain-pair ipSAE matrix and interface scores" /></div>
+            <figcaption>Aurora A with TPX2 from AlphaFold Server (the example of the ipSAE repository): ipSAE 0.87, pDockQ2 0.71.</figcaption>
+          </figure>
+        </article>
+
+        <article class="feature reverse">
+          <div class="feature-text">
+            <span class="kicker">Validation and density</span>
+            <h3>Check the model against the data</h3>
+            <p>Load the wwPDB validation report onto the structure: outliers per residue, clashes drawn in 3D, and the fit to density with percentiles. Show the 2Fo-Fc and Fo-Fc maps of an X-ray entry, the EMDB map of a cryo-EM entry, or your own CCP4 or MRC file.</p>
+            <ul class="checklist">
+              <li>Map fit: atom inclusion as EMDB reports it, and density per residue</li>
+              <li>Ramachandran classes on MolProbity's Top8000 contours, for predicted models too</li>
+              <li>Select problems: <code>outliers and within 5 of ligand</code></li>
+            </ul>
+            <a class="more-link" href="docs/validation.html">Validation and density maps</a>
+          </div>
+          <figure>
+            <div class="shot"><img src="assets/img/density-map.webp" width="1600" height="1000" loading="lazy" alt="Erlotinib in EGFR (1M17) inside its 2Fo-Fc electron density mesh, contoured at 1.0 sigma" /></div>
+            <figcaption>Erlotinib in EGFR (1M17) in its 2Fo-Fc density from the PDBe volume server, at 1.0σ.</figcaption>
+          </figure>
+        </article>
+
+        <article class="feature">
+          <div class="feature-text">
+            <span class="kicker">Comparison</span>
+            <h3>Compare structures, conformations and predictions</h3>
+            <p>Put several structures in one scene and superpose them by sequence, pruning outliers so a moving domain does not drag the fit, or by structure alone with TM-align and MM-align, ported from US-align. Color by deviation or lDDT to see what moved.</p>
+            <ul class="checklist">
+              <li>RMSD, TM-score and lDDT, overall and per chain</li>
+              <li>One click to compare a structure with its AlphaFold model</li>
+              <li>NMR ensembles overlaid, with per-residue RMSF</li>
+            </ul>
+            <a class="more-link" href="docs/comparing.html">Comparing structures</a>
+          </div>
+          <figure>
+            <div class="shot"><img src="assets/img/compare-deviation.webp" width="1600" height="1000" loading="lazy" alt="Adenylate kinase open (4AKE) and closed (1AKE) superposed on the CORE domain and colored by deviation, with the LID and NMP domains in red" /></div>
+            <figcaption>Adenylate kinase open and closed, fitted on the CORE domain: the LID and NMP domains close over the substrate.</figcaption>
+          </figure>
+        </article>
+
+        <article class="feature reverse">
+          <div class="feature-text">
+            <span class="kicker">Docking</span>
+            <h3>Triage docking poses</h3>
+            <p>Open the SDF, MOL2 or PDBQT output of AutoDock Vina, smina, GNINA, Glide, GOLD, DOCK, rDock or DiffDock in its receptor. Sort by score, step through the poses, and compare their interaction fingerprints to find the poses that keep the contacts you trust.</p>
+            <ul class="checklist">
+              <li>Scores read from each tool's own output</li>
+              <li>Heavy-atom RMSD of every pose to pose 1</li>
+              <li>A pose × residue fingerprint map, exported as CSV</li>
+            </ul>
+            <a class="more-link" href="docs/ligands.html">Ligands and docking</a>
+          </div>
+          <figure>
+            <div class="shot"><img src="assets/img/docking-poses.webp" width="1600" height="1000" loading="lazy" alt="AutoDock Vina poses of imatinib in ABL (1IEP) with the pose table, scores and interaction fingerprint map" /></div>
+            <figcaption>AutoDock Vina's tutorial poses of imatinib in ABL (1IEP), with their fingerprints.</figcaption>
+          </figure>
+        </article>
+
+        <article class="feature">
+          <div class="feature-text">
+            <span class="kicker">Proteomics</span>
+            <h3>Put your mass spectrometry results on the structure</h3>
+            <p>Open reports from MaxQuant, DIA-NN, Spectronaut, FragPipe, mzTab or Proteome Discoverer; multi-gigabyte reports are streamed, never uploaded. See coverage, localized PTM sites and fold changes on the structure, and test every feature with limma's moderated t-test and MSstatsPTM's adjustment for protein changes.</p>
+            <ul class="checklist">
+              <li>A volcano plot linked to the sites on the structure</li>
+              <li>Cross-links checked by Cα–Cα and solvent-accessible surface distance</li>
+              <li>HDX-MS with the hybrid significance test and Woods plots</li>
+            </ul>
+            <a class="more-link" href="docs/proteomics.html">Proteomics</a>
+          </div>
+          <figure>
+            <div class="shot"><img src="assets/img/differential-statistics.webp" width="1600" height="1000" loading="lazy" alt="Differential ubiquitination on BRD4 after the PROTAC MZ1 (5T35): a volcano plot and significant sites labeled on the structure" /></div>
+            <figcaption>Ubiquitination of BRD4 after the PROTAC MZ1 (MSstatsPTM's example data), on 5T35.</figcaption>
+          </figure>
+        </article>
+
+        <article class="feature reverse">
+          <div class="feature-text">
+            <span class="kicker">Evolution and variants</span>
+            <h3>See what evolution conserves, and which variants matter</h3>
+            <p>Score conservation from an alignment with the Jensen–Shannon divergence of Capra and Singh, in ConSurf's colors. Color human proteins by AlphaMissense pathogenicity, and map variants and PTM sites by structure or UniProt numbering.</p>
+            <ul class="checklist">
+              <li>A prediction's MSA, or A3M, FASTA, Stockholm and Clustal files</li>
+              <li>Part-sphere exposure and disorder, as in StructureMap</li>
+              <li>UniProt domains, sites and disease variants</li>
+            </ul>
+            <a class="more-link" href="docs/analysis.html">Analysis</a>
+          </div>
+          <figure>
+            <div class="shot"><img src="assets/img/conservation.webp" width="1600" height="1000" loading="lazy" alt="p53 bound to DNA (1TUP) colored by conservation in ConSurf's nine grades, from turquoise to maroon" /></div>
+            <figcaption>p53 on DNA (1TUP) colored by conservation from 1,384 UniRef90 sequences.</figcaption>
+          </figure>
+        </article>
+
+        <article class="feature">
+          <div class="feature-text">
+            <span class="kicker">Reproducible</span>
+            <h3>Figures, sessions and methods you can publish</h3>
+            <p>Export images up to 4× with a transparent background, save the whole workspace as a session, share a link that rebuilds the view, or open it in Mol* through MolViewSpec. The <strong>Methods</strong> button drafts a methods paragraph from what you did, with numbered references and BibTeX.</p>
+            <ul class="checklist">
+              <li>Data sources with their IDs, versions and dates</li>
+              <li>Every analysis with its parameters</li>
+              <li>Scripts from Python or Jupyter with <code>--remote-control</code></li>
+            </ul>
+            <a class="more-link" href="docs/sessions.html">Sessions, figures and methods</a>
+          </div>
+          <figure>
+            <div class="shot"><img src="assets/img/methods.webp" width="1600" height="1000" loading="lazy" alt="The Methods and references dialog with a drafted methods paragraph for 1M17 and numbered references with DOIs" /></div>
+            <figcaption>The methods paragraph for a session on EGFR with erlotinib (1M17), with its validation report and density map.</figcaption>
+          </figure>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="render-title">
+      <div class="container">
+        <div class="showcase">
+          <figure>
+            <img src="assets/img/spike-illustrative.webp" width="1400" height="1034" loading="lazy" alt="The SARS-CoV-2 spike trimer (6VXX) as a molecular surface in the Illustrative style, one color per chain, glycans in cream" />
+          </figure>
+          <div>
+            <span class="kicker">Rendering</span>
+            <h2 id="render-title">Figures that look like figures</h2>
+            <p>A WebGPU renderer ray-casts atoms and bonds, adds ambient occlusion, outlines and depth fog, and stays interactive at 100,000 atoms. Clipping planes cut slabs without rebuilding anything.</p>
+            <ul class="preset-list" aria-label="Lighting presets">
+              <li>Standard</li><li>Soft</li><li>Illustrative</li><li>Glossy</li><li>Neon</li><li>Flat</li>
+            </ul>
+            <p>The SARS-CoV-2 spike (6VXX), exported with the Illustrative preset on a transparent background.</p>
+            <a class="more-link" href="docs/viewing.html#lighting">Lighting and effects</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-alt" aria-labelledby="more-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="kicker">And more</span>
+          <h2 id="more-title">Built for real work</h2>
+        </div>
+        <div class="card-grid">
+          <a class="card" href="docs/commands.html">
+            <span class="icon-badge"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 8 4 4-4 4M12 17h7"/></svg></span>
+            <h3>Selections and commands</h3>
+            <p>PyMOL-style keywords with ChimeraX-style atom specs, typed in the search box with live previews and history.</p>
+          </a>
+          <a class="card" href="docs/sessions.html">
+            <span class="icon-badge pink"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg></span>
+            <h3>Sessions and links</h3>
+            <p>Save the whole workspace, share a link that rebuilds the view, or export MolViewSpec for Mol*.</p>
+          </a>
+          <a class="card" href="docs/scripting.html">
+            <span class="icon-badge gold"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5"/></svg></span>
+            <h3>Scripting</h3>
+            <p>Fetch, superpose, select and render images from Python or a Jupyter notebook.</p>
+          </a>
+          <a class="card" href="docs/getting-started.html#examples">
+            <span class="icon-badge mint"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5a2 2 0 0 1 2-2h13v14H6a2 2 0 0 0-2 2Zm0 0a2 2 0 0 0 2 2h13"/></svg></span>
+            <h3>27 curated examples</h3>
+            <p>Drug targets, degraders, antibodies, chromatin, Cas9, conformational changes, a capsid and the spike.</p>
+          </a>
+          <a class="card" href="docs/proteomics.html#crosslinks">
+            <span class="icon-badge"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.5 8.5l7 7"/></svg></span>
+            <h3>Cross-links and HDX-MS</h3>
+            <p>xiFDR, xiVIEW, pLink, MeroX, XlinkX, MS Annika and MaxLynx links; DynamX and HDExaminer uptake.</p>
+          </a>
+          <a class="card" href="docs/getting-started.html#privacy">
+            <span class="icon-badge pink"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/><path d="M4 4l16 16"/></svg></span>
+            <h3>Works offline</h3>
+            <p>With <code>--offline</code>, nothing leaves your computer; cached entries and the examples still work.</p>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="validation" aria-labelledby="validation-title">
+      <div class="container">
+        <div class="section-head">
+          <span class="kicker">Validated</span>
+          <h2 id="validation-title">Same numbers as the reference tools</h2>
+          <p>Proteoscope reimplements published methods. A validation suite recomputes the numbers of the tools those methods come from and runs in continuous integration.</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Analysis</th><th>Reference</th><th>Test</th><th>Agreement</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Differential statistics</strong></td><td>limma 3.68.5</td><td>Simulated experiments, with and without missing values</td><td class="agree">to 9×10⁻¹¹</td></tr>
+              <tr><td><strong>PTM adjustment</strong></td><td>MSstatsPTM 2.14.0</td><td>60 simulated sites, special cases included</td><td class="agree">to 7×10⁻¹⁴</td></tr>
+              <tr><td><strong>TM-align and MM-align</strong></td><td>US-align</td><td>17 chain pairs and 16 complex pairs</td><td class="agree">all identical</td></tr>
+              <tr><td><strong>Conservation</strong></td><td>Capra &amp; Singh's scorer</td><td>Two Pfam seed alignments, seven option sets each</td><td class="agree">to 5×10⁻¹³</td></tr>
+              <tr><td><strong>Map fit</strong></td><td>EMDB validation</td><td>8GUB in EMD-34272</td><td class="agree">0.8935 vs 0.896</td></tr>
+              <tr><td><strong>Ramachandran classes</strong></td><td>MolProbity (wwPDB report)</td><td>1M17</td><td class="agree">308 of 308</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="text-align:center"><a class="more-link" href="science.html">Methods, validation and citation</a></p>
+      </div>
+    </section>
+
+    <section class="section" id="get" aria-labelledby="get-title" style="padding-top:0">
+      <div class="container">
+        <div class="cta">
+          <div>
+            <h2 id="get-title">Get started in a minute</h2>
+            <p>Install with one command, then run <code>proteoscope</code>. It opens in your browser, with 27 examples ready to explore.</p>
+            <div class="btn-row">
+              <a class="btn btn-primary" href="docs/getting-started.html">Getting started</a>
+              <a class="btn" href="https://github.com/robert-mcdermott/proteoscope/releases/latest">All downloads</a>
+            </div>
+          </div>
+          <div class="install-card">
+            <div class="tablist" role="tablist" aria-label="Operating system" data-os>
+              <button class="tab" role="tab" id="cta-tab-unix" aria-controls="cta-panel-unix" aria-selected="true" data-os="macos linux">macOS and Linux</button>
+              <button class="tab" role="tab" id="cta-tab-win" aria-controls="cta-panel-win" aria-selected="false" tabindex="-1" data-os="windows">Windows</button>
+            </div>
+            <div class="tabpanel" role="tabpanel" id="cta-panel-unix" aria-labelledby="cta-tab-unix">
+              <div class="code wrap"><pre><code><span class="prompt">$ </span>curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/robert-mcdermott/proteoscope/main/install.sh | sh</code></pre></div>
+              <div class="code"><pre><code><span class="prompt">$ </span>proteoscope</code></pre></div>
+            </div>
+            <div class="tabpanel" role="tabpanel" id="cta-panel-win" aria-labelledby="cta-tab-win" hidden>
+              <div class="code wrap"><pre><code><span class="prompt">PS&gt; </span>irm https://raw.githubusercontent.com/robert-mcdermott/proteoscope/main/install.ps1 | iex</code></pre></div>
+              <div class="code"><pre><code><span class="prompt">PS&gt; </span>proteoscope</code></pre></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-about">
+          <a class="brand" href="./"><img src="assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+          <p>A 3D viewer and analysis workbench for protein structures and structural proteomics. Free and open source under the Apache License 2.0.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul>
+            <li><a href="#features">Features</a></li>
+            <li><a href="install.html">Install</a></li>
+            <li><a href="science.html">Science</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/blob/main/CHANGELOG.md">Changelog</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Documentation</h4>
+          <ul>
+            <li><a href="docs/getting-started.html">Getting started</a></li>
+            <li><a href="docs/commands.html">Commands</a></li>
+            <li><a href="docs/scripting.html">Scripting</a></li>
+            <li><a href="docs/troubleshooting.html">Troubleshooting</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope">GitHub</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/releases">Releases</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/issues">Issues</a></li>
+            <li><a href="science.html#cite">Cite Proteoscope</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">Proteoscope is licensed under the Apache License 2.0. Structures shown are from the PDB (wwPDB) and AlphaFold DB; see <a href="science.html#credits">data credits</a>.</div>
+    </div>
+  </footer>
+</body>
+</html>

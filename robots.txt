@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://robert-mcdermott.github.io/proteoscope/sitemap.xml

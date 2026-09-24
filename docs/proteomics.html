@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Proteomics · Proteoscope</title>
+  <meta name="description" content="Map search results, differential statistics, public evidence, peptides, sites and variants with AlphaMissense, cross-links, HDX-MS and custom values onto protein structures, all in the browser." />
+  <meta name="theme-color" content="#050708" />
+  <link rel="icon" href="../assets/img/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/css/site.css" />
+  <script>try { const t = localStorage.getItem('proteoscope-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+      <nav class="site-nav" id="site-nav" aria-label="Main">
+        <a href="../#features">Features</a>
+        <a href="./" aria-current="page">Documentation</a>
+        <a href="../install.html">Install</a>
+        <a href="../science.html">Science</a>
+      </nav>
+      <div class="header-actions">
+        <a class="icon-button" href="https://github.com/robert-mcdermott/proteoscope" aria-label="Proteoscope on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        </a>
+        <button class="icon-button theme-toggle" type="button" aria-label="Switch between light and dark">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <button class="icon-button nav-toggle" type="button" aria-label="Menu" aria-controls="site-nav" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <aside class="docs-sidebar" aria-label="Documentation">
+      <button class="btn docs-menu-toggle" type="button" aria-expanded="false">Documentation menu <span aria-hidden="true">▾</span></button>
+      <nav>
+        <h4>Start</h4>
+        <ul>
+          <li><a href="./">Overview</a></li>
+          <li><a href="getting-started.html">Getting started</a></li>
+          <li><a href="finding.html">Finding structures</a></li>
+        </ul>
+        <h4>Viewing</h4>
+        <ul>
+          <li><a href="viewing.html">Viewing and interactions</a></li>
+          <li><a href="commands.html">Selections and commands</a></li>
+          <li><a href="comparing.html">Comparing structures</a></li>
+        </ul>
+        <h4>Checking models</h4>
+        <ul>
+          <li><a href="predictions.html">Predictions and AlphaFold</a></li>
+          <li><a href="validation.html">Validation and density maps</a></li>
+          <li><a href="ligands.html">Ligands and docking</a></li>
+          <li><a href="analysis.html">Analysis</a></li>
+        </ul>
+        <h4>Your data</h4>
+        <ul>
+          <li><a href="proteomics.html" aria-current="page">Proteomics</a></li>
+        </ul>
+        <h4>Share and automate</h4>
+        <ul>
+          <li><a href="sessions.html">Sessions, figures and methods</a></li>
+          <li><a href="scripting.html">Scripting and command line</a></li>
+        </ul>
+        <h4>Reference</h4>
+        <ul>
+          <li><a href="formats.html">Supported files</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main id="main" class="doc">
+      <h1>Proteomics</h1>
+      <p class="doc-lede">Everything in the Proteomics tab runs in your browser, and your data is never uploaded. Put search results, differential statistics, public evidence, peptides, sites and variants, cross-links, HDX-MS and your own per-residue values on the structure.</p>
+
+      <h2 id="search-results">Search engine results</h2>
+      <p>Open a search engine's report, or drop it on the window. Proteoscope keeps only the rows of the active structure's proteins, matched by UniProt accession or by sequence, so a multi-gigabyte report of a whole proteome is streamed rather than loaded.</p>
+      <figure>
+        <div class="shot"><img src="../assets/img/search-report.webp" width="1600" height="1000" loading="lazy" alt="A DIA-NN report of HeLa runs (Parquet) on the AlphaFold model of nucleolin (P19338): peptide coverage on the structure, and three phosphosites in the disordered N-terminal region listed with localization probability, part-sphere exposure, disorder and public evidence" /></div>
+        <figcaption>A DIA-NN report of HeLa runs (Parquet) on the AlphaFold model of nucleolin (P19338): peptide coverage on the structure, and three phosphosites in the disordered N-terminal region with localization probability, part-sphere exposure, disorder and public evidence.</figcaption>
+      </figure>
+
+      <h3 id="supported-reports">Supported reports</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tool</th><th>Files</th></tr></thead>
+          <tbody>
+            <tr><td><strong>MaxQuant</strong></td><td><code>evidence.txt</code>, <code>peptides.txt</code>, site tables such as <code>Phospho (STY)Sites.txt</code></td></tr>
+            <tr><td><strong>DIA-NN</strong></td><td><code>report.tsv</code>, <code>report.parquet</code> (1.9 and 2.x), <code>pr_matrix.tsv</code>, site reports</td></tr>
+            <tr><td><strong>Spectronaut</strong></td><td>Normal and PTM site reports</td></tr>
+            <tr><td><strong>FragPipe</strong></td><td><code>psm.tsv</code>, peptide and site tables</td></tr>
+            <tr><td><strong>mzTab</strong></td><td>Peptide (PEP) and PSM sections, with modification probabilities</td></tr>
+            <tr><td><strong>Proteome Discoverer</strong></td><td>PSM and peptide group exports with ptmRS probabilities</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="filtering">Filtering</h3>
+      <ul>
+        <li>Decoys and contaminants are dropped.</li>
+        <li>q-value and localization thresholds apply as you type.</li>
+        <li>Semicolon-separated exports with decimal commas are read as such.</li>
+        <li>Localization probabilities are read from each tool's notation: MaxQuant's <code>S(0.98)</code>, DIA-NN, Spectronaut, ptmRS and mzTab.</li>
+      </ul>
+
+      <h3 id="report-on-structure">What the structure shows</h3>
+      <p>The structure shows one of:</p>
+      <ul>
+        <li>coverage;</li>
+        <li>peptide or PSM counts;</li>
+        <li>log10 intensity over the samples you choose;</li>
+        <li>the log2 fold change between two groups of samples. Spectronaut conditions are grouped automatically.</li>
+      </ul>
+
+      <h3 id="sites-table">The sites table</h3>
+      <p>The sites table lists every localized site with:</p>
+      <ul>
+        <li>its localization probability and value;</li>
+        <li>its <a href="analysis.html#ppse">part-sphere exposure</a>;</li>
+        <li>whether it lies in a disordered region;</li>
+        <li>with <a href="#public-evidence">public evidence</a> loaded, whether the site is already known.</li>
+      </ul>
+      <p>Click a site to focus it. Export the table as CSV.</p>
+
+      <h2 id="differential-statistics">Differential statistics</h2>
+      <p>With two sample groups chosen, <strong>Test B vs A</strong> runs a moderated t-test on every feature of the whole report, all proteins included, not only those of the active structure. The prior of limma's empirical Bayes needs many features.</p>
+
+      <h3 id="statistics-method">The test</h3>
+      <ul>
+        <li>Log2 intensities, with optional median normalization and a minimum number of values per group.</li>
+        <li>Optional imputation of missing values from a down-shifted normal distribution, as Perseus does.</li>
+        <li>Benjamini–Hochberg q-values.</li>
+        <li>For PTM sites, the protein's change (the median of its unmodified peptides) is subtracted, with Welch–Satterthwaite degrees of freedom, as MSstatsPTM does.</li>
+      </ul>
+
+      <h3 id="statistics-results">Results</h3>
+      <ul>
+        <li>A volcano plot shows the result. Click a site's point to focus it.</li>
+        <li>Sites are colored by fold change only when they are significant.</li>
+        <li>The sites CSV gains each site's fold change, p, q and degrees of freedom, and for adjusted sites the protein's change.</li>
+      </ul>
+      <p>The results match limma and MSstatsPTM on the same data.</p>
+      <figure>
+        <div class="shot"><img src="../assets/img/differential-statistics.webp" width="1600" height="1000" loading="lazy" alt="Ubiquitination after the PROTAC MZ1 on BRD4 (5T35), from the DIA-NN report of the MSstatsPTM example data: a moderated t-test of 38 GlyGly peptides with imputation, the volcano plot, and the significant sites K431 and K445 labeled on the structure" /></div>
+        <figcaption>Ubiquitination after the PROTAC MZ1 on BRD4 (5T35), from the DIA-NN report of the MSstatsPTM example data: a moderated t-test of 38 GlyGly peptides with imputation, the volcano plot, and the significant sites K431 and K445 labeled on the structure.</figcaption>
+      </figure>
+
+      <h2 id="public-evidence">Public evidence</h2>
+      <p><strong>Load public peptides and PTMs</strong> fetches, through the EBI Proteins API:</p>
+      <ul>
+        <li>the peptides observed for the structure's proteins in PeptideAtlas, ProteomicsDB and other resources;</li>
+        <li>the modification sites from reprocessed PRIDE datasets (PTMeXchange).</li>
+      </ul>
+      <p>You can then color the public coverage, mark the sites, filter by modification type, and compare them with your own report's sites: each of your sites is marked ✓ when it is already known and <strong>new</strong> when it is not. From the command line, use <code>evidence</code>.</p>
+
+      <h2 id="sequence-properties">Sequence properties</h2>
+      <p>Sequence properties follow ExPASy ProtParam conventions:</p>
+      <ul>
+        <li>average and monoisotopic mass;</li>
+        <li>the Bjellqvist pI;</li>
+        <li>net charge at pH 7;</li>
+        <li>ε280 with and without cystines, and absorbance at 0.1 %;</li>
+        <li>GRAVY;</li>
+        <li>the aliphatic and instability indices;</li>
+        <li>aromaticity.</li>
+      </ul>
+      <p>They are computed from the full deposited sequence when <code>SEQRES</code> or <code>entity_poly</code> is available.</p>
+
+      <h2 id="uniprot-annotations">UniProt annotations</h2>
+      <p>Proteoscope fetches domains, functional sites, PTMs, disease variants and mutagenesis data from UniProtKB, and maps the features onto the structure through its UniProt cross-reference.</p>
+      <ul>
+        <li>Filter the list, for example with <code>R175</code>, <code>kinase</code> or <code>phospho</code>.</li>
+        <li>Click a feature to select it.</li>
+        <li>Mark features as <a href="#sites-and-variants">sites</a>.</li>
+      </ul>
+
+      <h2 id="peptide-coverage">Peptide coverage</h2>
+      <p>Paste peptides, one per line, each with an optional value.</p>
+      <ul>
+        <li>MaxQuant, Spectronaut, DIA-NN, ProForma 2.0, Comet/SEQUEST and FragPipe notation are understood, including modifications.</li>
+        <li>Isoleucine and leucine can be treated as equal.</li>
+        <li>Coverage is mapped onto every matching chain and colored by peptide count. Peptide values are averaged per residue.</li>
+        <li><strong>In-silico digest</strong> generates theoretical peptides for common proteases.</li>
+      </ul>
+      <p>The <code>covered</code> set selects the covered residues; see <a href="commands.html">Selections and commands</a>.</p>
+
+      <h2 id="sites-and-variants">Sites and variants</h2>
+      <p>Enter modification sites and variants in common notations, such as <code>R175H</code>, <code>p.Arg248Gln</code>, <code>pS15</code>, <code>A:K120ac</code> and <code>Y1068</code>.</p>
+      <ul>
+        <li>Sites can use structure (author) or UniProt numbering.</li>
+        <li>Wild-type mismatches are flagged, which catches numbering offsets.</li>
+        <li>Sites are highlighted, labeled and focused.</li>
+      </ul>
+      <p>The <code>sites</code> set selects them.</p>
+      <figure>
+        <div class="shot"><img src="../assets/img/proteomics-sites.webp" width="1600" height="1000" loading="lazy" alt="p53 bound to DNA (1TUP) with the six most frequent cancer hotspot mutations labeled and peptide coverage shown in gold" /></div>
+        <figcaption>p53 bound to DNA (1TUP) with the six most frequent cancer hotspot mutations labeled and peptide coverage shown in gold.</figcaption>
+      </figure>
+
+      <h2 id="alphamissense">AlphaMissense</h2>
+      <p>Alongside sites and variants, <strong>AlphaMissense</strong> (Cheng et al. 2023) fetches the pathogenicity of every possible substitution from AlphaFold DB, for human proteins.</p>
+      <ul>
+        <li>The structure is colored by the mean score at each position.</li>
+        <li>Substitutions entered as sites, such as <code>R175H</code>, show their own score.</li>
+        <li>The selection card lists the most damaging substitutions at a residue.</li>
+        <li><code>am &gt; 0.564</code> selects likely pathogenic positions.</li>
+      </ul>
+      <div class="callout warn"><p><strong>Research use.</strong> AlphaMissense scores are for research, not clinical use.</p></div>
+      <figure>
+        <div class="shot"><img src="../assets/img/alphamissense.webp" width="1600" height="1000" loading="lazy" alt="p53 bound to DNA (1TUP) colored by AlphaMissense, with the six most frequent cancer hotspots mapped and scored" /></div>
+        <figcaption>p53 bound to DNA (1TUP) colored by AlphaMissense, with the six most frequent cancer hotspots mapped and scored.</figcaption>
+      </figure>
+
+      <h2 id="crosslinks">Cross-links (XL-MS)</h2>
+      <p>Check cross-links against the structure by Cα–Cα distance and by solvent-accessible surface distance.</p>
+
+      <h3 id="crosslink-input">Loading cross-links</h3>
+      <p>Use any of:</p>
+      <ul>
+        <li>pasted links such as <code>A:K123-B:K45</code>;</li>
+        <li>CSV with <code>Protein1</code>, <code>Residue1</code>, <code>Protein2</code> and <code>Residue2</code> columns;</li>
+        <li>the export of xiFDR, xiVIEW, pLink 2/3, MeroX, XlinkX (Proteome Discoverer), MS Annika or MaxLynx.</li>
+      </ul>
+      <p>Decoys are left out, and repeated identifications merge into residue pairs. Proteins are matched to chains by chain ID, UniProt accession or name.</p>
+
+      <h3 id="crosslink-distances">Distances</h3>
+      <p><strong>Cα–Cα distances</strong> are checked against the maximum of the cross-linker you choose, for example:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Cross-linker</th><th>Maximum Cα–Cα distance</th></tr></thead>
+          <tbody>
+            <tr><td><strong>DSS/BS3</strong></td><td>30 Å</td></tr>
+            <tr><td><strong>DSSO</strong></td><td>30 Å</td></tr>
+            <tr><td><strong>PhoX</strong></td><td>20 Å</td></tr>
+            <tr><td><strong>EDC</strong></td><td>20 Å</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>Surface distance (SASD)</strong> measures the shortest path through solvent around the protein, which is the path a linker actually has to take, as Jwalk does (Bullock et al. 2016). Pairs beyond 33 Å are violated.</p>
+
+      <h3 id="crosslink-display">On the structure</h3>
+      <ul>
+        <li>A histogram shows the distance distribution against the cutoff.</li>
+        <li>Links are drawn green when satisfied and red when violated.</li>
+        <li>For homo-oligomers, the shortest chain pairing is used.</li>
+      </ul>
+      <figure>
+        <div class="shot"><img src="../assets/img/crosslinks-sasd.webp" width="1600" height="1000" loading="lazy" alt="Cross-links on yeast RNA polymerase II (1WCM) from xiVIEW's example data: links drawn on the structure, with the histogram of solvent-accessible surface distances (bars) and Cα–Cα distances (outlines)" /></div>
+        <figcaption>Cross-links on yeast RNA polymerase II (1WCM) from xiVIEW's example data: links drawn on the structure, with the histogram of solvent-accessible surface distances (bars) and Cα–Cα distances (outlines).</figcaption>
+      </figure>
+
+      <h2 id="hdx-ms">HDX-MS</h2>
+      <p>Open any of:</p>
+      <ul>
+        <li>DynamX state or cluster data;</li>
+        <li>HDExaminer results or uptake summaries;</li>
+        <li>an HDX data table in the community format (Masson et al. 2019).</li>
+      </ul>
+      <p>Peptides are matched to the chain sequences. Uptake is corrected for the undeuterated mass, charge states and replicates are combined, and exchangeable amides are counted as DynamX does.</p>
+
+      <h3 id="hdx-difference">Difference</h3>
+      <p><strong>Difference</strong> compares two states.</p>
+      <ul>
+        <li>Each peptide's ΔD is tested with the hybrid significance test (Hageman &amp; Weis 2019) when replicates are known, or against a fixed threshold otherwise.</li>
+        <li>The Woods plot shows every peptide over its residues.</li>
+        <li>The structure shows protection (blue) and deprotection (red), averaged per residue over overlapping peptides.</li>
+      </ul>
+
+      <h3 id="hdx-uptake">Uptake</h3>
+      <p><strong>Uptake</strong> shows the relative uptake of one state at one or all exposures.</p>
+      <figure>
+        <div class="shot"><img src="../assets/img/hdx-woods.webp" width="1600" height="1000" loading="lazy" alt="HDX-MS of CD160 with and without HVEM (HaDeX example data) on the CD160–HVEM complex (6NG3): the Woods plot of significant uptake differences and the protected region on the structure" /></div>
+        <figcaption>HDX-MS of CD160 with and without HVEM (HaDeX example data) on the CD160–HVEM complex (6NG3): the Woods plot of significant uptake differences and the protected region on the structure.</figcaption>
+      </figure>
+
+      <h2 id="custom-data">Custom residue data</h2>
+      <p>For any other per-residue values, such as HDX uptake, conservation or DMS fitness, paste <code>chain,residue,value</code> rows.</p>
+      <ul>
+        <li>Choose a colormap, optionally centered on zero, to color the structure.</li>
+        <li>The values are also plotted in the <a href="analysis.html#profile">per-residue profile</a>.</li>
+      </ul>
+
+      <h2 id="saving">Saving and exporting</h2>
+      <ul>
+        <li>The sites table, with its statistics, exports as CSV.</li>
+        <li>Sessions keep the proteomics overlays; AlphaMissense scores are fetched again when the session opens. See <a href="sessions.html">Sessions, figures and methods</a>.</li>
+      </ul>
+
+      <nav class="doc-pager" aria-label="Pages">
+        <a class="prev" href="analysis.html"><span>Previous</span>Analysis</a>
+        <a class="next" href="sessions.html"><span>Next</span>Sessions, figures and methods</a>
+      </nav>
+    </main>
+
+    <aside class="toc" aria-label="On this page">
+      <h4>On this page</h4>
+      <ul></ul>
+    </aside>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-about">
+          <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+          <p>A 3D viewer and analysis workbench for protein structures and structural proteomics. Free and open source under the Apache License 2.0.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul>
+            <li><a href="../#features">Features</a></li>
+            <li><a href="../install.html">Install</a></li>
+            <li><a href="../science.html">Science</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/blob/main/CHANGELOG.md">Changelog</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Documentation</h4>
+          <ul>
+            <li><a href="getting-started.html">Getting started</a></li>
+            <li><a href="commands.html">Commands</a></li>
+            <li><a href="scripting.html">Scripting</a></li>
+            <li><a href="troubleshooting.html">Troubleshooting</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope">GitHub</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/releases">Releases</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/issues">Issues</a></li>
+            <li><a href="../science.html#cite">Cite Proteoscope</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">Proteoscope is licensed under the Apache License 2.0. Structures shown are from the PDB (wwPDB) and AlphaFold DB; see <a href="../science.html#credits">data credits</a>.</div>
+    </div>
+  </footer>
+</body>
+</html>

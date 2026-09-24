@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Viewing and interactions · Proteoscope</title>
+  <meta name="description" content="Representations, color schemes, lighting presets, selection and focus, non-covalent interactions, measurements, and biological assemblies and ensembles in Proteoscope." />
+  <meta name="theme-color" content="#050708" />
+  <link rel="icon" href="../assets/img/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/css/site.css" />
+  <script>try { const t = localStorage.getItem('proteoscope-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+      <nav class="site-nav" id="site-nav" aria-label="Main">
+        <a href="../#features">Features</a>
+        <a href="./" aria-current="page">Documentation</a>
+        <a href="../install.html">Install</a>
+        <a href="../science.html">Science</a>
+      </nav>
+      <div class="header-actions">
+        <a class="icon-button" href="https://github.com/robert-mcdermott/proteoscope" aria-label="Proteoscope on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        </a>
+        <button class="icon-button theme-toggle" type="button" aria-label="Switch between light and dark">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <button class="icon-button nav-toggle" type="button" aria-label="Menu" aria-controls="site-nav" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <aside class="docs-sidebar" aria-label="Documentation">
+      <button class="btn docs-menu-toggle" type="button" aria-expanded="false">Documentation menu <span aria-hidden="true">▾</span></button>
+      <nav>
+        <h4>Start</h4>
+        <ul>
+          <li><a href="./">Overview</a></li>
+          <li><a href="getting-started.html">Getting started</a></li>
+          <li><a href="finding.html">Finding structures</a></li>
+        </ul>
+        <h4>Viewing</h4>
+        <ul>
+          <li><a href="viewing.html" aria-current="page">Viewing and interactions</a></li>
+          <li><a href="commands.html">Selections and commands</a></li>
+          <li><a href="comparing.html">Comparing structures</a></li>
+        </ul>
+        <h4>Checking models</h4>
+        <ul>
+          <li><a href="predictions.html">Predictions and AlphaFold</a></li>
+          <li><a href="validation.html">Validation and density maps</a></li>
+          <li><a href="ligands.html">Ligands and docking</a></li>
+          <li><a href="analysis.html">Analysis</a></li>
+        </ul>
+        <h4>Your data</h4>
+        <ul>
+          <li><a href="proteomics.html">Proteomics</a></li>
+        </ul>
+        <h4>Share and automate</h4>
+        <ul>
+          <li><a href="sessions.html">Sessions, figures and methods</a></li>
+          <li><a href="scripting.html">Scripting and command line</a></li>
+        </ul>
+        <h4>Reference</h4>
+        <ul>
+          <li><a href="formats.html">Supported files</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main id="main" class="doc">
+      <h1>Viewing and interactions</h1>
+      <p class="doc-lede">Choose how molecules are drawn, colored and lit, focus a residue or ligand to see how it binds, measure distances and angles, and work with biological assemblies and ensembles.</p>
+
+      <h2 id="representations">Representations</h2>
+      <p>The <strong>Representation</strong> presets in the Style tab set the polymer and ligand styles together. Press <kbd>1</kbd> cartoon, <kbd>2</kbd> ball and stick, <kbd>3</kbd> sticks, <kbd>4</kbd> spacefill, <kbd>5</kbd> trace or <kbd>6</kbd> surface, or run a command such as <code>preset sticks</code>. You can also set each component separately:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Component</th><th>Options</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Polymer</strong></td><td>Cartoon, trace, ball and stick, sticks, spacefill or hidden. The cartoon draws helices as ribbons, strands as flat arrows and loops as tubes, with smooth transitions. Nucleic acids get a phosphate-backbone tube with base slabs.</td></tr>
+            <tr><td><strong>Ligands and ions</strong></td><td>Ball and stick, sticks, spacefill or hidden. Ions are drawn as spheres, and metal-coordination bonds are dashed.</td></tr>
+            <tr><td><strong>Side chains</strong></td><td><strong>Around focus</strong> (the default) shows side chains within 5 Å of the focused residue or ligand. <strong>All</strong> shows every side chain on top of the cartoon.</td></tr>
+            <tr><td><strong>Water and hydrogens</strong></td><td>Toggles, also on the <kbd>W</kbd> and <kbd>H</kbd> keys.</td></tr>
+            <tr><td><strong>Surface</strong></td><td>Four surface types with their own coloring and opacity; see <a href="#surfaces">Surfaces</a>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>With several structures in the scene, changes in the Style tab apply to all of them or only to the active one.</p>
+      <p>Modified residues such as selenomethionine and phosphoserine stay part of the polymer. Unknown residues with a linked peptide or sugar-phosphate backbone are recognized automatically.</p>
+
+      <h3 id="surfaces">Surfaces</h3>
+      <ul>
+        <li><strong>Types:</strong> <strong>Molecular (SES)</strong>, <strong>Solvent accessible (SAS)</strong>, <strong>Gaussian</strong> or <strong>van der Waals</strong>.</li>
+        <li><strong>Coloring</strong> can match the color scheme, or show Coulombic electrostatics or hydrophobicity.</li>
+        <li><strong>Opacity</strong> is adjustable; a transparent surface shows the cartoon underneath.</li>
+        <li>Surfaces are computed in a background worker, taking about 0.2 s for a 5,000-atom protein.</li>
+      </ul>
+
+      <h2 id="colors">Color schemes</h2>
+      <p>Pick a color scheme in the Style tab. The legend in the view describes the active scheme and the surface coloring; click a legend's title to collapse it. The <code>color</code> command applies a scheme by name, for example <code>color chain</code> or <code>color plddt</code>. Schemes apply to whole structures; to color part of one, use a named color or hex value with a selection, as in <code>color magenta /A:315</code> (see <a href="commands.html">Selections and commands</a>).</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Scheme</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Chain / Molecule (entity)</strong></td><td>Palettes: Vivid, Colorblind-safe (Okabe-Ito), Muted (Tol), Pastel.</td></tr>
+            <tr><td><strong>Rainbow (N → C)</strong></td><td>Sequence position within each chain.</td></tr>
+            <tr><td><strong>Secondary structure</strong></td><td>Helix, strand, turn, coil.</td></tr>
+            <tr><td><strong>Molecule type</strong></td><td>Protein, nucleic acid, ligand, ion, water.</td></tr>
+            <tr><td><strong>Element</strong></td><td>Standard element colors.</td></tr>
+            <tr><td><strong>Residue class</strong></td><td>Hydrophobic, polar, positive, negative, nucleic acid, ligand.</td></tr>
+            <tr><td><strong>Hydrophobicity</strong></td><td>Kyte-Doolittle scale.</td></tr>
+            <tr><td><strong>Nucleotide</strong></td><td>A, C, G, U/T.</td></tr>
+            <tr><td><strong>B-factor</strong></td><td>Blue-white-red, viridis or magma colormaps.</td></tr>
+            <tr><td><strong>AlphaFold confidence (pLDDT)</strong></td><td>AlphaFold DB colors: above 90 dark blue, 70–90 light blue, 50–70 yellow, below 50 orange. Applied automatically to predicted models; ligands of AlphaFold 3, Boltz and Chai-1 models are colored per atom. See <a href="predictions.html">Predictions and AlphaFold</a>.</td></tr>
+            <tr><td><strong>PAE domains</strong></td><td>Rigid domains clustered from the PAE matrix (<strong>Find domains</strong>).</td></tr>
+            <tr><td><strong>MSA depth</strong></td><td>Aligned sequences per residue, on a log scale from red (1) to blue (≥ 1,000).</td></tr>
+            <tr><td><strong>Validation outliers (wwPDB)</strong></td><td>Outlier criteria per residue, as in the report's residue plot: green none, yellow 1, orange 2, red 3 or more. See <a href="validation.html">Validation and density maps</a>.</td></tr>
+            <tr><td><strong>Fit to density</strong></td><td>RSRZ (X-ray; above 2 is an outlier) or Q-score (cryo-EM), from the validation report.</td></tr>
+            <tr><td><strong>AlphaMissense pathogenicity</strong></td><td>Mean score of the 19 substitutions at each position, blue (benign) to red (pathogenic).</td></tr>
+            <tr><td><strong>Solvent exposure</strong></td><td>Relative SASA, after <strong>Compute SASA</strong>.</td></tr>
+            <tr><td><strong>Peptide coverage / Custom residue data</strong></td><td>From the Proteomics tab. See <a href="proteomics.html">Proteomics</a>.</td></tr>
+            <tr><td><strong>Structure</strong></td><td>One color per structure; the default when a scene holds several.</td></tr>
+            <tr><td><strong>Deviation after superposition</strong></td><td>Cα distance to the aligned residue, 0 to 4 Å (blue-white-red). See <a href="comparing.html">Comparing structures</a>.</td></tr>
+            <tr><td><strong>Local agreement (lDDT)</strong></td><td>Per-residue lDDT against the compared structure, in the pLDDT colors.</td></tr>
+            <tr><td><strong>Ensemble flexibility (RMSF)</strong></td><td>Per-residue RMSF across overlaid models.</td></tr>
+            <tr><td><strong>Uniform</strong></td><td>Any color.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>Heteroatoms by element</strong>, on by default, colors N, O, S and other non-carbon atoms by element in the structural schemes. Ligand carbons are green.</p>
+
+      <h2 id="lighting">Lighting and effects</h2>
+      <p>Lighting presets set the overall look, from standard shading to flat, outlined figures. Choose one in the Style tab, or run a command such as <code>lighting illustrative</code>.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Preset</th><th>Look</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Standard</strong></td><td>Key light plus headlamp, ambient occlusion, depth fog.</td></tr>
+            <tr><td><strong>Soft</strong></td><td>Strong ambient occlusion with little direct light, similar to ChimeraX "soft".</td></tr>
+            <tr><td><strong>Illustrative</strong></td><td>Flat colors, black outlines and ambient occlusion, for Goodsell-style figures.</td></tr>
+            <tr><td><strong>Glossy</strong></td><td>Strong specular highlights.</td></tr>
+            <tr><td><strong>Neon</strong></td><td>Additive glow on a dark background (the original Proteoscope look).</td></tr>
+            <tr><td><strong>Flat</strong></td><td>Unlit colors with outlines.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figure>
+        <div class="shot"><img src="../assets/img/spike-illustrative.webp" width="1400" height="1034" loading="lazy" alt="The SARS-CoV-2 spike (6VXX) as a molecular surface in flat colors with black outlines and ambient occlusion, its glycans in cream, on a transparent background" /></div>
+        <figcaption>The SARS-CoV-2 spike (6VXX) as a molecular surface with the Illustrative preset, glycans in cream, exported with a transparent background.</figcaption>
+      </figure>
+      <p>Beyond the presets, you can fine-tune the look:</p>
+      <ul>
+        <li><strong>Sliders</strong> for ambient occlusion strength and radius, outline, depth fog, glow and specular.</li>
+        <li><strong>Backgrounds:</strong> dark, black, gray or white, also set with <code>bg white</code> and the like.</li>
+        <li><strong>Front clip</strong> and <strong>Back clip</strong> cut slabs through the molecule without rebuilding geometry; clipped atoms are capped.</li>
+        <li><kbd>O</kbd> switches between orthographic and perspective projection.</li>
+      </ul>
+      <div class="callout"><p><strong>Figures.</strong> Press <kbd>P</kbd> (Export image) to render the view at up to 4× with an optional transparent background, as in the spike above, or run <code>png 4 transparent</code>. See <a href="sessions.html">Sessions, figures and methods</a>.</p></div>
+
+      <h2 id="selection">Selection, focus and interactions</h2>
+      <p>Click to select a residue; double-click to focus it. Focusing a residue or ligand frames its binding site and draws its non-covalent interactions.</p>
+      <figure>
+        <div class="shot"><img src="../assets/img/binding-site.webp" width="1600" height="1000" loading="lazy" alt="Imatinib in the ABL kinase pocket (2HYY) with dashed lines for its hydrogen bonds to Met318, Thr315, Glu286 and Asp381, salt bridges, π-stacking and hydrophobic contacts" /></div>
+        <figcaption>Imatinib in the ABL kinase pocket (2HYY), with hydrogen bonds to Met318, Thr315, Glu286 and Asp381, salt bridges, π-stacking and hydrophobic contacts.</figcaption>
+      </figure>
+
+      <h3 id="selecting">Selecting</h3>
+      <p>Click an atom to select its residue, and Shift-click to add more; clicking another structure makes it active. In the sequence panel, click to select, shift-click to add and drag for a range. <kbd>Esc</kbd> clears the selection. The <strong>Selection</strong> card in the right panel shows:</p>
+      <ul>
+        <li>the residue type, including modifications;</li>
+        <li>the secondary structure and its source, including the DSSP code;</li>
+        <li>the φ/ψ angles;</li>
+        <li>the B-factor or pLDDT;</li>
+        <li>the UniProt position;</li>
+        <li>relative SASA and proteomics values, when computed.</li>
+      </ul>
+      <p><strong>Sticks</strong>, <strong>Color</strong>, <strong>Hide</strong> and <strong>Reset</strong> on the Selection card apply to the selected residues, and <strong>All</strong> in the Chains card shows hidden residues again. To select by a rule, such as everything within 5 Å of a ligand, see <a href="commands.html">Selections and commands</a>.</p>
+
+      <h3 id="focusing">Focusing</h3>
+      <p>Double-click a residue or ligand, or select one and press <kbd>F</kbd>, to focus it. The <code>focus</code> command does the same for a selection, for example <code>focus resn HEM and chain A</code>. When you focus:</p>
+      <ul>
+        <li>the camera frames the binding site;</li>
+        <li>side chains within 5 Å appear;</li>
+        <li>non-covalent interactions are detected and drawn as colored dashed lines, and listed in the right panel.</li>
+      </ul>
+      <p><kbd>Esc</kbd> clears the focus.</p>
+
+      <h3 id="interactions">Interaction types</h3>
+      <p>The criteria follow PLIP (Salentin et al. 2015). Proteoscope detects:</p>
+      <ul>
+        <li>hydrogen bonds;</li>
+        <li>salt bridges;</li>
+        <li>π-stacking, parallel and T-shaped;</li>
+        <li>cation-π interactions;</li>
+        <li>hydrophobic contacts;</li>
+        <li>halogen bonds;</li>
+        <li>metal coordination;</li>
+        <li>water bridges, when water is shown.</li>
+      </ul>
+      <p>Each type can be toggled in the Analysis tab. <strong>Analyze interface</strong> lists the contacts between two chains (the <code>interface A B</code> command does the same), and <strong>Export CSV</strong> saves the interaction table. See <a href="analysis.html">Analysis</a> for the rest of the Analysis tab.</p>
+
+      <h3 id="ligand-chemistry">Ligand chemistry</h3>
+      <p>Bond orders, aromatic rings and formal charges come from the wwPDB Chemical Component Dictionary:</p>
+      <ul>
+        <li>from the file, when its mmCIF carries the dictionary tables (RCSB's files do);</li>
+        <li>from a built-in table for standard residues;</li>
+        <li>otherwise, from one small dictionary file per ligand, downloaded and cached.</li>
+      </ul>
+      <p>A dictionary entry applies only when the ligand's atom names match it. Sticks show double and triple bonds and aromatic rings; <strong>Bond orders</strong> in the Style tab applies them to ligands, to all residues, or turns them off.</p>
+      <p>Interactions use the same chemistry for donors, acceptors, aromatic rings and charged groups, with basic groups protonated by rule: in imatinib, only the methylpiperazine nitrogen is charged. For docked ligands, see <a href="ligands.html">Ligands and docking</a>.</p>
+
+      <h3 id="labels">Labels and chains</h3>
+      <ul>
+        <li><strong>Label</strong> (or <kbd>L</kbd>) adds 3D labels to the selected residues. The <code>label</code> and <code>unlabel</code> commands add and remove them.</li>
+        <li><strong>Isolate chain</strong> hides the other chains.</li>
+        <li>In the Chains card, click a chain to show or hide it, or double-click it to show only that chain.</li>
+      </ul>
+
+      <h2 id="measurements">Measurements</h2>
+      <p>Pick a ruler in the toolbar, or press <kbd>D</kbd> (distance), <kbd>A</kbd> (angle) or <kbd>T</kbd> (torsion, or dihedral), then click 2, 3 or 4 atoms. Values appear as 3D labels and in the <strong>Measurements</strong> card. Remove one with <strong>×</strong>, or press <kbd>Backspace</kbd> to remove the last; <kbd>Esc</kbd> clears the ruler.</p>
+      <p>The <code>distance</code> command measures between two atoms named as atom specs. For example, <code>distance /A:769@N to :AQ4@N2</code> measures the hinge hydrogen bond to erlotinib in 1M17 (2.70 Å).</p>
+
+      <h2 id="assemblies">Biological assemblies and ensembles</h2>
+      <ul>
+        <li><strong>Assemblies.</strong> When a file defines biological assemblies (PDBx/mmCIF <code>pdbx_struct_assembly</code> or PDB <code>REMARK 350</code>), choose one under <strong>Biological assembly</strong> in the Structure tab. The <code>assembly</code> command lists them, <code>assembly &lt;id&gt;</code> builds one, and <code>assembly au</code> returns to the asymmetric unit. Assemblies above 300,000 atoms per model are shown as unavailable.</li>
+        <li><strong>Ensembles.</strong> Multi-model files, such as NMR ensembles, show a model slider with a play button. <strong>Overlay models</strong> in the Analysis tab (or the <code>overlay</code> command) superposes every model on the core they share and shows them all at once, with the mean RMSD and per-residue RMSF; color by <strong>Ensemble flexibility (RMSF)</strong> to see the flexible regions.</li>
+      </ul>
+      <div class="callout warn"><p><strong>Assemblies and superposition.</strong> Changing the assembly of a structure undoes its superposition, because assembly operators are defined in the deposited coordinate frame. See <a href="comparing.html">Comparing structures</a>.</p></div>
+
+      <nav class="doc-pager" aria-label="Pages">
+        <a class="prev" href="finding.html"><span>Previous</span>Finding structures</a>
+        <a class="next" href="commands.html"><span>Next</span>Selections and commands</a>
+      </nav>
+    </main>
+
+    <aside class="toc" aria-label="On this page">
+      <h4>On this page</h4>
+      <ul></ul>
+    </aside>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-about">
+          <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+          <p>A 3D viewer and analysis workbench for protein structures and structural proteomics. Free and open source under the Apache License 2.0.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul>
+            <li><a href="../#features">Features</a></li>
+            <li><a href="../install.html">Install</a></li>
+            <li><a href="../science.html">Science</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/blob/main/CHANGELOG.md">Changelog</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Documentation</h4>
+          <ul>
+            <li><a href="getting-started.html">Getting started</a></li>
+            <li><a href="commands.html">Commands</a></li>
+            <li><a href="scripting.html">Scripting</a></li>
+            <li><a href="troubleshooting.html">Troubleshooting</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope">GitHub</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/releases">Releases</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/issues">Issues</a></li>
+            <li><a href="../science.html#cite">Cite Proteoscope</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">Proteoscope is licensed under the Apache License 2.0. Structures shown are from the PDB (wwPDB) and AlphaFold DB; see <a href="../science.html#credits">data credits</a>.</div>
+    </div>
+  </footer>
+</body>
+</html>

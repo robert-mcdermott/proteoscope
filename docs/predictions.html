@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Predictions and AlphaFold · Proteoscope</title>
+  <meta name="description" content="Open AlphaFold DB models and AlphaFold 3, AlphaFold Server, Boltz, Chai-1, ColabFold, Protenix and OpenFold3 output; rank models and score interfaces with pLDDT, PAE, ipTM, ipSAE, pDockQ and LIS." />
+  <meta name="theme-color" content="#050708" />
+  <link rel="icon" href="../assets/img/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/css/site.css" />
+  <script>try { const t = localStorage.getItem('proteoscope-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+      <nav class="site-nav" id="site-nav" aria-label="Main">
+        <a href="../#features">Features</a>
+        <a href="./" aria-current="page">Documentation</a>
+        <a href="../install.html">Install</a>
+        <a href="../science.html">Science</a>
+      </nav>
+      <div class="header-actions">
+        <a class="icon-button" href="https://github.com/robert-mcdermott/proteoscope" aria-label="Proteoscope on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        </a>
+        <button class="icon-button theme-toggle" type="button" aria-label="Switch between light and dark">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <button class="icon-button nav-toggle" type="button" aria-label="Menu" aria-controls="site-nav" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <aside class="docs-sidebar" aria-label="Documentation">
+      <button class="btn docs-menu-toggle" type="button" aria-expanded="false">Documentation menu <span aria-hidden="true">▾</span></button>
+      <nav>
+        <h4>Start</h4>
+        <ul>
+          <li><a href="./">Overview</a></li>
+          <li><a href="getting-started.html">Getting started</a></li>
+          <li><a href="finding.html">Finding structures</a></li>
+        </ul>
+        <h4>Viewing</h4>
+        <ul>
+          <li><a href="viewing.html">Viewing and interactions</a></li>
+          <li><a href="commands.html">Selections and commands</a></li>
+          <li><a href="comparing.html">Comparing structures</a></li>
+        </ul>
+        <h4>Checking models</h4>
+        <ul>
+          <li><a href="predictions.html" aria-current="page">Predictions and AlphaFold</a></li>
+          <li><a href="validation.html">Validation and density maps</a></li>
+          <li><a href="ligands.html">Ligands and docking</a></li>
+          <li><a href="analysis.html">Analysis</a></li>
+        </ul>
+        <h4>Your data</h4>
+        <ul>
+          <li><a href="proteomics.html">Proteomics</a></li>
+        </ul>
+        <h4>Share and automate</h4>
+        <ul>
+          <li><a href="sessions.html">Sessions, figures and methods</a></li>
+          <li><a href="scripting.html">Scripting and command line</a></li>
+        </ul>
+        <h4>Reference</h4>
+        <ul>
+          <li><a href="formats.html">Supported files</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main id="main" class="doc">
+      <h1>Predictions and AlphaFold</h1>
+      <p class="doc-lede">Open AlphaFold DB models and the output of structure predictors, rank the models of a run, and use pLDDT, the predicted aligned error and interface scores to decide which parts and which interactions to believe.</p>
+
+      <h2 id="alphafold-db">AlphaFold DB models</h2>
+      <p>To open the AlphaFold DB model of a protein, type its UniProt accession (for example <code>P04637</code>) in <strong>Open structure</strong>, where you would type a PDB ID. The current AlphaFold DB model and its predicted aligned error (PAE) matrix are downloaded.</p>
+      <ul>
+        <li><a href="finding.html">Finding structures</a> lists a protein's models from 3D-Beacons, AlphaFold DB first, next to its experimental structures.</li>
+        <li><strong>Compare with AlphaFold</strong> superposes the AlphaFold DB model on an experimental entry by UniProt numbering. See <a href="comparing.html#alphafold">Comparing structures</a>.</li>
+        <li>The bundled example AF-P04637-F1 is the AlphaFold model of p53 with its PAE, so you can try pLDDT coloring and the PAE offline.</li>
+      </ul>
+      <figure>
+        <div class="shot"><img src="../assets/img/alphafold-pae.webp" width="1600" height="1000" loading="lazy" alt="AlphaFold DB model of p53 (P04637) colored by pLDDT, with the per-residue confidence profile and the predicted aligned error matrix" /></div>
+        <figcaption>The AlphaFold DB model of p53 (P04637) colored by pLDDT, with the per-residue confidence profile and the predicted aligned error matrix.</figcaption>
+      </figure>
+
+      <h2 id="plddt">Confidence per residue (pLDDT)</h2>
+      <p>The <strong>AlphaFold confidence (pLDDT)</strong> color scheme uses the AlphaFold DB colors. It is applied automatically to predicted models, and the ligands of AlphaFold 3, Boltz and Chai-1 models are colored per atom.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>pLDDT</th><th>Color</th></tr></thead>
+          <tbody>
+            <tr><td>Above 90</td><td>Dark blue</td></tr>
+            <tr><td>70–90</td><td>Light blue</td></tr>
+            <tr><td>50–70</td><td>Yellow</td></tr>
+            <tr><td>Below 50</td><td>Orange</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul>
+        <li>The selection card shows each residue's pLDDT, and the per-residue profile in the Analysis tab plots it along the sequence.</li>
+        <li>Select low-confidence residues with a value such as <code>plddt &lt; 70</code>.</li>
+      </ul>
+      <p>Proteoscope recognizes a predicted model from its ModelCIF records, the method and software names (AlphaFold, ColabFold, ESMFold, Boltz, Chai-1, OpenFold), or Protenix's data block name, and every model opened from a prediction folder is one. For these models the B-factor column is read as pLDDT, rescaled when a predictor writes it on a 0–1 scale. ModelCIF confidences on a 0–1 scale (SWISS-MODEL) are rescaled too.</p>
+
+      <h2 id="pae">Predicted aligned error</h2>
+      <p>The Analysis tab shows the PAE heatmap for AlphaFold models and predictions. Drag a rectangle on the heatmap to select the residues of both ranges in 3D.</p>
+      <ul>
+        <li><strong>Contact probability</strong> switches the heatmap to AlphaFold 3's contact probabilities.</li>
+        <li><strong>Find domains</strong> clusters the PAE into rigid domains. This follows ChimeraX's <code>alphafold pae colorDomains</code>: residue pairs under 5 Å PAE are weighted by 1/PAE and grouped by greedy modularity. It lists each domain's residues and mean pLDDT, and the <strong>PAE domains</strong> color scheme colors by domain.</li>
+        <li><strong>MSA depth</strong> colors each residue by the number of sequences aligned to it, on a log scale from red (1) to blue (≥ 1,000). It works for AlphaFold DB models, prediction folders, or a dropped <code>.a3m</code>. Shallow alignments are the most common cause of low confidence. Select shallow regions with a value such as <code>msa &lt; 30</code>.</li>
+      </ul>
+      <figure>
+        <div class="shot"><img src="../assets/img/pae-domains.webp" width="1600" height="1000" loading="lazy" alt="The AlphaFold DB model of p53 (P04637) split into rigid domains from its PAE: the DNA-binding domain, the N-terminal transactivation region and the C-terminal region with the tetramerization helix" /></div>
+        <figcaption>The AlphaFold DB model of p53 (P04637) split into rigid domains from its PAE: the DNA-binding domain, the N-terminal transactivation region, and the C-terminal region with the tetramerization helix.</figcaption>
+      </figure>
+      <p>The PAE is also used by part-sphere exposure (pPSE): a neighbor counts only when its distance plus the PAE is within the radius. See <a href="analysis.html">Analysis</a>.</p>
+
+      <h3 id="pae-files">Adding PAE and alignments to a model</h3>
+      <p>You can also drop these files onto a loaded model:</p>
+      <ul>
+        <li><strong>PAE:</strong> AlphaFold DB, AlphaFold 3 and ColabFold <code>.json</code>, or Boltz <code>.npz</code>.</li>
+        <li><strong>Alignments:</strong> <code>.a3m</code>, aligned <code>.fasta</code>, Stockholm <code>.sto</code> or Clustal <code>.aln</code>. An alignment gives MSA depth and <a href="analysis.html">conservation</a>.</li>
+      </ul>
+
+      <h2 id="opening-predictions">Opening prediction output</h2>
+      <p>Structure predictors write a folder of ranked models with their confidence data. Proteoscope reads the whole folder, ranks the models, and scores every interface, so you can decide which predicted interactions to believe without uploading anything. To open one:</p>
+      <ul>
+        <li>Drop the folder onto the window, or choose it with <strong>Open prediction folder…</strong>.</li>
+        <li>Drop the AlphaFold Server <code>.zip</code>.</li>
+        <li>Name the folder on the command line:</li>
+      </ul>
+      <div class="code"><pre><code><span class="prompt">$ </span>proteoscope af3_output/my_job/</code></pre></div>
+      <div class="callout"><p><strong>Tip.</strong> Open the whole output folder, or the AlphaFold Server <code>.zip</code>, rather than a single model file, so the confidence files come along.</p></div>
+
+      <h3 id="tools">What is read from each tool</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tool</th><th>Models</th><th>Confidence</th></tr></thead>
+          <tbody>
+            <tr><td><strong>AlphaFold 3</strong></td><td><code>seed-*_sample-*/…model.cif</code></td><td><code>summary_confidences.json</code> (ranking score, pTM, ipTM, chain-pair ipTM), <code>confidences.json</code> (PAE, contact probabilities, per-atom pLDDT), MSAs from <code>…_data.json</code></td></tr>
+            <tr><td><strong>AlphaFold Server</strong></td><td><code>fold_*_model_N.cif</code> in the downloaded <code>.zip</code></td><td><code>summary_confidences_N.json</code>, <code>full_data_N.json</code></td></tr>
+            <tr><td><strong>Boltz-1 / Boltz-2</strong></td><td><code>…_model_N.cif</code></td><td><code>confidence_…json</code>, <code>pae_…npz</code> (written with <code>--write_full_pae</code>), <code>plddt_…npz</code>, Boltz-2 <code>affinity_…json</code>, MSAs from <code>msa/</code></td></tr>
+            <tr><td><strong>Chai-1</strong></td><td><code>pred.model_idx_N.cif</code></td><td><code>scores.model_idx_N.npz</code> (aggregate score, pTM, ipTM, chain-pair ipTM, clashes)</td></tr>
+            <tr><td><strong>ColabFold</strong></td><td><code>…_relaxed_rank_…pdb</code> (else unrelaxed)</td><td><code>…_scores_rank_…json</code> (pLDDT, PAE, pTM, ipTM), <code>.a3m</code></td></tr>
+            <tr><td><strong>Protenix</strong></td><td><code>seed_*/predictions/…_sample_N.cif</code></td><td><code>…_summary_confidence_sample_N.json</code> (ranking score, pTM, ipTM, chain-pair ipTM), <code>…_full_data_sample_N.json</code> (PAE and contact probabilities, written with <code>--need_atom_confidence</code>)</td></tr>
+            <tr><td><strong>OpenFold3</strong></td><td><code>…_seed_S_sample_N_model.cif</code> or <code>.pdb</code></td><td><code>…_confidences_aggregated.json</code> (sample ranking score, pTM, ipTM, chain-pair ipTM), <code>…_confidences.json</code> or <code>.npz</code> (PAE)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul>
+        <li>AlphaFold 3 runs saved with <code>--compress_large_output_files</code> (<code>.zst</code> models and confidences) open as they are.</li>
+        <li>Samples from several seeds form one ranked set.</li>
+        <li>Other files in a prediction folder (logs, settings, templates, inputs) are left alone.</li>
+        <li>Chai-1 does not write PAE to disk, so its models get the scores Chai reports but not the PAE-based ones.</li>
+      </ul>
+
+      <h2 id="ranking">Ranking models</h2>
+      <p>The <strong>Prediction</strong> group in the Structure tab lists the models by the tool's own ranking score.</p>
+      <ul>
+        <li>Click a model to show it in place of the current one.</li>
+        <li><strong>Superpose all models</strong> opens them all, superposed on the top-ranked model, so you can see where they disagree.</li>
+        <li><strong>Export CSV</strong> saves every model and chain pair with the <a href="#interface-scores">interface scores</a>.</li>
+        <li>The <code>ranking</code> command lists them from the command line.</li>
+      </ul>
+      <figure>
+        <div class="shot"><img src="../assets/img/predicted-complex.webp" width="1600" height="1000" loading="lazy" alt="Aurora A with TPX2 predicted by AlphaFold Server, with the ranked models, the chain-pair ipSAE matrix and the table of interface scores" /></div>
+        <figcaption>Aurora A with TPX2 predicted by AlphaFold Server, the example of Dunbrack's ipSAE repository: the ranking, the chain-pair ipSAE matrix and interface scores; ipSAE 0.87, pDockQ2 0.71.</figcaption>
+      </figure>
+
+      <h2 id="interface-scores">Interface scores</h2>
+      <p>For each chain pair, Proteoscope computes interface scores from the model's PAE, pLDDT and coordinates, with the definitions of Dunbrack's <code>ipsae.py</code>.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Score</th><th>What it is</th></tr></thead>
+          <tbody>
+            <tr><td><strong>ipTM</strong></td><td>As the predictor reports it; for ColabFold, recomputed from the PAE.</td></tr>
+            <tr><td><strong>ipSAE</strong> (Dunbrack 2025)</td><td>pTM-style scores averaged only over residue pairs whose PAE is below 10 Å (15 Å for AlphaFold 2 / ColabFold), so disordered tails and extra domains do not drag the score down the way they do ipTM.</td></tr>
+            <tr><td><strong>pDockQ</strong> (Bryant et al. 2022)</td><td>From the interface pLDDT and the number of Cβ contacts within 8 Å.</td></tr>
+            <tr><td><strong>pDockQ2</strong> (Zhu et al. 2023)</td><td>From the interface pLDDT, the number of Cβ contacts within 8 Å, and the PAE of the contacting pairs.</td></tr>
+            <tr><td><strong>LIS</strong> (Kim et al. 2024)</td><td>The mean of (12 − PAE)/12 over inter-chain pairs with PAE below 12 Å.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The matrix under the score table shows ipTM for every chain pair, with chain pTM on the diagonal. Switch it to ipSAE or pDockQ2, and click a cell to select that interface.</p>
+
+      <h3 id="ipsae-check">Checked against ipsae.py</h3>
+      <p>These scores reproduce <code>ipsae.py</code> (version 4) to its printed precision on the AlphaFold 3 (Aurora A–TPX2) and AlphaFold 2 multimer (RAF1–KSR1–MEK1) examples of the IPSAE repository, and on a Boltz-2 prediction. A unit test pins them to <code>ipsae.py</code> output at both PAE cutoffs. The example outputs in that repository predate version 4 and count PAE = 12 Å in LIS, so their LIS differs in the fourth decimal.</p>
+
+      <h2 id="more-confidence">More confidence data</h2>
+      <ul>
+        <li><strong>Contact probability</strong> (AlphaFold 3) sits next to the PAE in the Analysis tab.</li>
+        <li><strong>Find domains</strong> clusters the PAE into rigid domains as ChimeraX does; see <a href="#pae">Predicted aligned error</a>.</li>
+        <li><strong>MSA depth</strong> colors each residue by how many sequences were aligned to it. Shallow alignments are the most common cause of low confidence.</li>
+        <li><strong>Cross-links</strong> mapped in the Proteomics tab add a column with how many links each model satisfies. See <a href="proteomics.html">Proteomics</a>.</li>
+      </ul>
+
+      <h2 id="sessions">Predictions in sessions</h2>
+      <p>Sessions keep the model, its PAE, contact probabilities and scores:</p>
+      <ul>
+        <li>PAE matrices and contact probabilities you opened are saved (at 0.125 Å and 1/255 steps), with the prediction scores and MSA depth.</li>
+        <li>PAE domains are recomputed when the session opens, and AlphaFold DB PAE matrices are fetched again.</li>
+      </ul>
+      <p>See <a href="sessions.html">Sessions, figures and methods</a>. The related commands are <code>alphafold</code>, <code>ranking</code>, <code>domains</code> and <code>msa</code>; the help dialog (<kbd>?</kbd>) lists the syntax of each.</p>
+
+      <nav class="doc-pager" aria-label="Pages">
+        <a class="prev" href="comparing.html"><span>Previous</span>Comparing structures</a>
+        <a class="next" href="validation.html"><span>Next</span>Validation and density maps</a>
+      </nav>
+    </main>
+
+    <aside class="toc" aria-label="On this page">
+      <h4>On this page</h4>
+      <ul></ul>
+    </aside>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-about">
+          <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+          <p>A 3D viewer and analysis workbench for protein structures and structural proteomics. Free and open source under the Apache License 2.0.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul>
+            <li><a href="../#features">Features</a></li>
+            <li><a href="../install.html">Install</a></li>
+            <li><a href="../science.html">Science</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/blob/main/CHANGELOG.md">Changelog</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Documentation</h4>
+          <ul>
+            <li><a href="getting-started.html">Getting started</a></li>
+            <li><a href="commands.html">Commands</a></li>
+            <li><a href="scripting.html">Scripting</a></li>
+            <li><a href="troubleshooting.html">Troubleshooting</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope">GitHub</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/releases">Releases</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/issues">Issues</a></li>
+            <li><a href="../science.html#cite">Cite Proteoscope</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">Proteoscope is licensed under the Apache License 2.0. Structures shown are from the PDB (wwPDB) and AlphaFold DB; see <a href="../science.html#credits">data credits</a>.</div>
+    </div>
+  </footer>
+</body>
+</html>

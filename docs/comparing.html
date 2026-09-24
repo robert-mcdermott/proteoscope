@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Comparing structures · Proteoscope</title>
+  <meta name="description" content="Load several structures, superpose them by sequence or by structure alone with TM-align, color by deviation or lDDT, and compare an experimental structure with its AlphaFold model." />
+  <meta name="theme-color" content="#050708" />
+  <link rel="icon" href="../assets/img/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/css/site.css" />
+  <script>try { const t = localStorage.getItem('proteoscope-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+      <nav class="site-nav" id="site-nav" aria-label="Main">
+        <a href="../#features">Features</a>
+        <a href="./" aria-current="page">Documentation</a>
+        <a href="../install.html">Install</a>
+        <a href="../science.html">Science</a>
+      </nav>
+      <div class="header-actions">
+        <a class="icon-button" href="https://github.com/robert-mcdermott/proteoscope" aria-label="Proteoscope on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        </a>
+        <button class="icon-button theme-toggle" type="button" aria-label="Switch between light and dark">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <button class="icon-button nav-toggle" type="button" aria-label="Menu" aria-controls="site-nav" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <aside class="docs-sidebar" aria-label="Documentation">
+      <button class="btn docs-menu-toggle" type="button" aria-expanded="false">Documentation menu <span aria-hidden="true">▾</span></button>
+      <nav>
+        <h4>Start</h4>
+        <ul>
+          <li><a href="./">Overview</a></li>
+          <li><a href="getting-started.html">Getting started</a></li>
+          <li><a href="finding.html">Finding structures</a></li>
+        </ul>
+        <h4>Viewing</h4>
+        <ul>
+          <li><a href="viewing.html">Viewing and interactions</a></li>
+          <li><a href="commands.html">Selections and commands</a></li>
+          <li><a href="comparing.html" aria-current="page">Comparing structures</a></li>
+        </ul>
+        <h4>Checking models</h4>
+        <ul>
+          <li><a href="predictions.html">Predictions and AlphaFold</a></li>
+          <li><a href="validation.html">Validation and density maps</a></li>
+          <li><a href="ligands.html">Ligands and docking</a></li>
+          <li><a href="analysis.html">Analysis</a></li>
+        </ul>
+        <h4>Your data</h4>
+        <ul>
+          <li><a href="proteomics.html">Proteomics</a></li>
+        </ul>
+        <h4>Share and automate</h4>
+        <ul>
+          <li><a href="sessions.html">Sessions, figures and methods</a></li>
+          <li><a href="scripting.html">Scripting and command line</a></li>
+        </ul>
+        <h4>Reference</h4>
+        <ul>
+          <li><a href="formats.html">Supported files</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main id="main" class="doc">
+      <h1>Comparing structures</h1>
+      <p class="doc-lede">Put several structures in one scene, superpose them by sequence or by structure alone, and see where they differ. You can also compare an experimental structure with its AlphaFold model, or overlay the models of an NMR ensemble.</p>
+
+      <h2 id="loading">Loading several structures</h2>
+      <p>A new structure normally replaces the scene. To keep what is already there, use any of these:</p>
+      <ul>
+        <li>Tick <strong>Add to the scene instead of replacing</strong> before you fetch or open a structure.</li>
+        <li>Drop several files onto the window at once.</li>
+        <li>Name several files on the command line when you start Proteoscope.</li>
+        <li>Use a link such as <code>http://127.0.0.1:8765/#fetch=4AKE,1AKE&amp;superpose</code>, which loads both entries and superposes the second onto the first.</li>
+        <li>In <a href="finding.html">Finding structures</a>, <strong>Add</strong> adds a structure superposed on the active one.</li>
+      </ul>
+      <p>With several structures in the scene, the <strong>Structure</strong> color scheme gives each one its own color; it is the default when a scene holds several.</p>
+
+      <h3 id="structures-list">The structures list</h3>
+      <p>The structures list in the Structure tab shows every structure with its color.</p>
+      <ul>
+        <li>Click a structure, in the list or in the 3D view, to make it active. The metadata, chains, sequence, selection and the Analysis and Proteomics tabs follow the active structure.</li>
+        <li>The eye button hides a structure, and <strong>×</strong> removes it.</li>
+        <li>Changes in the Style tab apply to all structures or only to the active one; you choose the scope.</li>
+      </ul>
+
+      <h2 id="superpose">Superposing by sequence</h2>
+      <p><strong>Superpose</strong> in the Analysis tab, or the <code>superpose</code> command, moves one structure, or all the others, onto a reference.</p>
+      <ul>
+        <li><strong>Pairing residues.</strong> Residues are paired by a global alignment (BLOSUM62 blended with secondary structure, as in ChimeraX <em>matchmaker</em>), and the principal atoms (Cα, or C4′ in nucleic acids) are fitted by least squares.</li>
+        <li><strong>Pruning outliers.</strong> Pairs more than 2 Å apart are pruned iteratively, so a flexible loop or a moving domain does not drag the fit. <strong>Fit on selected residues</strong> fits on a domain or binding site you selected.</li>
+        <li><strong>Chains.</strong> Chains are paired automatically by sequence, and identical subunits by position; choose chains to compare one pair. When the chains of a complex are arranged differently, the fit uses the chain pair that superposes best.</li>
+      </ul>
+      <p>From the command line, this superposes 1AKE onto 4AKE, fitting on the adenylate kinase CORE domain:</p>
+      <div class="code"><pre><code>superpose 1AKE onto 4AKE fit /A:1-29+60-121+160-214</code></pre></div>
+
+      <h3 id="superpose-report">What the result reports</h3>
+      <ul>
+        <li>RMSD of the fitted core and of all pairs</li>
+        <li>TM-score, normalized by the reference</li>
+        <li>lDDT</li>
+        <li>Sequence identity</li>
+        <li>The number of pairs within 2 Å</li>
+        <li>For complexes, a per-chain table</li>
+      </ul>
+      <p>After a superposition, the sequence panel shows a second row with the aligned residues of the other structure, with substitutions highlighted.</p>
+
+      <h2 id="structure-only">Structure-only pairing</h2>
+      <p>Remote homologs have sequences that align poorly. For them, set <strong>Pair residues by</strong> to <em>Structure (TM-align)</em>, or run <code>tmalign</code>. Residues are then paired by structure alone with TM-align (MM-align for complexes), ported from US-align and giving its scores.</p>
+      <ul>
+        <li>The report adds the TM-score normalized by each structure, and the aligned length.</li>
+        <li>Coloring, the aligned sequences and sessions work as they do for sequence pairing.</li>
+      </ul>
+      <p>This superposes SUMO-1 on ubiquitin by structure alone:</p>
+      <div class="code"><pre><code>tmalign 1A5R onto 1UBQ</code></pre></div>
+
+      <h2 id="differences">Seeing the differences</h2>
+      <figure>
+        <div class="shot"><img src="../assets/img/compare-deviation.webp" width="1600" height="1000" loading="lazy" alt="Adenylate kinase open (4AKE) and closed (1AKE, with the inhibitor Ap5A) superposed on the CORE domain and colored by Cα deviation, with the LID and NMP domains in red" /></div>
+        <figcaption>Adenylate kinase open (4AKE) and closed (1AKE, with the inhibitor Ap5A) superposed on the CORE domain and colored by Cα deviation: the LID and NMP domains that close over the substrate are red.</figcaption>
+      </figure>
+      <p>Two color schemes show how the structures differ:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Scheme</th><th>What it shows</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Deviation after superposition</strong></td><td>The Cα distance to the aligned residue, from 0 to 4 Å (blue-white-red).</td></tr>
+            <tr><td><strong>Local agreement (lDDT)</strong></td><td>Per-residue lDDT against the compared structure, in the pLDDT colors. lDDT compares local distances and needs no superposition, so a hinge motion does not mask a well-preserved domain.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul>
+        <li>Hovering a residue shows its deviation.</li>
+        <li>Selecting or hovering a residue highlights the aligned residue in the other structure.</li>
+        <li>Focusing a binding site shows the matching side chains in both structures.</li>
+        <li><strong>Trim to aligned region</strong> hides residues outside the compared span.</li>
+        <li>Measurements work between structures.</li>
+      </ul>
+      <p>Comparison values also work in <a href="commands.html">selections</a>:</p>
+      <ul>
+        <li><code>deviation &gt; 2</code> and <code>lddt &lt; 0.7</code> select by deviation or local agreement; <code>select deviation &gt; 5</code> selects the residues that moved more than 5 Å after superposing.</li>
+        <li><code>aligned</code> is the set of residues paired in a comparison.</li>
+        <li>Distances reach across structures, so <code>within 5 of (#1 and ligand)</code> finds residues of a superposed structure near another structure's ligand.</li>
+      </ul>
+
+      <h2 id="alphafold">Comparing with AlphaFold</h2>
+      <p><strong>Compare with AlphaFold</strong> fetches the AlphaFold DB model for each UniProt accession of the active entry and superposes it by UniProt numbering.</p>
+      <ul>
+        <li>The experimental structure turns gray.</li>
+        <li>The model keeps its pLDDT colors and is trimmed to the aligned span.</li>
+        <li>The model's PAE matrix is available when the model is active.</li>
+      </ul>
+      <figure>
+        <div class="shot"><img src="../assets/img/compare-alphafold.webp" width="1600" height="1000" loading="lazy" alt="EGFR kinase domain with erlotinib (1M17, gray) and the AlphaFold DB model of EGFR (P00533) superposed by UniProt numbering and colored by pLDDT" /></div>
+        <figcaption>The EGFR kinase domain with erlotinib (1M17, gray) and the AlphaFold DB model of EGFR (P00533), superposed by UniProt numbering and colored by pLDDT.</figcaption>
+      </figure>
+      <p>For what pLDDT and PAE tell you about the model, see <a href="predictions.html">Predictions and AlphaFold</a>.</p>
+
+      <h2 id="ensembles">Overlaying ensemble models</h2>
+      <p>Multi-model files, such as NMR ensembles, show a model slider with a play button. <strong>Overlay models</strong> in the Analysis tab superposes every model of the ensemble on the core the models share and shows them together, with the mean RMSD and per-residue RMSF.</p>
+      <ul>
+        <li>Color by <strong>Ensemble flexibility (RMSF)</strong> to see the flexible regions.</li>
+        <li>Select them with a value such as <code>rmsf &gt; 2</code>.</li>
+      </ul>
+      <div class="callout warn"><p><strong>Assemblies and superpositions.</strong> Changing the biological assembly of a structure undoes its superposition, because assembly operators are defined in the deposited coordinate frame.</p></div>
+
+      <h2 id="try-it">Try it and keep it</h2>
+      <ul>
+        <li>The conformational-change group of <strong>Bundled examples</strong> (Structure tab) has structures to compare: 4AKE and 1AKE, adenylate kinase open and closed (superposed on the CORE domain); 4HHB and 1HHO, hemoglobin in the T and R states; and 1JM7, the BRCA1–BARD1 NMR ensemble. See <a href="getting-started.html#examples">Bundled examples</a>.</li>
+        <li>Sessions record superpositions (refitted when the session opens), ensemble overlays and trimming. See <a href="sessions.html">Sessions, figures and methods</a>.</li>
+        <li>The related commands are <code>superpose</code>, <code>tmalign</code>, <code>alphafold</code> and <code>overlay</code>. The help dialog (<kbd>?</kbd>) lists the syntax of each.</li>
+      </ul>
+
+      <h2 id="checked">Checked against known cases</h2>
+      <p>The comparison tools give these results on well-studied pairs:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Comparison</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td>Adenylate kinase closed (1AKE) onto open (4AKE), chain A</td><td>1.08 Å over 112 core pairs; TM-score 0.68; the LID and NMP domains deviate</td></tr>
+            <tr><td>Human α-globin vs β-globin (4HHB chains A and B)</td><td>44.6% identity with the D-helix gap; 1.10 Å over 120 pairs; TM-score 0.89</td></tr>
+            <tr><td>EGFR (1M17) vs AlphaFold model P00533</td><td>0.78 Å over 249 of 312 pairs; TM-score 0.89; lDDT 0.92</td></tr>
+            <tr><td>Hemoglobin R state (1HHO assembly) onto T state (4HHB)</td><td>One αβ dimer fits within 1.1–1.5 Å, the other is rotated (2.7–4.5 Å)</td></tr>
+            <tr><td>SUMO-1 (1A5R) onto ubiquitin (1UBQ), structure-only</td><td>71 pairs at 2.36 Å, TM-score 0.654, as US-align gives; sequence pairing reaches 0.625</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <nav class="doc-pager" aria-label="Pages">
+        <a class="prev" href="commands.html"><span>Previous</span>Selections and commands</a>
+        <a class="next" href="predictions.html"><span>Next</span>Predictions and AlphaFold</a>
+      </nav>
+    </main>
+
+    <aside class="toc" aria-label="On this page">
+      <h4>On this page</h4>
+      <ul></ul>
+    </aside>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-about">
+          <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+          <p>A 3D viewer and analysis workbench for protein structures and structural proteomics. Free and open source under the Apache License 2.0.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul>
+            <li><a href="../#features">Features</a></li>
+            <li><a href="../install.html">Install</a></li>
+            <li><a href="../science.html">Science</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/blob/main/CHANGELOG.md">Changelog</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Documentation</h4>
+          <ul>
+            <li><a href="getting-started.html">Getting started</a></li>
+            <li><a href="commands.html">Commands</a></li>
+            <li><a href="scripting.html">Scripting</a></li>
+            <li><a href="troubleshooting.html">Troubleshooting</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope">GitHub</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/releases">Releases</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/issues">Issues</a></li>
+            <li><a href="../science.html#cite">Cite Proteoscope</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">Proteoscope is licensed under the Apache License 2.0. Structures shown are from the PDB (wwPDB) and AlphaFold DB; see <a href="../science.html#credits">data credits</a>.</div>
+    </div>
+  </footer>
+</body>
+</html>
