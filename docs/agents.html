@@ -85,7 +85,7 @@
 
       <h2 id="requirements">Requirements</h2>
       <ul>
-        <li><strong>Proteoscope 0.7.0 or later.</strong> <code>proteoscope --version</code> prints yours; to upgrade, <a href="../install.html">install the latest release</a>.</li>
+        <li><strong>Proteoscope 0.7.0 or later</strong> (0.8.0 for the ligand commands). <code>proteoscope --version</code> prints yours; to upgrade, <a href="../install.html">install the latest release</a>.</li>
         <li><strong>A browser.</strong> Chrome, Edge or Brave works best, because they have WebGPU. Proteoscope opens in your default browser; others work too, more slowly (see <a href="troubleshooting.html#canvas-preview">the Canvas preview</a>).</li>
         <li><strong>The full path to the program.</strong> Agents start Proteoscope themselves, often without your shell's <code>PATH</code>, so give them the full path. Print it with <code>command -v proteoscope</code> (macOS and Linux) or <code>(Get-Command proteoscope).Source</code> (PowerShell).</li>
       </ul>
@@ -182,13 +182,14 @@ args = ["mcp"]</code></pre></div>
         <li>“Load the validation report for 1M17 and list the worst residues near the ligand.”</li>
         <li>“Open the prediction folders in /data/campaign/, rank them by ipSAE for chains A and B, and show me a gallery of the best five.”</li>
         <li>“Which interface residues of the best model have pLDDT below 70?”</li>
+        <li>“Is the ligand in 1M17 supported by the density? Show me its interaction diagram.”</li>
       </ul>
       <ul>
         <li><strong>What you see.</strong> The agent's tools act on the Proteoscope page in your browser. It opens when the agent first needs it, and again if you close it. Structures load, selections highlight, the camera moves and the triage table updates. Each call's result appears as a message at the top of the page. A triage gallery briefly shows each model in turn, then the scene goes back to how it was.</li>
         <li><strong>Taking over.</strong> You can use the page while the agent works. Its commands act on whatever structure is active, so if you change the active structure, the agent's next command acts on your choice.</li>
         <li><strong>One page.</strong> Commands go to the Proteoscope tab opened most recently. If you open a second tab, that tab takes over.</li>
         <li><strong>Several agents.</strong> Each agent session starts its own Proteoscope, with its own page. If the port is busy, a nearby free port is used. When the session ends, its Proteoscope stops.</li>
-        <li><strong>Beyond the tools.</strong> <code>proteoscope_command</code> runs any command from <a href="commands.html">Selections and commands</a>, such as <code>color plddt</code>, <code>show sticks within 5 of resn AQ4</code>, <code>map load</code> or <code>conservation</code>. The agent can run <code>help</code> for the full list, or <code>help &lt;command&gt;</code> for one command.</li>
+        <li><strong>Beyond the tools.</strong> <code>proteoscope_command</code> runs any command from <a href="commands.html">Selections and commands</a>, such as <code>color plddt</code>, <code>show sticks within 5 of resn AQ4</code>, <code>compound resn AQ4</code> (what a ligand is), <code>diagram resn AQ4</code> (its 2D interaction diagram, as an image), <code>map load</code> then <code>map peaks</code> (difference-map peaks near the model), or <code>conservation</code>. The agent can run <code>help</code> for the full list, or <code>help &lt;command&gt;</code> for one command.</li>
       </ul>
 
       <h2 id="tools">Tools</h2>
@@ -215,7 +216,7 @@ args = ["mcp"]</code></pre></div>
       <p>ipSAE, pDockQ, pDockQ2 and LIS are computed the same way from every predictor's output, so they compare jobs from different tools. ipTM, pTM and the ranking score are each tool's own. See <a href="predictions.html#triage">Batch triage</a>.</p>
 
       <h2 id="images">Images</h2>
-      <p><code>render_image</code> returns the view as an image the model can look at; scale 1 is enough for the agent to see what is shown. Commands run through <code>proteoscope_command</code> return their images as images too: <code>triage gallery</code> gives the agent a thumbnail of each of the best models, captioned with its rank, job, model and score, so it can compare the jobs by eye. In the structured data, each image is replaced by its number among the images returned.</p>
+      <p><code>render_image</code> returns the view as an image the model can look at; scale 1 is enough for the agent to see what is shown. Commands run through <code>proteoscope_command</code> return their images as images too: <code>diagram</code> gives the agent the ligand's 2D interaction diagram, and <code>triage gallery</code> gives it a thumbnail of each of the best models, captioned with its rank, job, model and score, so it can compare the jobs by eye. In the structured data, each image is replaced by its number among the images returned.</p>
       <ul>
         <li>The images of one result are limited to 8 MB in all; any beyond that are left out, and the answer says so.</li>
         <li>For a closer look at one model, open it with <code>triage show &lt;n&gt;</code> and call <code>render_image</code>.</li>

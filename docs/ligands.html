@@ -81,7 +81,7 @@
 
     <main id="main" class="doc">
       <h1>Ligands and docking</h1>
-      <p class="doc-lede">Where Proteoscope gets a ligand's chemistry, which interactions it finds in a binding site, and how to open, score and compare docking poses in their receptor.</p>
+      <p class="doc-lede">What a ligand is, where Proteoscope gets its chemistry, which interactions it finds in a binding site, how to draw them in 2D for a figure, and how to open, score and compare docking poses in their receptor.</p>
 
       <h2 id="chemistry">Ligand chemistry</h2>
       <p>Bond orders, aromatic rings and formal charges come from the wwPDB Chemical Component Dictionary. Proteoscope takes them from one of three places:</p>
@@ -131,6 +131,32 @@
         <li><strong>Export CSV</strong> saves the interaction table.</li>
       </ul>
       <p>After an interface analysis, solvent accessibility also reports the buried surface area of that interface; see <a href="analysis.html#solvent-accessibility">Analysis</a>.</p>
+
+      <h2 id="card">The ligand card</h2>
+      <p>Select or focus a ligand and the <strong>Ligand</strong> card in the right panel shows what it is, from the wwPDB Chemical Component Dictionary through RCSB (downloaded once and cached):</p>
+      <ul>
+        <li>its common name (Erlotinib for AQ4, Heme for HEM) and dictionary name;</li>
+        <li>formula, molecular weight and formal charge;</li>
+        <li>how many of its heavy atoms the model contains, with an incomplete ligand flagged;</li>
+        <li>SMILES and InChIKey;</li>
+        <li>links to RCSB, PDBe, PubChem, ChEMBL, DrugBank and ChEBI, where they list it;</li>
+        <li>the difference-map peaks near it, once they have been found (see <a href="validation.html#peaks">Difference-map peaks</a>).</li>
+      </ul>
+      <p>A docking pose, or a ligand without a dictionary code (UNL), is described from the model: its formula is counted from the atoms. <code>compound [&lt;selection&gt;]</code> shows the card and returns its facts to scripts.</p>
+
+      <h2 id="diagram">2D interaction diagrams</h2>
+      <p><strong>2D diagram</strong> on the card, or <code>diagram</code>, draws the ligand flat with the residues it interacts with, in the style of LigPlot+ and PoseView:</p>
+      <figure>
+        <div class="shot"><img src="../assets/img/ligand-diagram.webp" width="1153" height="1131" loading="lazy" alt="A 2D diagram of imatinib in ABL (2HYY): the salt bridge to Asp381, hydrogen bonds to Thr315, Met318, Glu286 and Ile360 with their distances, π-stacking with Tyr253 and hydrophobic contacts" /></div>
+        <figcaption>Imatinib in ABL (2HYY): the salt bridge to Asp381, hydrogen bonds to Thr315, Met318, Glu286 and Ile360, π-stacking with Tyr253, and hydrophobic contacts as arcs.</figcaption>
+      </figure>
+      <ul>
+        <li><strong>Interactions</strong> are those of the Interactions card, in their colors: dashed lines with distances for hydrogen bonds, salt bridges, halogen bonds and metal coordination; π contacts from the ring's center; waters between the atoms they bridge; arcs on the ligand atoms for hydrophobic contacts.</li>
+        <li><strong>Residues</strong> are placed where they lie around the ligand in the current view, clear of the ligand and of each other. Rotate the structure and click <strong>Redraw</strong> to move them.</li>
+        <li><strong>Atom names</strong> can be added, to relate the drawing to the 3D model.</li>
+        <li><strong>Save SVG</strong> and <strong>Save PNG</strong> export it for figures. Scripts get both from <code>diagram</code>, and AI agents get an image.</li>
+      </ul>
+      <p>The layout draws rings as regular polygons, fused rings edge to edge and chains as zigzags, and puts metals at the center of the atoms they bind, so heme's iron sits in its porphyrin. Flat molecules whose layout would overlap are drawn from their own 3D shape. Some bridged or caged ligands, such as camphor, cannot be drawn flat without overlapping atoms; the diagram says so.</p>
 
       <h2 id="docking">Opening docking poses</h2>
       <p>Open or drop an SDF or molfile (V2000 or V3000), MOL2 or PDBQT file (<code>.sdf</code>, <code>.mol</code>, <code>.mol2</code>, <code>.pdbqt</code>) with the receptor active, and its molecules become poses in the receptor. Poses from AutoDock Vina, smina, GNINA, Glide, GOLD, DOCK, rDock and DiffDock come with their scores.</p>

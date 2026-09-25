@@ -48,7 +48,7 @@
   <main id="main">
     <section class="hero">
       <div class="container hero-grid">
-        <a class="eyebrow" href="https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.7.0"><span class="pill">v0.7.0</span> AI agents and batch triage of prediction campaigns</a>
+        <a class="eyebrow" href="https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.8.0"><span class="pill">v0.8.0</span> Ligand cards, 2D interaction diagrams and difference-map peaks</a>
         <h1>Explore, check and explain <span class="accent">protein structures</span></h1>
         <p class="lede">Proteoscope is a 3D viewer and analysis workbench for protein and nucleic-acid structures, predicted complexes, density maps and structural proteomics data. It runs on your own computer as one self-contained program, installed with a single command and needing nothing else: no packages, no account. Your files never leave your machine.</p>
         <figure class="hero-shot">
@@ -154,6 +154,24 @@
 
         <article class="feature">
           <div class="feature-text">
+            <span class="kicker">Ligands</span>
+            <h3>Know the ligand, check its density, draw how it binds</h3>
+            <p>Select a ligand to see what it is: its common name, formula, weight, SMILES and InChIKey from the Chemical Component Dictionary, how much of it is modeled, and links to PubChem, ChEMBL and DrugBank. Draw its interactions in 2D for a figure, and list the difference-map peaks around it.</p>
+            <ul class="checklist">
+              <li>2D diagrams in the style of LigPlot+, as SVG or PNG</li>
+              <li>Residues placed as they lie around the ligand in the view</li>
+              <li>Fo-Fc peaks near the ligand: unmodeled density and unsupported atoms</li>
+            </ul>
+            <a class="more-link" href="docs/ligands.html#diagram">Ligand card and diagrams</a>
+          </div>
+          <figure>
+            <div class="shot"><img src="assets/img/ligand-diagram.webp" width="1153" height="1131" loading="lazy" alt="A 2D diagram of imatinib in ABL (2HYY): the salt bridge to Asp381, hydrogen bonds to Thr315, Met318, Glu286 and Ile360 with their distances, π-stacking with Tyr253 and hydrophobic contacts" /></div>
+            <figcaption>Imatinib in ABL (2HYY), drawn by Proteoscope: the salt bridge to Asp381, hydrogen bonds with their distances and π-stacking with Tyr253.</figcaption>
+          </figure>
+        </article>
+
+        <article class="feature reverse">
+          <div class="feature-text">
             <span class="kicker">Predicted complexes</span>
             <h3>Decide which predicted interfaces to believe</h3>
             <p>Drop an output folder from AlphaFold 3, AlphaFold Server, Boltz, Chai-1, ColabFold, Protenix or OpenFold3. Proteoscope ranks the models by the tool's own score and scores every chain pair from its PAE: ipTM, ipSAE, pDockQ, pDockQ2 and LIS, reproducing Dunbrack's <code>ipsae.py</code>.</p>
@@ -170,7 +188,7 @@
           </figure>
         </article>
 
-        <article class="feature reverse">
+        <article class="feature">
           <div class="feature-text">
             <span class="kicker">Batch triage</span>
             <h3>Rank a whole prediction campaign</h3>
@@ -188,7 +206,7 @@
           </figure>
         </article>
 
-        <article class="feature">
+        <article class="feature reverse">
           <div class="feature-text">
             <span class="kicker">AI agents</span>
             <h3>Let an agent do the legwork while you watch</h3>
@@ -216,7 +234,7 @@
           </figure>
         </article>
 
-        <article class="feature reverse">
+        <article class="feature">
           <div class="feature-text">
             <span class="kicker">Validation and density</span>
             <h3>Check the model against the data</h3>
@@ -225,6 +243,7 @@
               <li>Map fit: atom inclusion as EMDB reports it, and density per residue</li>
               <li>Ramachandran classes on MolProbity's Top8000 contours, for predicted models too</li>
               <li>Select problems: <code>outliers and within 5 of ligand</code></li>
+              <li>Difference-map peaks near the model, from full-resolution maps</li>
             </ul>
             <a class="more-link" href="docs/validation.html">Validation and density maps</a>
           </div>
@@ -234,7 +253,7 @@
           </figure>
         </article>
 
-        <article class="feature">
+        <article class="feature reverse">
           <div class="feature-text">
             <span class="kicker">Comparison</span>
             <h3>Compare structures, conformations and predictions</h3>
@@ -252,7 +271,7 @@
           </figure>
         </article>
 
-        <article class="feature reverse">
+        <article class="feature">
           <div class="feature-text">
             <span class="kicker">Docking</span>
             <h3>Triage docking poses</h3>
@@ -270,7 +289,7 @@
           </figure>
         </article>
 
-        <article class="feature">
+        <article class="feature reverse">
           <div class="feature-text">
             <span class="kicker">Proteomics</span>
             <h3>Put your mass spectrometry results on the structure</h3>
@@ -288,7 +307,7 @@
           </figure>
         </article>
 
-        <article class="feature reverse">
+        <article class="feature">
           <div class="feature-text">
             <span class="kicker">Evolution and variants</span>
             <h3>See what evolution conserves, and which variants matter</h3>
@@ -306,7 +325,7 @@
           </figure>
         </article>
 
-        <article class="feature">
+        <article class="feature reverse">
           <div class="feature-text">
             <span class="kicker">Reproducible</span>
             <h3>Figures, sessions and methods you can publish</h3>

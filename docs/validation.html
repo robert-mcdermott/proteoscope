@@ -81,7 +81,7 @@
 
     <main id="main" class="doc">
       <h1>Validation and density maps</h1>
-      <p class="doc-lede">Check a model against the evidence: the wwPDB validation report with its outliers, clashes and fit to density, Ramachandran classes on MolProbity's contours for any model, and the experimental density map with the model's fit to it.</p>
+      <p class="doc-lede">Check a model against the evidence: the wwPDB validation report with its outliers, clashes and fit to density, Ramachandran classes on MolProbity's contours for any model, and the experimental density map with the model's fit to it and the peaks of the difference map.</p>
 
       <h2 id="report">The validation report</h2>
       <p><strong>Load report</strong> in the Analysis tab, or the <code>validate</code> command, fetches the wwPDB validation report of the active PDB entry: the same report RCSB and PDBe publish with every entry.</p>
@@ -178,6 +178,15 @@
       <div class="code"><pre><code>map load
 map level 1.2
 map fit</code></pre></div>
+
+      <h2 id="peaks">Difference-map peaks</h2>
+      <p>For an X-ray entry (or an Fo-Fc map file), <strong>Difference peaks</strong>, or <code>map peaks [&lt;σ&gt;]</code>, lists the peaks of the Fo-Fc map beyond +3σ and −3σ within 5 Å of the model, found in full-resolution tiles:</p>
+      <ul>
+        <li>Each peak's height in σ, refined between grid points, and the atom nearest to it.</li>
+        <li>A hint of what it may be: a positive peak on or next to an atom (an unmodeled part or an alternative position), 2.4–3.4 Å from a nitrogen or oxygen (a possible water), or away from the model (unmodeled density); a negative peak on an atom (not supported by the data).</li>
+        <li>Click a peak to go to it: the nearest residue is selected, so the map follows.</li>
+      </ul>
+      <p>The <a href="ligands.html#card">ligand card</a> lists the peaks within 3 Å of a ligand, the quickest check of whether the ligand, and each part of it, is in the density. For 1M17 at 2.6 Å, 135 positive and 65 negative peaks lie near the model, two of +3.6σ next to erlotinib. The hints come from distances alone; look at the density before acting on them.</p>
 
       <h2 id="sessions">Reports and maps in sessions</h2>
       <p>A saved session keeps the density map's settings. Validation reports and maps from the server are fetched again when the session opens; map files must be opened again. See <a href="sessions.html">Sessions, figures and methods</a>.</p>
