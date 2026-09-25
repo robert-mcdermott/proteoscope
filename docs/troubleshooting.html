@@ -69,6 +69,7 @@
         <ul>
           <li><a href="sessions.html">Sessions, figures and methods</a></li>
           <li><a href="scripting.html">Scripting and command line</a></li>
+          <li><a href="agents.html">AI agents (MCP)</a></li>
         </ul>
         <h4>Reference</h4>
         <ul>
@@ -140,6 +141,14 @@
         </li>
       </ul>
 
+      <h2 id="agents">An AI agent cannot use Proteoscope</h2>
+      <ul>
+        <li>Give the agent the full path to Proteoscope, and check that <code>proteoscope --help</code> lists <code>proteoscope mcp</code> (version 0.7.0 or later).</li>
+        <li>“No Proteoscope page is connected”: open the address in the message in Chrome, Edge or Brave, then try again.</li>
+        <li>Calls that open many prediction jobs take minutes; raise the client's tool timeout.</li>
+      </ul>
+      <p>See <a href="agents.html#troubleshooting">AI agents (MCP)</a> for more.</p>
+
       <h2 id="help">Getting help</h2>
       <p>If your problem is not covered here, open an issue on <a href="https://github.com/robert-mcdermott/proteoscope/issues">GitHub</a>. It helps to include the version (<code>proteoscope --version</code>), your operating system and browser, and what the renderer badge says.</p>
 
@@ -176,6 +185,7 @@
             <li><a href="getting-started.html">Getting started</a></li>
             <li><a href="commands.html">Commands</a></li>
             <li><a href="scripting.html">Scripting</a></li>
+            <li><a href="agents.html">AI agents</a></li>
             <li><a href="troubleshooting.html">Troubleshooting</a></li>
           </ul>
         </div>

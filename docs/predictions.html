@@ -69,6 +69,7 @@
         <ul>
           <li><a href="sessions.html">Sessions, figures and methods</a></li>
           <li><a href="scripting.html">Scripting and command line</a></li>
+          <li><a href="agents.html">AI agents (MCP)</a></li>
         </ul>
         <h4>Reference</h4>
         <ul>
@@ -80,7 +81,7 @@
 
     <main id="main" class="doc">
       <h1>Predictions and AlphaFold</h1>
-      <p class="doc-lede">Open AlphaFold DB models and the output of structure predictors, rank the models of a run, and use pLDDT, the predicted aligned error and interface scores to decide which parts and which interactions to believe.</p>
+      <p class="doc-lede">Open AlphaFold DB models and the output of structure predictors, rank the models of a run or a whole campaign, and use pLDDT, the predicted aligned error and interface scores to decide which parts and which interactions to believe.</p>
 
       <h2 id="alphafold-db">AlphaFold DB models</h2>
       <p>To open the AlphaFold DB model of a protein, type its UniProt accession (for example <code>P04637</code>) in <strong>Open structure</strong>, where you would type a PDB ID. The current AlphaFold DB model and its predicted aligned error (PAE) matrix are downloaded.</p>
@@ -197,6 +198,22 @@
       <h3 id="ipsae-check">Checked against ipsae.py</h3>
       <p>These scores reproduce <code>ipsae.py</code> (version 4) to its printed precision on the AlphaFold 3 (Aurora A–TPX2) and AlphaFold 2 multimer (RAF1–KSR1–MEK1) examples of the IPSAE repository, and on a Boltz-2 prediction. A unit test pins them to <code>ipsae.py</code> output at both PAE cutoffs. The example outputs in that repository predate version 4 and count PAE = 12 Å in LIS, so their LIS differs in the fourth decimal.</p>
 
+      <h2 id="triage">Batch triage</h2>
+      <p>A design campaign or a screen of interaction partners produces many jobs, more than anyone opens one by one. Drop or choose several prediction folders at once, or a folder that holds them, or name it on the command line. Proteoscope scores every model of every job, opens the best, and shows the <strong>Triage</strong> table (Structure tab, <strong>Open table</strong>).</p>
+      <div class="code"><pre><code><span class="prompt">$ </span>proteoscope campaign/</code></pre></div>
+      <ul>
+        <li><strong>One row per job</strong> (its best model under the chosen score) or one per model, ranked by ipSAE, pDockQ2, pDockQ, LIS, ipTM, pTM, the tool's own score, mean pLDDT, or the share of your cross-links each model satisfies. Click a column header to rank by it.</li>
+        <li><strong>The interface</strong> is each model's best chain pair by ipSAE, or the chains you name (for example <code>A&nbsp;B</code>, the target and the binder).</li>
+        <li><strong>Across tools.</strong> ipSAE, pDockQ, pDockQ2 and LIS are computed from each model's PAE and coordinates the same way for every predictor, so they compare jobs from different tools. ipTM, pTM and the score are each tool's own.</li>
+        <li><strong>Click a row</strong> (or press Enter on it) to show that model. <strong>Gallery</strong> renders the 12 best, each superposed on the first so they share a view. <strong>Export CSV</strong> saves every model and interface of every job.</li>
+        <li><strong>Scale.</strong> A folder named on the command line or opened by path can hold up to 20,000 files. Alignments are read only when a model opens, so scoring stays fast.</li>
+      </ul>
+      <figure>
+        <div class="shot"><img src="../assets/img/prediction-triage.webp" width="1600" height="1000" loading="lazy" alt="The Prediction triage table ranking Aurora A with TPX2 from AlphaFold Server and RAF1–KSR1–MEK1 from ColabFold by ipSAE, with pDockQ2, LIS, ipTM and pLDDT, and a gallery of the two models" /></div>
+        <figcaption>Two jobs from two tools on one table: Aurora A–TPX2 from AlphaFold Server (ipSAE 0.87) and RAF1–KSR1–MEK1 from ColabFold (0.60 on its best interface, A–C), with the gallery below.</figcaption>
+      </figure>
+      <p>From the command line: <code>triage</code> ranks the jobs (for example <code>triage by pdockq2 top 10 pair A B</code>), <code>triage show 3</code> shows a row, <code>triage gallery 12</code> renders the gallery and <code>triage export</code> saves the CSV. The table ranks the jobs of the current scene: opening a structure in place of the scene clears it, and adding jobs extends it. An AI agent can do all of this too; see <a href="agents.html">AI agents (MCP)</a>.</p>
+
       <h2 id="more-confidence">More confidence data</h2>
       <ul>
         <li><strong>Contact probability</strong> (AlphaFold 3) sits next to the PAE in the Analysis tab.</li>
@@ -211,7 +228,7 @@
         <li>PAE matrices and contact probabilities you opened are saved (at 0.125 Å and 1/255 steps), with the prediction scores and MSA depth.</li>
         <li>PAE domains are recomputed when the session opens, and AlphaFold DB PAE matrices are fetched again.</li>
       </ul>
-      <p>See <a href="sessions.html">Sessions, figures and methods</a>. The related commands are <code>alphafold</code>, <code>ranking</code>, <code>domains</code> and <code>msa</code>; the help dialog (<kbd>?</kbd>) lists the syntax of each.</p>
+      <p>See <a href="sessions.html">Sessions, figures and methods</a>. The related commands are <code>alphafold</code>, <code>ranking</code>, <code>triage</code>, <code>domains</code> and <code>msa</code>; the help dialog (<kbd>?</kbd>) lists the syntax of each.</p>
 
       <nav class="doc-pager" aria-label="Pages">
         <a class="prev" href="comparing.html"><span>Previous</span>Comparing structures</a>
@@ -247,6 +264,7 @@
             <li><a href="getting-started.html">Getting started</a></li>
             <li><a href="commands.html">Commands</a></li>
             <li><a href="scripting.html">Scripting</a></li>
+            <li><a href="agents.html">AI agents</a></li>
             <li><a href="troubleshooting.html">Troubleshooting</a></li>
           </ul>
         </div>

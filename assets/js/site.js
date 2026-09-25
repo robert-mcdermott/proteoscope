@@ -75,7 +75,8 @@ document.querySelectorAll('[role="tablist"]').forEach((list) => {
 });
 
 // Copy buttons on code blocks.
-document.querySelectorAll('.code').forEach((block) => {
+// Illustrations (a transcript) are marked data-no-copy.
+document.querySelectorAll('.code:not([data-no-copy])').forEach((block) => {
   const pre = block.querySelector('pre');
   if (!pre || block.querySelector('.copy-button')) return;
   const button = document.createElement('button');

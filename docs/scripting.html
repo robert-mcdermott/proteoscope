@@ -69,6 +69,7 @@
         <ul>
           <li><a href="sessions.html">Sessions, figures and methods</a></li>
           <li><a href="scripting.html" aria-current="page">Scripting and command line</a></li>
+          <li><a href="agents.html">AI agents (MCP)</a></li>
         </ul>
         <h4>Reference</h4>
         <ul>
@@ -80,11 +81,12 @@
 
     <main id="main" class="doc">
       <h1>Scripting and command line</h1>
-      <p class="doc-lede">Start Proteoscope with the options you need, open structures from a link, and drive it from the browser console or from Python and Jupyter.</p>
+      <p class="doc-lede">Start Proteoscope with the options you need, open structures from a link, and drive it from the browser console, from Python and Jupyter, or from an AI agent.</p>
 
       <h2 id="options">Command-line options</h2>
       <p>Flags come first, followed by any structure files or prediction folders to open at startup. Every file and folder you name opens, and the first structure is active.</p>
       <div class="code"><span class="code-label">text</span><pre><code>proteoscope [flags] [structure files or prediction folders...]
+proteoscope mcp [flags]    an MCP server for AI agents (see AI agents)
 
   --host string       interface to bind (default 127.0.0.1)
   --port int          preferred port; nearby ports are tried if busy (default 8765)
@@ -163,19 +165,36 @@ image = ps("png 2")["data"]["image"]                      # PNG as a data URL
 
 from IPython.display import Image
 Image(base64.b64decode(image.split(",", 1)[1]))</code></pre></div>
-      <p>The reply is JSON. Its <code>message</code> carries the command's report, such as the superposition result printed above, and <code>data</code> its results, such as residue keys or the image. When a command fails, <code>ok</code> is false, and the <code>ps</code> helper raises an error with the reply's <code>message</code> or <code>error</code>. Over remote control, <code>png</code>, <code>save</code>, <code>link</code> and <code>mvs</code> return data instead of downloading a file, so the image, session, link or MolViewSpec file comes back in the reply.</p>
+      <p>The reply is JSON. Its <code>message</code> carries the command's report, such as the superposition result printed above, and <code>data</code> its results, such as residue keys or the image. When a command fails, <code>ok</code> is false, and the <code>ps</code> helper raises an error with the reply's <code>message</code> or <code>error</code>. Over remote control, <code>png</code>, <code>save</code>, <code>link</code> and <code>mvs</code> return data instead of downloading a file, so the image, session, link or MolViewSpec file comes back in the reply. <code>info</code>, <code>interactions &lt;selection&gt;</code>, <code>interface &lt;chain&gt; &lt;chain&gt;</code>, <code>validate</code>, <code>superpose</code>, <code>triage</code> and <code>help</code> return their results as data too.</p>
+
+      <h3 id="open-by-path">Opening files from scripts</h3>
+      <p>POST absolute paths of files or folders to <code>/api/remote/open</code>, and the page opens them as if they had been named on the command line; several prediction folders are ranked together. Because this reads files from your disk, it also needs the token Proteoscope prints when it starts (a new one each run), in the <code>X-Proteoscope-Token</code> header:</p>
+      <div class="code"><span class="code-label">python</span><pre><code>TOKEN = "..."   # from the "Opening files by path" line Proteoscope printed
+
+reply = requests.post("http://127.0.0.1:8765/api/remote/open",
+                      headers={"X-Proteoscope-Token": TOKEN},
+                      json={"paths": ["/runs/campaign"]}, timeout=1800).json()
+print(reply["message"])                  # "Opened 48 prediction jobs (240 models) ..."
+best = ps("triage by ipsae top 5 pair A B")["data"]["rows"]</code></pre></div>
+      <p>Files opened this way are served only to the page on this computer, even when <code>--host</code> shares Proteoscope with other machines.</p>
+
+      <h2 id="agents">AI agents</h2>
+      <p><code>proteoscope mcp</code> lets an AI agent such as Claude Code use Proteoscope in the page you see, through the Model Context Protocol:</p>
+      <div class="code wrap"><pre><code><span class="prompt">$ </span>claude mcp add proteoscope --scope user -- /Users/you/.local/bin/proteoscope mcp</code></pre></div>
+      <p>See <a href="agents.html">AI agents (MCP)</a> for Claude Desktop, Collomia and other clients, the tools, and troubleshooting.</p>
 
       <h2 id="safety">Remote control safety</h2>
       <ul>
         <li>Remote control is off unless you start Proteoscope with <code>--remote-control</code>.</li>
-        <li>It accepts requests only from this computer, whatever <code>--host</code> the server listens on.</li>
+        <li>It accepts requests only from this computer, whatever <code>--host</code> the server listens on, and only when they name this computer (<code>127.0.0.1</code> or <code>localhost</code>), which blocks DNS rebinding. To script Proteoscope on another machine, forward its port with SSH: <code>ssh -N -L 8765:127.0.0.1:8765 you@server</code>.</li>
+        <li>Opening files by path needs the token printed at startup.</li>
         <li>Requests from web pages on other sites are refused.</li>
       </ul>
       <div class="callout warn"><p><strong>Any local program can send commands.</strong> While <code>--remote-control</code> is on, any program on your computer can send commands to Proteoscope. Start Proteoscope without the flag when you are not scripting it.</p></div>
 
       <nav class="doc-pager" aria-label="Pages">
         <a class="prev" href="sessions.html"><span>Previous</span>Sessions, figures and methods</a>
-        <a class="next" href="formats.html"><span>Next</span>Supported files</a>
+        <a class="next" href="agents.html"><span>Next</span>AI agents (MCP)</a>
       </nav>
     </main>
 
@@ -207,6 +226,7 @@ Image(base64.b64decode(image.split(",", 1)[1]))</code></pre></div>
             <li><a href="getting-started.html">Getting started</a></li>
             <li><a href="commands.html">Commands</a></li>
             <li><a href="scripting.html">Scripting</a></li>
+            <li><a href="agents.html">AI agents</a></li>
             <li><a href="troubleshooting.html">Troubleshooting</a></li>
           </ul>
         </div>

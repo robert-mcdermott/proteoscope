@@ -48,7 +48,7 @@
   <main id="main">
     <section class="hero">
       <div class="container hero-grid">
-        <a class="eyebrow" href="https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.6.1"><span class="pill">v0.6.1</span> One-command installers, density maps, docking and more</a>
+        <a class="eyebrow" href="https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.7.0"><span class="pill">v0.7.0</span> AI agents and batch triage of prediction campaigns</a>
         <h1>Explore, check and explain <span class="accent">protein structures</span></h1>
         <p class="lede">Proteoscope is a 3D viewer and analysis workbench for protein and nucleic-acid structures, predicted complexes, density maps and structural proteomics data. It runs on your own computer as one self-contained program, installed with a single command and needing nothing else: no packages, no account. Your files never leave your machine.</p>
         <figure class="hero-shot">
@@ -167,6 +167,52 @@
           <figure>
             <div class="shot"><img src="assets/img/predicted-complex.webp" width="1600" height="1000" loading="lazy" alt="An AlphaFold Server prediction of Aurora A with TPX2 colored by pLDDT, with the ranking table, the chain-pair ipSAE matrix and interface scores" /></div>
             <figcaption>Aurora A with TPX2 from AlphaFold Server (the example of the ipSAE repository): ipSAE 0.87, pDockQ2 0.71.</figcaption>
+          </figure>
+        </article>
+
+        <article class="feature reverse">
+          <div class="feature-text">
+            <span class="kicker">Batch triage</span>
+            <h3>Rank a whole prediction campaign</h3>
+            <p>Open a design campaign or a screen of partners at once: hundreds of jobs from any mix of predictors. Every model is scored and ranked on one table by ipSAE, pDockQ2, LIS, ipTM, pLDDT or your cross-links, for each model's best interface or the chains you name.</p>
+            <ul class="checklist">
+              <li>Scores computed alike for every tool, so jobs compare across tools</li>
+              <li>A gallery of the best models, superposed and framed alike</li>
+              <li>Every model and interface as CSV, and <code>triage</code> from the command line</li>
+            </ul>
+            <a class="more-link" href="docs/predictions.html#triage">Batch triage</a>
+          </div>
+          <figure>
+            <div class="shot"><img src="assets/img/prediction-triage.webp" width="1600" height="1000" loading="lazy" alt="The Prediction triage table ranking an AlphaFold Server job and a ColabFold job by ipSAE, with pDockQ2, LIS, ipTM and pLDDT, and a gallery of the models" /></div>
+            <figcaption>Aurora A–TPX2 from AlphaFold Server and RAF1–KSR1–MEK1 from ColabFold, ranked on one table by ipSAE.</figcaption>
+          </figure>
+        </article>
+
+        <article class="feature">
+          <div class="feature-text">
+            <span class="kicker">AI agents</span>
+            <h3>Let an agent do the legwork while you watch</h3>
+            <p>Proteoscope is an MCP server, so Claude Code, Claude Desktop, Collomia and other agents can use it: open structures and prediction folders, rank predictions, list interactions, superpose, load validation reports and look at the images they render. They work in the page you see, and you can take over at any time.</p>
+            <ul class="checklist">
+              <li>One command to add it to Claude Code</li>
+              <li>Results as text, data and images</li>
+              <li>Local only: the agent reaches Proteoscope through the MCP connection alone</li>
+            </ul>
+            <a class="more-link" href="docs/agents.html">AI agents (MCP)</a>
+          </div>
+          <figure>
+            <div class="code" data-no-copy><span class="code-label">terminal</span><pre><code><span class="prompt">$ </span>claude mcp add proteoscope --scope user -- ~/.local/bin/proteoscope mcp
+
+&gt; Open 1M17 in Proteoscope and tell me how erlotinib binds.
+
+  open_structure    {"id": "1M17"}
+    Opened 1M17.
+  get_interactions  {"selection": "resn AQ4"}
+    7 interactions of AQ4 999 · chain A: 1 hydrogen bond, 6 hydrophobic.
+    Hydrogen bond  AQ4 N2 · Met769 N  2.70 Å
+    Hydrophobic    AQ4 C1 · Leu764 CB  3.43 Å
+    …</code></pre></div>
+            <figcaption>The tool calls an agent makes for that question, with Proteoscope's own results for EGFR with erlotinib (1M17).</figcaption>
           </figure>
         </article>
 
@@ -319,8 +365,8 @@
           </a>
           <a class="card" href="docs/scripting.html">
             <span class="icon-badge gold"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5"/></svg></span>
-            <h3>Scripting</h3>
-            <p>Fetch, superpose, select and render images from Python or a Jupyter notebook.</p>
+            <h3>Scripting and agents</h3>
+            <p>Fetch, superpose, select and render images from Python or Jupyter, or let an AI agent do it.</p>
           </a>
           <a class="card" href="docs/getting-started.html#examples">
             <span class="icon-badge mint"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5a2 2 0 0 1 2-2h13v14H6a2 2 0 0 0-2 2Zm0 0a2 2 0 0 0 2 2h13"/></svg></span>
@@ -417,6 +463,7 @@
             <li><a href="docs/getting-started.html">Getting started</a></li>
             <li><a href="docs/commands.html">Commands</a></li>
             <li><a href="docs/scripting.html">Scripting</a></li>
+            <li><a href="docs/agents.html">AI agents</a></li>
             <li><a href="docs/troubleshooting.html">Troubleshooting</a></li>
           </ul>
         </div>

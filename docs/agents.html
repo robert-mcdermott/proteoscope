@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI agents (MCP) · Proteoscope</title>
+  <meta name="description" content="Use Proteoscope from AI agents such as Claude Code, Claude Desktop and Collomia through its Model Context Protocol server: setup, tools, images, privacy and troubleshooting." />
+  <meta name="theme-color" content="#050708" />
+  <link rel="icon" href="../assets/img/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/css/site.css" />
+  <script>try { const t = localStorage.getItem('proteoscope-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+      <nav class="site-nav" id="site-nav" aria-label="Main">
+        <a href="../#features">Features</a>
+        <a href="./" aria-current="page">Documentation</a>
+        <a href="../install.html">Install</a>
+        <a href="../science.html">Science</a>
+      </nav>
+      <div class="header-actions">
+        <a class="icon-button" href="https://github.com/robert-mcdermott/proteoscope" aria-label="Proteoscope on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        </a>
+        <button class="icon-button theme-toggle" type="button" aria-label="Switch between light and dark">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <button class="icon-button nav-toggle" type="button" aria-label="Menu" aria-controls="site-nav" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <aside class="docs-sidebar" aria-label="Documentation">
+      <button class="btn docs-menu-toggle" type="button" aria-expanded="false">Documentation menu <span aria-hidden="true">▾</span></button>
+      <nav>
+        <h4>Start</h4>
+        <ul>
+          <li><a href="./">Overview</a></li>
+          <li><a href="getting-started.html">Getting started</a></li>
+          <li><a href="finding.html">Finding structures</a></li>
+        </ul>
+        <h4>Viewing</h4>
+        <ul>
+          <li><a href="viewing.html">Viewing and interactions</a></li>
+          <li><a href="commands.html">Selections and commands</a></li>
+          <li><a href="comparing.html">Comparing structures</a></li>
+        </ul>
+        <h4>Checking models</h4>
+        <ul>
+          <li><a href="predictions.html">Predictions and AlphaFold</a></li>
+          <li><a href="validation.html">Validation and density maps</a></li>
+          <li><a href="ligands.html">Ligands and docking</a></li>
+          <li><a href="analysis.html">Analysis</a></li>
+        </ul>
+        <h4>Your data</h4>
+        <ul>
+          <li><a href="proteomics.html">Proteomics</a></li>
+        </ul>
+        <h4>Share and automate</h4>
+        <ul>
+          <li><a href="sessions.html">Sessions, figures and methods</a></li>
+          <li><a href="scripting.html">Scripting and command line</a></li>
+          <li><a href="agents.html" aria-current="page">AI agents (MCP)</a></li>
+        </ul>
+        <h4>Reference</h4>
+        <ul>
+          <li><a href="formats.html">Supported files</a></li>
+          <li><a href="troubleshooting.html">Troubleshooting</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main id="main" class="doc">
+      <h1>AI agents (MCP)</h1>
+      <p class="doc-lede"><code>proteoscope mcp</code> is a <a href="https://modelcontextprotocol.io">Model Context Protocol</a> server. An AI agent such as Claude Code can use it to open structures and prediction folders, rank predictions, list interactions and interface contacts, superpose structures, load validation reports and render images, in the Proteoscope page you see.</p>
+
+      <h2 id="requirements">Requirements</h2>
+      <ul>
+        <li><strong>Proteoscope 0.7.0 or later.</strong> <code>proteoscope --version</code> prints yours; to upgrade, <a href="../install.html">install the latest release</a>.</li>
+        <li><strong>A browser.</strong> Chrome, Edge or Brave works best, because they have WebGPU. Proteoscope opens in your default browser; others work too, more slowly (see <a href="troubleshooting.html#canvas-preview">the Canvas preview</a>).</li>
+        <li><strong>The full path to the program.</strong> Agents start Proteoscope themselves, often without your shell's <code>PATH</code>, so give them the full path. Print it with <code>command -v proteoscope</code> (macOS and Linux) or <code>(Get-Command proteoscope).Source</code> (PowerShell).</li>
+      </ul>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>System</th><th>Where the installer puts it</th></tr></thead>
+          <tbody>
+            <tr><td>macOS and Linux</td><td><code>~/.local/bin/proteoscope</code>, for example <code>/Users/you/.local/bin/proteoscope</code></td></tr>
+            <tr><td>Windows</td><td><code>%LOCALAPPDATA%\Programs\Proteoscope\proteoscope.exe</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The examples below use <code>/Users/you/.local/bin/proteoscope</code>; use your own path.</p>
+
+      <h2 id="claude-code">Claude Code</h2>
+      <p>Add the server for all your projects:</p>
+      <div class="code wrap"><pre><code><span class="prompt">$ </span>claude mcp add proteoscope --scope user -- /Users/you/.local/bin/proteoscope mcp</code></pre></div>
+      <p>Everything after <code>--</code> is the command Claude Code runs, so Proteoscope's options go there too, for example <code>-- /Users/you/.local/bin/proteoscope mcp --offline</code>.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Scope</th><th>Where it applies</th></tr></thead>
+          <tbody>
+            <tr><td><code>local</code> (the default)</td><td>You, in the current project only</td></tr>
+            <tr><td><code>user</code></td><td>You, in every project</td></tr>
+            <tr><td><code>project</code></td><td>Everyone working in the repository, through a <code>.mcp.json</code> file you commit; Claude Code asks each person to approve it</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>For the project scope, <code>.mcp.json</code> looks like this. A committed file holds one path for everyone, so it works only when everyone has Proteoscope at that path, or on their <code>PATH</code> with the command just <code>proteoscope</code>.</p>
+      <div class="code"><span class="code-label">json</span><pre><code>{
+  "mcpServers": {
+    "proteoscope": {
+      "command": "/Users/you/.local/bin/proteoscope",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre></div>
+      <ul>
+        <li><strong>Check it:</strong> <code>claude mcp list</code> in a terminal shows whether it connects; inside a session, <code>/mcp</code> shows its status and tools.</li>
+        <li><strong>Remove it:</strong> <code>claude mcp remove proteoscope --scope user</code>.</li>
+        <li><strong>Long calls:</strong> opening a large prediction campaign can take several minutes. If a call times out, start Claude Code with a longer tool timeout, in milliseconds: <code>MCP_TOOL_TIMEOUT=900000 claude</code>.</li>
+      </ul>
+
+      <h2 id="claude-desktop">Claude Desktop</h2>
+      <p>Open <strong>Settings → Developer → Edit Config</strong>. That opens <code>claude_desktop_config.json</code>, which is in <code>~/Library/Application Support/Claude/</code> on macOS and in <code>%APPDATA%\Claude\</code> on Windows. Add Proteoscope under <code>mcpServers</code>:</p>
+      <div class="code"><span class="code-label">json</span><pre><code>{
+  "mcpServers": {
+    "proteoscope": {
+      "command": "/Users/you/.local/bin/proteoscope",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre></div>
+      <p>On Windows, double the backslashes in the path: <code>"C:\\Users\\you\\AppData\\Local\\Programs\\Proteoscope\\proteoscope.exe"</code>. Quit and reopen Claude Desktop; Proteoscope's tools then appear in the chat's tools menu.</p>
+
+      <h2 id="collomia">Collomia</h2>
+      <p>Add the server for all workspaces, with a timeout long enough for large campaigns (Collomia's default is 30 seconds), and check it:</p>
+      <div class="code wrap"><pre><code><span class="prompt">$ </span>collo mcp add proteoscope --global --timeout 600 -- /Users/you/.local/bin/proteoscope mcp
+<span class="prompt">$ </span>collo mcp test proteoscope</code></pre></div>
+      <p>The test connects, pings the server and checks its tools. It does not open a browser, because Proteoscope opens the page only when a tool needs it. Images from Proteoscope reach the model on provider routes that accept images.</p>
+
+      <h2 id="other-clients">Other clients</h2>
+      <p>Most clients take the same two things: the command (the full path to Proteoscope) and its arguments (<code>["mcp"]</code>). Where the configuration lives depends on the client, so see its documentation. Clients that use an <code>mcpServers</code> object, such as Cursor (<code>~/.cursor/mcp.json</code>) and Gemini CLI (<code>~/.gemini/settings.json</code>), take the same entry as Claude Desktop.</p>
+      <p>VS Code (<code>.vscode/mcp.json</code> in a workspace) uses <code>servers</code>:</p>
+      <div class="code"><span class="code-label">json</span><pre><code>{
+  "servers": {
+    "proteoscope": {
+      "type": "stdio",
+      "command": "/Users/you/.local/bin/proteoscope",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre></div>
+      <p>OpenAI Codex CLI (<code>~/.codex/config.toml</code>) uses TOML:</p>
+      <div class="code"><span class="code-label">toml</span><pre><code>[mcp_servers.proteoscope]
+command = "/Users/you/.local/bin/proteoscope"
+args = ["mcp"]</code></pre></div>
+
+      <h2 id="testing">Testing the server</h2>
+      <p>The <a href="https://github.com/modelcontextprotocol/inspector">MCP Inspector</a> is the MCP project's tool for trying a server by hand. It needs Node.js and runs from npm; it is not part of Proteoscope:</p>
+      <div class="code wrap"><pre><code><span class="prompt">$ </span>npx @modelcontextprotocol/inspector /Users/you/.local/bin/proteoscope mcp</code></pre></div>
+      <p>It opens a page where you connect, list the tools and call them one at a time. Try these:</p>
+      <ol>
+        <li><code>open_structure</code> with <code>{"id": "1M17"}</code>. Proteoscope opens in your browser and loads the EGFR kinase with erlotinib.</li>
+        <li><code>get_interactions</code> with <code>{"selection": "resn AQ4"}</code>. You should get seven interactions, including the hydrogen bond to Met769 at 2.70 Å.</li>
+        <li><code>render_image</code> with <code>{}</code>. You get a PNG of the view.</li>
+      </ol>
+
+      <h2 id="using">Using it</h2>
+      <p>Ask in your own words. Name Proteoscope, and give files and folders as absolute paths. For example:</p>
+      <ul>
+        <li>“Open 1M17 in Proteoscope and tell me how erlotinib binds.”</li>
+        <li>“Fetch 1M17, add the AlphaFold model of P00533, superpose them and show me an image.”</li>
+        <li>“Load the validation report for 1M17 and list the worst residues near the ligand.”</li>
+        <li>“Open the prediction folders in /data/campaign/, rank them by ipSAE for chains A and B, and show me a gallery of the best five.”</li>
+        <li>“Which interface residues of the best model have pLDDT below 70?”</li>
+      </ul>
+      <ul>
+        <li><strong>What you see.</strong> The agent's tools act on the Proteoscope page in your browser. It opens when the agent first needs it, and again if you close it. Structures load, selections highlight, the camera moves and the triage table updates. Each call's result appears as a message at the top of the page. A triage gallery briefly shows each model in turn, then the scene goes back to how it was.</li>
+        <li><strong>Taking over.</strong> You can use the page while the agent works. Its commands act on whatever structure is active, so if you change the active structure, the agent's next command acts on your choice.</li>
+        <li><strong>One page.</strong> Commands go to the Proteoscope tab opened most recently. If you open a second tab, that tab takes over.</li>
+        <li><strong>Several agents.</strong> Each agent session starts its own Proteoscope, with its own page. If the port is busy, a nearby free port is used. When the session ends, its Proteoscope stops.</li>
+        <li><strong>Beyond the tools.</strong> <code>proteoscope_command</code> runs any command from <a href="commands.html">Selections and commands</a>, such as <code>color plddt</code>, <code>show sticks within 5 of resn AQ4</code>, <code>map load</code> or <code>conservation</code>. The agent can run <code>help</code> for the full list, or <code>help &lt;command&gt;</code> for one command.</li>
+      </ul>
+
+      <h2 id="tools">Tools</h2>
+      <p>Required arguments are in bold. Every tool returns a short text answer, and structured data for agents that read it.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tool</th><th>Arguments</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>open_structure</code></td><td><strong><code>id</code></strong>, <code>add</code></td><td>Fetch a PDB entry (<code>1M17</code>) or the AlphaFold DB model of a UniProt accession (<code>P04637</code>). Replaces the scene unless <code>add</code> is true</td></tr>
+            <tr><td><code>open_files</code></td><td><strong><code>paths</code></strong>, <code>add</code></td><td>Open files and folders by absolute path: structures, or prediction folders from AlphaFold 3, AlphaFold Server, Boltz, Chai-1, ColabFold, Protenix and OpenFold3. Several jobs are scored and ranked together</td></tr>
+            <tr><td><code>describe_structure</code></td><td>none</td><td>Source, title, method, and resolution or confidence; chains with molecules and UniProt accessions; ligands; prediction scores, comparison and validation summary</td></tr>
+            <tr><td><code>list_structures</code></td><td>none</td><td>The structures in the scene, the active one, and superposition results</td></tr>
+            <tr><td><code>select_residues</code></td><td><strong><code>selection</code></strong></td><td>Select with the <a href="commands.html#selection-language">selection language</a> (<code>chain A and resi 40-80</code>, <code>within 5 of resn STI</code>, <code>plddt &lt; 70</code>) and return the residues</td></tr>
+            <tr><td><code>get_interactions</code></td><td><strong><code>selection</code></strong></td><td>Focus residues or a ligand and list its interactions (type, partner, atoms, distance), using PLIP's criteria</td></tr>
+            <tr><td><code>interface_contacts</code></td><td><strong><code>chain_a</code></strong>, <strong><code>chain_b</code></strong></td><td>The contacts between two chains, and the interface residues</td></tr>
+            <tr><td><code>superpose</code></td><td><strong><code>moving</code></strong>, <code>reference</code>, <code>method</code>, <code>fit</code></td><td>Superpose a structure, or <code>all</code>, by sequence (the default) or by structure alone (<code>structure</code>: TM-align, or MM-align for complexes). Returns RMSD, TM-score, lDDT and the number of aligned pairs</td></tr>
+            <tr><td><code>validation_report</code></td><td>none</td><td>The wwPDB validation summary of the active entry, with percentiles, ligand fit and the worst residues</td></tr>
+            <tr><td><code>rank_predictions</code></td><td><code>metric</code>, <code>limit</code>, <code>level</code>, <code>chains</code></td><td>Rank the open prediction jobs by <code>ipsae</code>, <code>pdockq2</code>, <code>pdockq</code>, <code>lis</code>, <code>iptm</code>, <code>ranking</code>, <code>ptm</code>, <code>plddt</code> or <code>crosslinks</code>. Returns each job's best model, or every model with <code>level: "models"</code>. <code>chains</code> scores one chain pair</td></tr>
+            <tr><td><code>render_image</code></td><td><code>scale</code>, <code>transparent</code></td><td>The current view as a PNG, at 1 to 4 times the view's size</td></tr>
+            <tr><td><code>proteoscope_command</code></td><td><strong><code>command</code></strong></td><td>Any other command</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>ipSAE, pDockQ, pDockQ2 and LIS are computed the same way from every predictor's output, so they compare jobs from different tools. ipTM, pTM and the ranking score are each tool's own. See <a href="predictions.html#triage">Batch triage</a>.</p>
+
+      <h2 id="images">Images</h2>
+      <p><code>render_image</code> returns the view as an image the model can look at; scale 1 is enough for the agent to see what is shown. Commands run through <code>proteoscope_command</code> return their images as images too: <code>triage gallery</code> gives the agent a thumbnail of each of the best models, captioned with its rank, job, model and score, so it can compare the jobs by eye. In the structured data, each image is replaced by its number among the images returned.</p>
+      <ul>
+        <li>The images of one result are limited to 8 MB in all; any beyond that are left out, and the answer says so.</li>
+        <li>For a closer look at one model, open it with <code>triage show &lt;n&gt;</code> and call <code>render_image</code>.</li>
+        <li>The client and its model provider must accept images in tool results. Claude does.</li>
+      </ul>
+
+      <h2 id="options">Options</h2>
+      <p><code>proteoscope mcp</code> takes the usual <a href="scripting.html#options">command-line options</a>:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Option</th><th>Use</th></tr></thead>
+          <tbody>
+            <tr><td><code>--port</code></td><td>The preferred port (default 8765); a nearby free port is used if it is busy</td></tr>
+            <tr><td><code>--offline</code></td><td>No downloads: only local files and cached entries</td></tr>
+            <tr><td><code>--cache-dir</code>, <code>--cache-max-age</code>, <code>--no-cache</code></td><td>Where downloads are cached, and for how long</td></tr>
+            <tr><td><code>--no-open</code></td><td>Do not open a browser. Open the address yourself: Proteoscope writes it to the client's server log, and a tool that finds no page names it</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><code>--host</code> must be a local address, such as the default <code>127.0.0.1</code>: the MCP server serves only this computer. To use Proteoscope from another machine, forward the port with SSH (<code>ssh -N -L 8765:127.0.0.1:8765 you@server</code>).</p>
+
+      <h2 id="privacy">Privacy and security</h2>
+      <ul>
+        <li><strong>Everything runs locally.</strong> Proteoscope runs on your computer and answers only this computer. The agent talks to it through standard input and output. In MCP mode, the HTTP routes that scripts use (<code>/api/remote/command</code> and <code>/api/remote/open</code>) are turned off.</li>
+        <li><strong>Files.</strong> The agent can open any structure or prediction file your account can read, as you can.</li>
+        <li><strong>What the model provider sees.</strong> The results the agent receives, including images, go to the agent's model provider as part of the conversation.</li>
+        <li><strong>Downloads.</strong> Proteoscope downloads entries, validation reports, maps and annotations from the public databases, as it does when you use it. <code>--offline</code> turns that off.</li>
+      </ul>
+
+      <h2 id="troubleshooting">Troubleshooting</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Problem</th><th>What to do</th></tr></thead>
+          <tbody>
+            <tr><td>The client cannot start the server</td><td>Use the full path to Proteoscope, and check that <code>proteoscope --help</code> lists <code>proteoscope mcp</code></td></tr>
+            <tr><td>“No Proteoscope page is connected”</td><td>The browser did not open, or you used <code>--no-open</code>. Open the address in the message, in Chrome, Edge or Brave, then try again</td></tr>
+            <tr><td>A call times out</td><td>Opening many prediction jobs takes minutes. Raise the client's tool timeout (<code>MCP_TOOL_TIMEOUT</code> in Claude Code, <code>--timeout</code> in Collomia). Proteoscope allows 30 minutes for opening files and 2 minutes for other commands</td></tr>
+            <tr><td>“use an absolute path”</td><td>Give full paths; <code>~</code> is expanded</td></tr>
+            <tr><td>“The Proteoscope page was closed or reloaded before it answered”</td><td>Call the tool again. The page reopens when a tool needs it</td></tr>
+            <tr><td>The agent acts on the wrong structure</td><td>Tools act on the active structure. Ask the agent to call <code>list_structures</code> and name the structure it wants</td></tr>
+            <tr><td>Images are described but not seen</td><td>The client or model provider does not accept images in tool results</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Proteoscope writes its startup lines and errors to standard error, which most clients keep in their MCP server log. Standard output carries only protocol messages.</p>
+
+      <h2 id="how-it-works">How it works</h2>
+      <p>The server speaks JSON-RPC 2.0 over standard input and output, one message per line, in MCP versions 2024-11-05 to 2025-11-25. It handles <code>initialize</code>, <code>ping</code>, <code>tools/list</code> and <code>tools/call</code>; calls can be cancelled with <code>notifications/cancelled</code>, and calls that take a while send progress notifications when the client asks for them.</p>
+      <p>Each tool call becomes one Proteoscope command, or a request to open files, and goes to the page through the same channel as <a href="scripting.html#python">remote control</a>. The page runs one request at a time and posts back <code>{ ok, message, data }</code>, which Proteoscope returns as the tool's result: text, structured content and images. When the client closes standard input, calls still running get a second to finish, and then Proteoscope stops.</p>
+
+      <nav class="doc-pager" aria-label="Pages">
+        <a class="prev" href="scripting.html"><span>Previous</span>Scripting and command line</a>
+        <a class="next" href="formats.html"><span>Next</span>Supported files</a>
+      </nav>
+    </main>
+
+    <aside class="toc" aria-label="On this page">
+      <h4>On this page</h4>
+      <ul></ul>
+    </aside>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-about">
+          <a class="brand" href="../"><img src="../assets/img/logo.svg" alt="" width="30" height="30" />Proteoscope</a>
+          <p>A 3D viewer and analysis workbench for protein structures and structural proteomics. Free and open source under the Apache License 2.0.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul>
+            <li><a href="../#features">Features</a></li>
+            <li><a href="../install.html">Install</a></li>
+            <li><a href="../science.html">Science</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/blob/main/CHANGELOG.md">Changelog</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Documentation</h4>
+          <ul>
+            <li><a href="getting-started.html">Getting started</a></li>
+            <li><a href="commands.html">Commands</a></li>
+            <li><a href="scripting.html">Scripting</a></li>
+            <li><a href="agents.html">AI agents</a></li>
+            <li><a href="troubleshooting.html">Troubleshooting</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope">GitHub</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/releases">Releases</a></li>
+            <li><a href="https://github.com/robert-mcdermott/proteoscope/issues">Issues</a></li>
+            <li><a href="../science.html#cite">Cite Proteoscope</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">Proteoscope is licensed under the Apache License 2.0. Structures shown are from the PDB (wwPDB) and AlphaFold DB; see <a href="../science.html#credits">data credits</a>.</div>
+    </div>
+  </footer>
+</body>
+</html>

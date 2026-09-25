@@ -69,6 +69,7 @@
         <ul>
           <li><a href="sessions.html">Sessions, figures and methods</a></li>
           <li><a href="scripting.html">Scripting and command line</a></li>
+          <li><a href="agents.html">AI agents (MCP)</a></li>
         </ul>
         <h4>Reference</h4>
         <ul>
@@ -245,6 +246,7 @@
             <tr><td><strong>search</strong></td><td><code>search &lt;gene|<wbr />protein|<wbr />UniProt|<wbr />keywords|<wbr />sequence&gt;</code></td><td>Finds structures and models in RCSB PDB, UniProt, PDBe and 3D-Beacons. See <a href="finding.html">Finding structures</a>. Also <code>lookup</code>, <code>discover</code>.</td></tr>
             <tr><td><strong>example</strong></td><td><code>example [add] [&lt;id&gt;]</code></td><td>Opens a bundled example with its opening view. With <code>add</code>, adds it next to the open structures, without the view. With no ID, lists them. Also <code>examples</code>, <code>sample</code>, <code>demo</code>.</td></tr>
             <tr><td><strong>list</strong></td><td><code>list</code></td><td>Lists the structures in the scene. Also <code>structures</code>, <code>ls</code>.</td></tr>
+            <tr><td><strong>info</strong></td><td><code>info</code></td><td>Describes the active structure: source, method and resolution or confidence, chains, ligands and scores. Also <code>describe</code>, <code>about</code>.</td></tr>
             <tr><td><strong>activate</strong></td><td><code>activate &lt;structure&gt;</code></td><td>Makes a structure the active one. Also <code>use</code>.</td></tr>
             <tr><td><strong>remove</strong></td><td><code>remove &lt;structure&gt;</code></td><td>Removes a structure from the scene. Also <code>delete</code>, <code>close</code>.</td></tr>
             <tr><td><strong>refresh</strong></td><td><code>refresh</code></td><td>Downloads the active structure again, bypassing the cache. Also <code>reload</code>.</td></tr>
@@ -263,6 +265,7 @@
             <tr><td><strong>alphafold</strong></td><td><code>alphafold</code></td><td>Compares the active structure with its AlphaFold DB model. Also <code>af</code>.</td></tr>
             <tr><td><strong>overlay</strong></td><td><code>overlay [on|<wbr />off]</code></td><td>Overlays all models of an ensemble.</td></tr>
             <tr><td><strong>ranking</strong></td><td><code>ranking [&lt;rank&gt;]</code></td><td>Lists the models of an opened prediction, or shows the one at a rank. See <a href="predictions.html">Predictions and AlphaFold</a>. Also <code>models</code>, <code>predictions</code>.</td></tr>
+            <tr><td><strong>triage</strong></td><td><code>triage [by &lt;metric&gt;] [top &lt;n&gt;] [jobs|<wbr />models] [pair &lt;chain&gt; &lt;chain&gt;|<wbr />best]</code><br /><code>triage show &lt;n&gt;</code><br /><code>triage gallery [&lt;n&gt;]</code><br /><code>triage export</code></td><td>Ranks every opened prediction job by ipSAE, pDockQ2, pDockQ, LIS, ipTM, pTM, the tool's score, pLDDT or cross-links; shows a row, renders a gallery of the best, or exports the table. See <a href="predictions.html#triage">Batch triage</a>. Also <code>batch</code>, <code>campaign</code>.</td></tr>
             <tr><td><strong>domains</strong></td><td><code>domains</code></td><td>Finds rigid domains in the PAE matrix and colors by them. Also <code>paedomains</code>.</td></tr>
             <tr><td><strong>msa</strong></td><td><code>msa</code></td><td>Colors by MSA depth (AlphaFold DB models, prediction folders, dropped <code>.a3m</code> files).</td></tr>
           </tbody>
@@ -286,6 +289,7 @@
         <table>
           <thead><tr><th>Command</th><th>Syntax</th><th>What it does</th></tr></thead>
           <tbody>
+            <tr><td><strong>interactions</strong></td><td><code>interactions &lt;selection&gt;</code></td><td>Focuses residues or a ligand and lists their interactions with PLIP's criteria. Also <code>plip</code>.</td></tr>
             <tr><td><strong>interface</strong></td><td><code>interface &lt;chain&gt; &lt;chain&gt;</code></td><td>Lists the contacts between two chains and frames their interface. Also <code>contacts</code>.</td></tr>
             <tr><td><strong>conservation</strong></td><td><code>conservation [jsd|<wbr />entropy|<wbr />off]</code></td><td>Colors by conservation from the prediction's MSA, AlphaFold DB's, or a dropped alignment (Jensen–Shannon divergence, ConSurf-style grades). Also <code>consurf</code>, <code>conserved</code>.</td></tr>
             <tr><td><strong>missense</strong></td><td><code>missense [&lt;UniProt accession&gt;]</code></td><td>Colors by AlphaMissense pathogenicity (human proteins). Also <code>alphamissense</code>, <code>am</code>.</td></tr>
@@ -308,7 +312,7 @@
             <tr><td><strong>save</strong></td><td><code>save</code></td><td>Saves the session as a file. See <a href="sessions.html">Sessions, figures and methods</a>. Also <code>session</code>.</td></tr>
             <tr><td><strong>link</strong></td><td><code>link</code></td><td>Copies a link that reopens this view. Also <code>share</code>.</td></tr>
             <tr><td><strong>mvs</strong></td><td><code>mvs</code></td><td>Exports the view as MolViewSpec for Mol*. Also <code>molviewspec</code>.</td></tr>
-            <tr><td><strong>help</strong></td><td><code>help [command]</code></td><td>Lists commands. Also <code>?</code>, <code>commands</code>.</td></tr>
+            <tr><td><strong>help</strong></td><td><code>help [command]</code></td><td>Lists commands; for scripts and agents, as text. Also <code>?</code>, <code>commands</code>.</td></tr>
           </tbody>
         </table>
       </div>
@@ -319,7 +323,7 @@
       <h2 id="scripting">Running commands from scripts</h2>
       <p>Every command also runs from code. In the browser console, <code>proteoscope.run()</code> executes a command and returns <code>{ ok, message, data }</code>:</p>
       <div class="code"><span class="code-label">js</span><pre><code>await proteoscope.run('show sticks byres (within 4.5 of resn STI) and protein');</code></pre></div>
-      <p>From Python or Jupyter, start Proteoscope with <code>--remote-control</code> and send the same commands over HTTP. See <a href="scripting.html">Scripting and command line</a>.</p>
+      <p>From Python or Jupyter, start Proteoscope with <code>--remote-control</code> and send the same commands over HTTP. See <a href="scripting.html">Scripting and command line</a>. AI agents run them through Proteoscope's MCP server; see <a href="agents.html">AI agents (MCP)</a>.</p>
 
       <nav class="doc-pager" aria-label="Pages">
         <a class="prev" href="viewing.html"><span>Previous</span>Viewing and interactions</a>
@@ -355,6 +359,7 @@
             <li><a href="getting-started.html">Getting started</a></li>
             <li><a href="commands.html">Commands</a></li>
             <li><a href="scripting.html">Scripting</a></li>
+            <li><a href="agents.html">AI agents</a></li>
             <li><a href="troubleshooting.html">Troubleshooting</a></li>
           </ul>
         </div>
