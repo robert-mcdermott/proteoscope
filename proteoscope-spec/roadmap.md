@@ -8,7 +8,7 @@ variants; `wave5`: bring your data, find public data; `wave6`: maps, ligand
 chemistry and statistics; `wave7`: agents and batch triage), a review of the bundled
 examples and of the public databases Proteoscope can use without API keys, and
 a prioritized plan for what comes next. Waves 1 to 6 were released together
-as version 0.6.0 ([CHANGELOG.md](../CHANGELOG.md)).
+as version 0.6.0, and wave 7 as version 0.7.0 ([CHANGELOG.md](../CHANGELOG.md)).
 
 ## 1. Where v0.4 stood
 
@@ -1027,7 +1027,9 @@ MCP server so that an agent can drive the page the user sees.
   `interface_contacts`, `superpose`, `validation_report`, `rank_predictions`,
   `render_image` and `proteoscope_command`. Each becomes one command line or
   an open event in the page; results come back as structured content and
-  text, and `render_image` as a PNG. Tool arguments cannot add a second
+  text, and `render_image` as a PNG. Images inside a command's result (the
+  triage gallery, `png`) become captioned image content, up to 8 MB per
+  result, and the data keeps their numbers. Tool arguments cannot add a second
   command line, and every `rank_predictions` call states all its settings.
 - The tools act on the visible page, so the user sees what the agent does
   and can take over. A tool call waits up to 30 seconds for a page to
@@ -1035,11 +1037,12 @@ MCP server so that an agent can drive the page the user sees.
 
 ### Validation
 
-- **Tests.** 7 new JavaScript tests, 256 in total, and 12 new Go tests, 73
+- **Tests.** 7 new JavaScript tests, 256 in total, and 14 new Go tests, 75
   in total: triage ranking, exact chain pairs, filters, records and CSV rows
   (with repeated job names); the parsing of `triage`, `info` and
   `interactions`; the MCP handshake, tool list, command lines built from tool
-  arguments, images, tool errors, protocol edge cases (batches, bad versions,
+  arguments, images (including those inside command results, and their size
+  limit), tool errors, protocol edge cases (batches, bad versions,
   overlong lines, cancellation), opening files by path, the
   `/api/remote/open` endpoint (token, requests from other machines, DNS
   rebinding), MCP mode without the script routes, one request at a time, and

@@ -7730,7 +7730,7 @@ async function triageCommand(parsed, options) {
   if (parsed.action === 'gallery') {
     const images = await renderTriageGallery(parsed.count, { filter: '' });
     if (!options.remote) openTriageDialog();
-    return { message: `Rendered ${images.length} models, each superposed on the best.`, data: options.remote ? images.map((item) => ({ position: item.row.position, job: item.row.job, model: item.row.model, image: item.url })) : undefined };
+    return { message: `Rendered ${images.length} models, each superposed on the best.`, data: options.remote ? images.map((item) => ({ position: item.row.position, job: item.row.job, model: item.row.model, metric: triageMetricLabel(item.metric), score: Number.isFinite(item.row[item.metric]) ? Number(item.row[item.metric].toFixed(4)) : null, image: item.url })) : undefined };
   }
   if (parsed.action === 'show') {
     const { rows } = rankedTriage({ filter: '' });

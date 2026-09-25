@@ -419,11 +419,19 @@ func commandResult(outcome remoteResult) map[string]any {
 	}
 	text := outcome.Message
 	structured := map[string]any{"message": outcome.Message}
+	var images []mcpImage
 	if len(outcome.Data) > 0 && string(outcome.Data) != "null" {
 		var data any
 		if err := json.Unmarshal(outcome.Data, &data); err == nil {
+			// Images (a triage gallery, "png") go to the agent as images; the data keeps their numbers.
+			var dropped int
+			data, images, dropped = extractImages(data)
 			structured["data"] = data
 			serialized := string(outcome.Data)
+			if len(images) > 0 || dropped > 0 {
+				encoded, _ := json.Marshal(data)
+				serialized = string(encoded)
+			}
 			if len(serialized) > mcpTextLimit {
 				serialized = strings.ToValidUTF8(serialized[:mcpTextLimit], "") + " … (truncated; the structured content has everything)"
 			}
@@ -431,12 +439,92 @@ func commandResult(outcome remoteResult) map[string]any {
 				text += "\n\n"
 			}
 			text += serialized
+			if dropped > 0 {
+				text += fmt.Sprintf("\n\n%d more images left out (null above): the images of one result are limited to %d MB.", dropped, mcpImageLimit>>20)
+			}
 		}
 	}
 	if text == "" {
 		text = "Done."
 	}
-	return map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}, "structuredContent": structured}
+	content := []any{map[string]any{"type": "text", "text": text}}
+	for index, image := range images {
+		content = append(content,
+			map[string]any{"type": "text", "text": fmt.Sprintf("Image %d: %s", index+1, image.caption)},
+			map[string]any{"type": "image", "data": image.data, "mimeType": image.mimeType})
+	}
+	return map[string]any{"content": content, "structuredContent": structured}
+}
+
+type mcpImage struct {
+	data, mimeType, caption string
+}
+
+var dataURLImage = regexp.MustCompile(`^data:(image/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$`)
+
+// extractImages replaces every image data URL in a command's data with its 1-based number among
+// the images returned, up to mcpImageLimit bytes of them in all; images past the limit become
+// null and are counted. Each image is captioned from the fields next to it (position, job,
+// model, score, size), so the agent can tell a gallery's thumbnails apart.
+func extractImages(data any) (any, []mcpImage, int) {
+	var images []mcpImage
+	dropped, total := 0, 0
+	var walk func(value any, siblings map[string]any) any
+	walk = func(value any, siblings map[string]any) any {
+		switch typed := value.(type) {
+		case map[string]any:
+			for key, item := range typed {
+				typed[key] = walk(item, typed)
+			}
+			return typed
+		case []any:
+			for index, item := range typed {
+				typed[index] = walk(item, nil)
+			}
+			return typed
+		case string:
+			match := dataURLImage.FindStringSubmatch(typed)
+			if match == nil {
+				return typed
+			}
+			if total+len(match[2]) > mcpImageLimit {
+				dropped++
+				return nil
+			}
+			total += len(match[2])
+			images = append(images, mcpImage{data: match[2], mimeType: match[1], caption: imageCaption(siblings)})
+			return len(images)
+		}
+		return value
+	}
+	data = walk(data, nil)
+	return data, images, dropped
+}
+
+func imageCaption(fields map[string]any) string {
+	var parts []string
+	if position, ok := fields["position"].(float64); ok {
+		parts = append(parts, fmt.Sprintf("#%d", int(position)))
+	}
+	for _, key := range []string{"job", "model"} {
+		if text, ok := fields[key].(string); ok && text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if metric, ok := fields["metric"].(string); ok {
+		if score, ok := fields["score"].(float64); ok {
+			parts = append(parts, fmt.Sprintf("%s %.2f", metric, score))
+		}
+	}
+	width, _ := fields["width"].(float64)
+	height, _ := fields["height"].(float64)
+	if width > 0 && height > 0 {
+		parts = append(parts, fmt.Sprintf("%d × %d", int(width), int(height)))
+	}
+	if len(parts) == 0 {
+		return "image"
+	}
+	return strings.Join(parts, ", ")
 }
 
 func imageResult(outcome remoteResult) map[string]any {

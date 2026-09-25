@@ -24,9 +24,9 @@ you can take over at any time.
 
 ## Requirements
 
-- **A version with the `mcp` command.** `proteoscope --help` lists
-  `proteoscope mcp` when yours has it. Otherwise install the latest release
-  ([Installing Proteoscope](INSTALLING.md)) or build from source.
+- **Proteoscope 0.7.0 or later.** `proteoscope --version` prints yours, and
+  `proteoscope --help` lists `proteoscope mcp` when it has it. To upgrade,
+  install the latest release ([Installing Proteoscope](INSTALLING.md)).
 - **A browser.** Chrome, Edge or Brave works best, because they have WebGPU.
   Proteoscope opens in your default browser. Other browsers work too, more
   slowly (see [the Canvas preview](../README.md#the-badge-says-canvas-preview)).
@@ -256,9 +256,13 @@ enough for the agent to see what is shown. Images larger than 8 MB are
 refused; render them at scale 1. To send images to the model, the client and
 its model provider must accept images in tool results. Claude does.
 
-The thumbnails from `triage gallery` and the image from `png`, both run
-through `proteoscope_command`, come back as data in the result rather than as
-images. To show the agent a model, open it with `triage show <n>`, then call
+Commands run through `proteoscope_command` return their images as images
+too. `triage gallery` gives the agent a thumbnail of each of the best models
+(480 pixels wide), each captioned with its rank, job, model and score, so
+it can compare the jobs by eye. In the structured data, each image is replaced
+by its number among the images returned. The images of one result are limited
+to 8 MB in all; any beyond that are left out, and the answer says so. For a
+closer look at one model, open it with `triage show <n>` and call
 `render_image`.
 
 ## Options

@@ -504,3 +504,48 @@ func TestMCPCommandLine(t *testing.T) {
 		t.Fatalf("--host 0.0.0.0: %d stdout %q stderr %q", code, out.String(), errs.String())
 	}
 }
+
+func TestMCPCommandImagesBecomeImageContent(t *testing.T) {
+	hub := newRemoteHub()
+	fakePage(t, hub, func(event remoteEvent) remoteResult {
+		return remoteResult{OK: true, Message: "Rendered 2 models.", Data: json.RawMessage(`[
+			{"position":1,"job":"aurka_tpx2","model":"Model 0","metric":"ipSAE","score":0.8665,"image":"data:image/jpeg;base64,/9j/AAAA"},
+			{"position":2,"job":"raf1_ksr1","model":"Rank 1","metric":"ipSAE","score":0.5978,"image":"data:image/jpeg;base64,/9j/BBBB"}]`)}
+	})
+	server := &mcpServer{hub: hub, url: "http://127.0.0.1:8765", pageWait: time.Second}
+	result := resultOf(t, runMCPLines(t, server, call(1, "proteoscope_command", `{"command":"triage gallery 2"}`))[0])
+	content := result["content"].([]any)
+	if len(content) != 5 {
+		t.Fatalf("want the answer and two captioned images, got %d blocks: %v", len(content), content)
+	}
+	text := content[0].(map[string]any)["text"].(string)
+	if strings.Contains(text, "base64") || !strings.Contains(text, `"image":1`) {
+		t.Fatalf("the text should number the images, not carry them: %q", text)
+	}
+	if caption := content[1].(map[string]any)["text"]; caption != "Image 1: #1, aurka_tpx2, Model 0, ipSAE 0.87" {
+		t.Fatalf("caption %q", caption)
+	}
+	image := content[4].(map[string]any)
+	if image["type"] != "image" || image["mimeType"] != "image/jpeg" || image["data"] != "/9j/BBBB" {
+		t.Fatalf("image %v", image)
+	}
+	rows := result["structuredContent"].(map[string]any)["data"].([]any)
+	if rows[1].(map[string]any)["image"] != float64(2) {
+		t.Fatalf("structured content should hold the image's number: %v", rows[1])
+	}
+}
+
+func TestExtractImagesKeepsResultsWithinTheLimit(t *testing.T) {
+	big := "data:image/png;base64," + strings.Repeat("A", mcpImageLimit/2+8)
+	data, images, dropped := extractImages(map[string]any{"a": big, "b": big, "c": []any{"text", "data:text/plain;base64,QQ=="}})
+	fields := data.(map[string]any)
+	if len(images) != 1 || dropped != 1 {
+		t.Fatalf("want one image and one left out, got %d and %d", len(images), dropped)
+	}
+	if (fields["a"] == nil) == (fields["b"] == nil) {
+		t.Fatalf("one image should be numbered and the other null: %v, %v", fields["a"], fields["b"])
+	}
+	if list := fields["c"].([]any); list[1] != "data:text/plain;base64,QQ==" {
+		t.Fatalf("only images are taken out: %v", list)
+	}
+}

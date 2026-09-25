@@ -519,7 +519,8 @@ ambient occlusion or outlines.
   tool call becomes a command line or an open event through the same
   dispatch as remote control; the page's `{ ok, message, data }` becomes the
   tool result (`structuredContent` plus text, or an image for
-  `render_image`). Tool calls run concurrently with other messages, can be
+  `render_image`); image data URLs anywhere in the data become captioned
+  image content, and the data keeps their numbers. Tool calls run concurrently with other messages, can be
   cancelled, and report progress when asked; at end of input they get a
   second before being cancelled. The banner and logs go to stderr.
 
