@@ -1,6 +1,6 @@
 // Density maps live in this worker: parsing (CCP4/MRC files can hold hundreds of megabytes),
 // isosurfaces for a region, and map values at atoms. The page keeps only summaries.
-import { contourVolume, extractRegion, gridSpacing, mapFit, parseMRC, parseVolumeServerData } from './volume.js';
+import { contourVolume, extractRegion, gridSpacing, mapFit, mapPeaks, parseMRC, parseVolumeServerData } from './volume.js';
 
 const volumes = new Map();
 
@@ -42,6 +42,12 @@ self.onmessage = (event) => {
       if (!volume) throw new Error('The map is no longer loaded.');
       const fit = mapFit(volume, payload.positions, payload.groups, payload.groupCount, payload.level);
       self.postMessage({ id, result: fit }, [fit.sigma.buffer, fit.inclusion.buffer, fit.counts.buffer, fit.sums.buffer, fit.sampled.buffer, fit.insideCounts.buffer]);
+      return;
+    }
+    if (type === 'peaks') {
+      const volume = volumes.get(payload.key);
+      if (!volume) throw new Error('The map is no longer loaded.');
+      self.postMessage({ id, result: mapPeaks(volume, payload.threshold, payload.core) });
       return;
     }
     if (type === 'drop') {

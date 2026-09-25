@@ -7,6 +7,7 @@ import {
   extractRegion,
   isMRC,
   mapFit,
+  mapPeaks,
   parseMRC,
   parseVolumeServerData,
   sampleVolume,
@@ -211,4 +212,36 @@ test('regions, strides, statistics, map fit and detail levels', () => {
   assert.equal(detailForBudget(header, 2e6), 1);
   assert.equal(detailForBudget(header, 4194304), 3);
   assert.equal(detailForBudget(header, 1000), 0);
+});
+
+test('difference-map peaks: maxima and minima past ±nσ, refined between grid points, kept once per tile core', () => {
+  // A 40³ grid at 0.5 Å with a positive blob off grid points and a weaker negative one.
+  const dims = [40, 40, 40];
+  const data = new Float32Array(dims[0] * dims[1] * dims[2]);
+  const blobs = [{ center: [6.2, 7.1, 8.3], height: 1, width: 0.8 }, { center: [13.4, 12.6, 5.9], height: -0.6, width: 0.8 }, { center: [4, 14, 14], height: 0.08, width: 0.8 }];
+  for (let k = 0; k < dims[2]; k += 1) {
+    for (let j = 0; j < dims[1]; j += 1) {
+      for (let i = 0; i < dims[0]; i += 1) {
+        const point = [i * 0.5, j * 0.5, k * 0.5];
+        let value = 0;
+        for (const blob of blobs) value += blob.height * Math.exp(-((point[0] - blob.center[0]) ** 2 + (point[1] - blob.center[1]) ** 2 + (point[2] - blob.center[2]) ** 2) / (2 * blob.width ** 2));
+        data[i + dims[0] * (j + dims[1] * k)] = value;
+      }
+    }
+  }
+  const volume = { data, dims, origin: [0, 0, 0], axes: [[0.5, 0, 0], [0, 0.5, 0], [0, 0, 0.5]], stats: { mean: 0, rms: 0.1 } };
+  const peaks = mapPeaks(volume, 3);
+  assert.equal(peaks.length, 2, 'the 0.8σ blob is below 3σ');
+  assert.ok(close(peaks[0].sigma, 10, 0.3) && peaks[1].sigma < -5.5, 'sorted by height, the negative one second');
+  for (const [index, blob] of blobs.slice(0, 2).entries()) {
+    const distance = Math.hypot(...peaks[index].position.map((value, axis) => value - blob.center[axis]));
+    assert.ok(distance < 0.08, `peak ${index} at ${peaks[index].position} (refined to within ${distance.toFixed(3)} Å)`);
+  }
+  // A tile's core keeps what lies inside it; the neighboring tile reports the rest.
+  const core = { min: [0, 0, 0], max: [10, 20, 20] };
+  assert.deepEqual(mapPeaks(volume, 3, core).map((peak) => Math.sign(peak.sigma)), [1]);
+  // A flat top gives one peak, not one per grid point.
+  const flat = { ...volume, data: new Float32Array(data.length) };
+  for (const [i, j, k] of [[10, 10, 10], [11, 10, 10], [10, 11, 10]]) flat.data[i + 40 * (j + 40 * k)] = 1;
+  assert.equal(mapPeaks(flat, 3).length, 1);
 });

@@ -329,6 +329,23 @@ const els = {
   triageGalleryGrid: document.querySelector('#triage-gallery-grid'),
   triageDialogExport: document.querySelector('#triage-dialog-export'),
   triageDialogGallery: document.querySelector('#triage-dialog-gallery'),
+  ligandCard: document.querySelector('#ligand-card'),
+  ligandCode: document.querySelector('#ligand-code'),
+  ligandName: document.querySelector('#ligand-name'),
+  ligandDetails: document.querySelector('#ligand-details'),
+  ligandLinks: document.querySelector('#ligand-links'),
+  ligandStatus: document.querySelector('#ligand-status'),
+  ligandDiagramButton: document.querySelector('#ligand-diagram-button'),
+  diagramDialog: document.querySelector('#diagram-dialog'),
+  diagramTitle: document.querySelector('#diagram-title'),
+  diagramView: document.querySelector('#diagram-view'),
+  diagramNote: document.querySelector('#diagram-note'),
+  diagramNames: document.querySelector('#diagram-names'),
+  diagramRedraw: document.querySelector('#diagram-redraw'),
+  diagramSaveSVG: document.querySelector('#diagram-save-svg'),
+  diagramSavePNG: document.querySelector('#diagram-save-png'),
+  densityPeaks: document.querySelector('#density-peaks'),
+  densityPeakList: document.querySelector('#density-peak-list'),
   validationLoad: document.querySelector('#validation-load'),
   validationColor: document.querySelector('#validation-color'),
   validationFit: document.querySelector('#validation-fit'),
@@ -455,6 +472,9 @@ const state = {
   // Batch triage: the metric (null: ipSAE for complexes, else pLDDT), one row per job or per
   // model, a fixed chain pair (null: each model's best interface) and a job-name filter.
   triage: { metric: null, level: 'jobs', pair: null, filter: '', gallery: [] },
+  // Chemical component facts by CCD code, for the ligand card: { status, info, promise }.
+  compounds: new Map(),
+  diagram: null,
   crosslinkRequest: null,
   pairMetric: 'iptm',
   paeView: 'pae',
@@ -938,6 +958,7 @@ function bindEvents() {
   els.predictionSuperpose.addEventListener('click', () => guardedLoad(superposePredictionModels));
   els.predictionExport.addEventListener('click', exportPredictionCSV);
   bindTriageEvents();
+  bindLigandEvents();
   document.querySelector('#docking-fingerprints').addEventListener('click', () => guardedLoad(() => computePoseFingerprints()));
   els.densityLoad.addEventListener('click', () => runCommand('map'));
   els.conservationRun.addEventListener('click', () => runCommand('conservation'));
@@ -1719,6 +1740,507 @@ async function completeChemistry(entry) {
 }
 
 const MAX_COMPONENT_REQUESTS = 40;
+
+/* ---------- Ligand card and 2D diagram ---------- */
+
+// The card describes the focused or selected ligand: its names, formula, weight, charge, SMILES
+// and InChIKey from RCSB's chemical component API (through the server, and cached), with links
+// to the databases that list it. A ligand without a dictionary code (a docking pose, UNL) is
+// described from the model alone.
+const COMPOUND_LINKS = [
+  ['pubchem', 'PubChem', (id) => `https://pubchem.ncbi.nlm.nih.gov/compound/${encodeURIComponent(id)}`],
+  ['chembl', 'ChEMBL', (id) => `https://www.ebi.ac.uk/chembl/explore/compound/${encodeURIComponent(id)}`],
+  ['drugbank', 'DrugBank', (id) => `https://go.drugbank.com/drugs/${encodeURIComponent(id)}`],
+  ['chebi', 'ChEBI', (id) => `https://www.ebi.ac.uk/chebi/${encodeURIComponent(id)}`],
+];
+// The order a diagram's residue labels take their color from, strongest interaction first.
+const DIAGRAM_PRECEDENCE = ['salt-bridge', 'metal-coordination', 'hydrogen-bond', 'halogen-bond', 'pi-stacking', 'cation-pi', 'water-bridge', 'hydrophobic'];
+
+function ligandCardResidue() {
+  if (!state.structure) return null;
+  const model = activeModel();
+  const keys = state.focus?.residues.size === 1 ? [...state.focus.residues] : state.selection.size === 1 ? [...state.selection] : [];
+  const residue = keys.length ? model.residueMap.get(keys[0]) : null;
+  return residue && (residue.kind === 'ligand' || residue.kind === 'ion') ? residue : null;
+}
+
+// The residue's code in the Chemical Component Dictionary, when the residue is that component:
+// the dictionary's chemistry matched it, the file came from the PDB, or it is an ion.
+function compoundCode(residue, entry = state.active) {
+  const id = String(residue?.resName ?? '').toUpperCase();
+  if (!/^[A-Z0-9]{1,5}$/.test(id) || ['UNL', 'UNK', 'UNX', 'DUM'].includes(id)) return '';
+  const docking = dockingOf(entry);
+  if (docking && poseResidueKey(docking) === residue.key) return '';
+  if (residue.kind === 'ion' || residue.chemistry === 'ccd' || residue.chemistry === 'file' || entry?.origin?.type === 'fetch') return id;
+  return '';
+}
+
+// One lookup per code; a failed one (offline, a network error) is tried again after a minute.
+const COMPOUND_RETRY = 60_000;
+
+function compoundRecord(id) {
+  let record = state.compounds.get(id);
+  if (record && !(record.status === 'error' && Date.now() > record.retryAt)) return record.promise;
+  record = { status: 'loading', info: null, message: '' };
+  record.promise = (async () => {
+    try {
+      const response = await fetch(`/api/fetch/compound/${encodeURIComponent(id)}`);
+      if (!response.ok) {
+        record.status = response.status === 404 ? 'missing' : 'error';
+        record.message = await responseError(response, `Could not look up ${id}`);
+      } else {
+        record.info = await response.json();
+        record.status = 'ready';
+      }
+    } catch (error) {
+      record.status = 'error';
+      record.message = error.message;
+    }
+    if (record.status === 'error') record.retryAt = Date.now() + COMPOUND_RETRY;
+    return record;
+  })();
+  state.compounds.set(id, record);
+  return record.promise;
+}
+
+// The elements of the modeled atoms in Hill order, with hydrogens when the model has them or
+// the dictionary's chemistry gives their count.
+function modelFormula(residue) {
+  const counts = new Map();
+  let explicit = 0;
+  let implicit = 0;
+  let implicitKnown = true;
+  for (const atom of residue.atoms) {
+    if (atom.isHydrogen) {
+      explicit += 1;
+      continue;
+    }
+    const element = elementSymbol(atom.element);
+    counts.set(element, (counts.get(element) ?? 0) + 1);
+    if (Number.isFinite(atom.hydrogens)) implicit += atom.hydrogens;
+    else implicitKnown = false;
+  }
+  const hydrogens = explicit || (implicitKnown ? implicit : 0);
+  if (hydrogens) counts.set('H', hydrogens);
+  const order = [...counts.keys()].sort((a, b) => {
+    const rank = (element) => (counts.has('C') ? (element === 'C' ? 0 : element === 'H' ? 1 : 2) : 2);
+    return rank(a) - rank(b) || a.localeCompare(b);
+  });
+  return order.map((element) => `${element}${counts.get(element) > 1 ? counts.get(element) : ''}`).join(' ');
+}
+
+function elementSymbol(element) {
+  const text = String(element ?? '');
+  return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+}
+
+function formulaHTML(formula) {
+  return String(formula).split(/\s+/).filter(Boolean).map((part) => {
+    const match = /^([A-Za-z]{1,2})(\d*)([+-]?\d*[+-]?)$/.exec(part);
+    if (!match) return escapeHTML(part);
+    return `${escapeHTML(elementSymbol(match[1]))}${match[2] ? `<sub>${match[2]}</sub>` : ''}${match[3] ? `<sup>${escapeHTML(match[3])}</sup>` : ''}`;
+  }).join('');
+}
+
+// What the card shows, as a record: for the card, the `compound` command and scripts.
+function compoundCard(residue, entry = state.active) {
+  const id = compoundCode(residue, entry);
+  const record = id ? state.compounds.get(id) : null;
+  const info = record?.status === 'ready' ? record.info : null;
+  // A docking pose is named by its file's title and its place in the list.
+  const docking = dockingOf(entry);
+  const pose = docking && poseResidueKey(docking) === residue.key ? docking.molecules[docking.index] : null;
+  const local = pose ? `${pose.title || 'Pose'} (pose ${docking.index + 1})` : componentNameOf(residue, entry);
+  const heavy = residue.atoms.filter((atom) => !atom.isHydrogen).length;
+  const links = [];
+  if (id && record?.status !== 'missing') {
+    links.push({ label: 'RCSB', url: `https://www.rcsb.org/ligand/${encodeURIComponent(id)}` });
+    links.push({ label: 'PDBe', url: `https://pdbe.org/chem/${encodeURIComponent(id)}` });
+  }
+  for (const [key, label, url] of COMPOUND_LINKS) {
+    if (info?.related?.[key]) links.push({ label, url: url(info.related[key]), id: info.related[key] });
+  }
+  return {
+    id: id || null,
+    residue: shortResidueLabel(residue),
+    name: info?.commonName ? titleCase(info.commonName) : info?.name ? titleCase(info.name) : local || residue.resName,
+    fullName: info?.name ? titleCase(info.name) : local || null,
+    synonyms: info?.synonyms ?? [],
+    type: info?.type ?? residue.kind,
+    formula: info?.formula || modelFormula(residue),
+    formulaFrom: info?.formula ? 'dictionary' : 'model',
+    weight: Number.isFinite(info?.weight) ? info.weight : null,
+    charge: Number.isFinite(info?.charge) ? info.charge : null,
+    smiles: info?.smiles ?? null,
+    inchiKey: info?.inchiKey ?? null,
+    heavyAtoms: { modeled: heavy, expected: info?.heavyAtoms ?? null },
+    links,
+    peaks: ligandPeaks(entry, residue),
+    status: record?.status ?? (id ? 'loading' : 'model'),
+    message: record?.message ?? '',
+  };
+}
+
+function renderLigandCard() {
+  const residue = ligandCardResidue();
+  els.ligandCard.hidden = !residue;
+  if (!residue) return;
+  const entry = state.active;
+  const id = compoundCode(residue, entry);
+  const known = id ? state.compounds.get(id) : null;
+  if (id && (!known || (known.status === 'error' && Date.now() > known.retryAt))) {
+    compoundRecord(id).then(() => {
+      if (ligandCardResidue() === residue) renderLigandCard();
+    });
+  }
+  const card = compoundCard(residue, entry);
+  els.ligandCode.textContent = id || residue.resName;
+  els.ligandName.textContent = card.name;
+  const rows = [];
+  const row = (label, html, options = {}) => rows.push(`<div${options.wide ? ' class="wide"' : ''}><dt>${escapeHTML(label)}</dt><dd${options.mono ? ' class="mono"' : ''} title="${escapeHTML(options.title ?? '')}">${html}</dd></div>`);
+  if (card.fullName && card.fullName !== card.name) row('Name', escapeHTML(card.fullName), { wide: true, title: card.fullName });
+  row('Formula', `${formulaHTML(card.formula)}${card.formulaFrom === 'model' ? ' <span class="hint">(model)</span>' : ''}`, { title: card.formulaFrom === 'model' ? 'Counted from the modeled atoms' : '' });
+  if (card.weight !== null) row('Weight', `${card.weight.toFixed(2)} g/mol`);
+  if (card.charge !== null) row('Charge', card.charge > 0 ? `+${card.charge}` : String(card.charge).replace('-', '−'));
+  if (card.heavyAtoms.expected) {
+    const missing = card.heavyAtoms.expected - card.heavyAtoms.modeled;
+    row('Modeled', `${card.heavyAtoms.modeled} of ${card.heavyAtoms.expected} heavy atoms${missing > 0 ? ' <span class="warn">(incomplete)</span>' : ''}`, { title: 'Heavy atoms in the model, of those in the dictionary entry' });
+  }
+  if (card.smiles) row('SMILES', `${escapeHTML(card.smiles)}`, { wide: true, mono: true, title: card.smiles });
+  if (card.inchiKey) row('InChIKey', escapeHTML(card.inchiKey), { wide: true, mono: true, title: card.inchiKey });
+  if (card.peaks) row('Fo-Fc peaks', escapeHTML(ligandPeakText(card.peaks)), { wide: true, title: `Difference-map peaks beyond ±${card.peaks.threshold}σ within ${LIGAND_PEAK_DISTANCE} Å of the ligand` });
+  els.ligandDetails.innerHTML = rows.join('');
+  els.ligandLinks.innerHTML = card.links.map((link) => `<a href="${escapeHTML(link.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHTML(link.id ?? link.url)}">${escapeHTML(link.label)}</a>`).join('');
+  const status = {
+    loading: 'Looking up the Chemical Component Dictionary…',
+    missing: `${residue.resName} is not in the Chemical Component Dictionary; the formula is counted from the model.`,
+    error: `${(card.message || 'The dictionary could not be reached').replace(/\.+$/, '')}. The formula is counted from the model.`,
+    model: 'No dictionary code (a docking pose or an unnamed ligand): the formula is counted from the model.',
+  }[card.status] ?? '';
+  els.ligandStatus.hidden = !status;
+  els.ligandStatus.textContent = status;
+  els.ligandDiagramButton.disabled = card.heavyAtoms.modeled < 2;
+}
+
+// "compound [<selection>]": the card of a ligand, and its facts for scripts.
+async function compoundCommand(selection) {
+  const residue = resolveLigand(selection);
+  const entry = state.active;
+  const id = compoundCode(residue, entry);
+  if (id) await compoundRecord(id);
+  if (!state.selection.has(residue.key) || state.selection.size !== 1) {
+    state.selection = new Set([residue.key]);
+    onSelectionChanged();
+  }
+  renderLigandCard();
+  const card = compoundCard(residue, entry);
+  const facts = [card.formula, card.weight !== null ? `${card.weight.toFixed(2)} g/mol` : ''].filter(Boolean).join(', ');
+  return { message: `${card.name}${card.id ? ` (${card.id})` : ''}: ${facts}.`, data: card };
+}
+
+// The ligand a command names, or the one shown in the card, or the largest in the structure.
+function resolveLigand(selection) {
+  const model = activeModel();
+  const isLigand = (residue) => residue && (residue.kind === 'ligand' || residue.kind === 'ion');
+  if (selection) {
+    const resolved = requireSelection(selection, [state.active]);
+    const keys = resolved.results.find((result) => result.entry === state.active)?.keys ?? new Set();
+    const residue = [...keys].map((key) => model.residueMap.get(key)).find(isLigand);
+    if (!residue) throw new CommandError(`"${selection}" matches no ligand in ${state.active.name}.`);
+    return residue;
+  }
+  const shown = ligandCardResidue();
+  if (shown) return shown;
+  const largest = model.residues.filter((residue) => residue.kind === 'ligand').sort((a, b) => b.atoms.length - a.atoms.length)[0];
+  if (!largest) throw new CommandError(`${state.active.name} has no ligands.`);
+  return largest;
+}
+
+function diagramResidueLabel(residue, chains) {
+  if (!residue) return '?';
+  if (residue.kind === 'water') return `HOH ${residue.resSeq}`;
+  if (residue.kind === 'ion') return `${elementSymbol(residue.atoms[0]?.element ?? residue.resName)}${chains ? ` ${residue.chain}` : ''}`;
+  const name = residue.kind === 'protein' ? elementSymbol(residue.resName) : residue.resName;
+  return `${name}${residue.resSeq}${residue.iCode || ''}${chains ? ` ${residue.chain}` : ''}`;
+}
+
+// The diagram of a ligand with the interactions the Interactions card lists for it, turned to
+// match the view.
+async function buildLigandDiagram(residue, options = {}) {
+  const entry = state.active;
+  const model = activeModel();
+  const heavy = residue.atoms.filter((atom) => !atom.isHydrogen);
+  if (heavy.length < 2) throw new CommandError(`${residueLabel(residue)} has fewer than two heavy atoms; there is nothing to draw.`);
+  if (!(state.focus?.residues.size === 1 && state.focus.residues.has(residue.key))) await focusResidues([residue.key]);
+  lazyModules.diagram ??= await import('./lib/ligand-diagram.js');
+  const local = new Map(heavy.map((atom, index) => [atom.id, index]));
+  // Heme's Fe–N bonds and the like are drawn as coordination, not as covalent bonds.
+  const bonds = (model.bonds ?? []).filter((bond) => (bond.kind === 'covalent' || bond.kind === 'metal') && local.has(bond.a) && local.has(bond.b))
+    .map((bond) => ({ a: local.get(bond.a), b: local.get(bond.b), order: bond.order ?? 1, aromatic: Boolean(bond.aromatic), coordination: bond.kind === 'metal' }));
+  // The title uses the ligand's common name, when the dictionary answers in time.
+  const code = compoundCode(residue, entry);
+  if (code) await Promise.race([compoundRecord(code), new Promise((resolve) => setTimeout(resolve, 4000))]);
+  const view = currentView();
+  const width = els.canvas.clientWidth;
+  const height = els.canvas.clientHeight;
+  const onScreen = (position) => {
+    const screen = position ? projectToScreen(view, position, width, height) : null;
+    return screen ? [screen.x, screen.y] : null;
+  };
+  let reference = heavy.map((atom) => onScreen(point(atom)));
+  if (reference.some((item) => !item)) reference = null;
+  const chains = new Set(model.residues.filter((item) => item.kind === 'protein' || item.kind === 'nucleic').map((item) => item.chain)).size > 1;
+  const contacts = [];
+  for (const item of state.interactions.list) {
+    if (item.residueA !== residue.key || !state.interactions.enabled.has(item.type)) continue;
+    const ids = item.atomA >= 0 ? [item.atomA] : item.details?.atomsA ?? [];
+    const atoms = ids.map((id) => local.get(id)).filter((index) => index !== undefined);
+    if (!atoms.length) continue;
+    const partner = model.residueMap.get(item.residueB);
+    const water = item.type === 'water-bridge' ? model.residueMap.get(item.details?.waterResidue) : null;
+    contacts.push({
+      type: item.type,
+      atoms,
+      point: onScreen(item.pointB),
+      distance: item.distance,
+      residue: { key: item.residueB, label: diagramResidueLabel(partner, chains) },
+      water: water ? { key: water.key, label: diagramResidueLabel(water, false), point: onScreen(item.details.waterPoint) } : null,
+    });
+  }
+  const types = DIAGRAM_PRECEDENCE.map((id) => state.interactionTypes.find((type) => type.id === id)).filter(Boolean);
+  const card = compoundCard(residue, entry);
+  const diagram = lazyModules.diagram.ligandDiagram({
+    title: `${card.name}${card.id && card.id !== card.name ? ` (${card.id})` : ''}`,
+    subtitle: `${entry.structure.meta.code || entry.name} · ${residueLabel(residue)} · ${contacts.length} interaction${contacts.length === 1 ? '' : 's'}`,
+    atoms: heavy.map((atom) => ({ element: atom.element, name: atom.name, charge: atom.charge ?? 0, hydrogens: atom.hydrogens, aromatic: atom.aromatic, x: atom.x, y: atom.y, z: atom.z })),
+    bonds,
+    reference,
+    contacts,
+    types,
+    atomNames: Boolean(options.names),
+  });
+  return { ...diagram, residue, card, contacts: contacts.length, fileName: `${fileStem()}-${residue.resName.toLowerCase()}-${residue.chain}${residue.resSeq}-diagram` };
+}
+
+async function diagramImage(diagram, scaleFactor = 2) {
+  const url = URL.createObjectURL(new Blob([diagram.svg], { type: 'image/svg+xml' }));
+  try {
+    const image = new Image();
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error('The diagram could not be drawn as an image.'));
+      image.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(diagram.width * scaleFactor);
+    canvas.height = Math.ceil(diagram.height * scaleFactor);
+    const context = canvas.getContext('2d');
+    context.scale(scaleFactor, scaleFactor);
+    context.drawImage(image, 0, 0, diagram.width, diagram.height);
+    return canvas;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function openLigandDiagram(residue, options = {}) {
+  const diagram = await buildLigandDiagram(residue, { names: options.names ?? els.diagramNames.checked });
+  state.diagram = diagram;
+  els.diagramNames.checked = Boolean(options.names ?? els.diagramNames.checked);
+  els.diagramTitle.textContent = `${diagram.card.name}: interaction diagram`;
+  els.diagramView.innerHTML = diagram.svg;
+  const notes = [];
+  if (!diagram.contacts) notes.push('No interactions are listed for this ligand; the diagram shows the ligand alone.');
+  if (diagram.method === 'projection') notes.push('Drawn from the ligand\'s own 3D shape, projected onto its plane, because a flat layout overlapped more.');
+  if (diagram.approximate) notes.push('Some atoms overlap in 2D: bridged and caged ligands cannot always be drawn flat.');
+  els.diagramNote.textContent = notes.join(' ');
+  els.diagramNote.hidden = !notes.length;
+  if (!els.diagramDialog.open) els.diagramDialog.showModal();
+  return diagram;
+}
+
+// "diagram [<selection>] [names]": opens the diagram, or returns it (SVG and PNG) to scripts.
+async function diagramCommand(parsed, options) {
+  const residue = resolveLigand(parsed.selection);
+  if (options.remote) {
+    const diagram = await buildLigandDiagram(residue, { names: parsed.names });
+    const canvas = await diagramImage(diagram, 2);
+    return {
+      message: `Drew ${diagram.card.name} with ${diagram.contacts} interaction${diagram.contacts === 1 ? '' : 's'} and ${diagram.residues} residue${diagram.residues === 1 ? '' : 's'}${diagram.approximate ? ' (some atoms overlap in 2D)' : ''}.`,
+      data: { ligand: diagram.card.id ?? residue.resName, residue: shortResidueLabel(residue), interactions: diagram.contacts, residues: diagram.residues, layout: diagram.method, approximate: diagram.approximate, width: Math.round(diagram.width), height: Math.round(diagram.height), svg: diagram.svg, image: canvas.toDataURL('image/png') },
+    };
+  }
+  await openLigandDiagram(residue, { names: parsed.names || undefined });
+  return '';
+}
+
+function saveDiagram(format) {
+  const diagram = state.diagram;
+  if (!diagram) return;
+  if (format === 'svg') {
+    downloadText(`${diagram.fileName}.svg`, diagram.svg, 'image/svg+xml');
+    return;
+  }
+  guardedLoad(async () => {
+    const canvas = await diagramImage(diagram, 3);
+    canvas.toBlob((blob) => blob && downloadBlob(`${diagram.fileName}.png`, blob), 'image/png');
+  });
+}
+
+function bindLigandEvents() {
+  els.ligandDiagramButton.addEventListener('click', () => {
+    const residue = ligandCardResidue();
+    if (residue) guardedLoad(() => openLigandDiagram(residue));
+  });
+  const redraw = () => {
+    const residue = state.diagram ? activeModel()?.residueMap.get(state.diagram.residue.key) : null;
+    if (residue) guardedLoad(() => openLigandDiagram(residue, { names: els.diagramNames.checked }));
+  };
+  els.diagramNames.addEventListener('change', redraw);
+  els.diagramRedraw.addEventListener('click', redraw);
+  els.diagramSaveSVG.addEventListener('click', () => saveDiagram('svg'));
+  els.diagramSavePNG.addEventListener('click', () => saveDiagram('png'));
+  els.densityPeaks.addEventListener('click', () => guardedLoad(() => findDifferencePeaks(state.active)));
+}
+
+/* ---------- Difference-map peaks ---------- */
+
+// Peaks of the Fo-Fc map past ±3σ within reach of the model, each with its nearest atom: positive
+// peaks are density the model does not explain (a missing ligand part, water, alternative
+// conformation), negative ones atoms the data do not support.
+const PEAK_REACH = 5;
+const LIGAND_PEAK_DISTANCE = 3;
+const MAX_PEAKS = 200;
+
+async function findDifferencePeaks(entry = state.active, threshold = 3) {
+  const density = entry?.density;
+  if (!density) throw new CommandError('Load the map first ("map load", or Load map in the Analysis tab).');
+  const channel = density.channels.find((item) => item.kind === 'fo-fc');
+  if (!channel) {
+    throw new CommandError(density.source.kind === 'em'
+      ? 'A cryo-EM map has no difference map; difference peaks need the Fo-Fc map of an X-ray entry.'
+      : 'This map has no Fo-Fc channel. Load the X-ray entry\'s maps, or open an Fo-Fc map file.');
+  }
+  const model = activeModelOf(entry);
+  const atoms = model.atoms.filter((atom) => !atom.isHydrogen);
+  if (!atoms.length) throw new CommandError('The structure has no atoms.');
+  const inverse = entry.transform ? invertTransform(entry.transform) : null;
+  const positions = new Float32Array(atoms.length * 3);
+  atoms.forEach((atom, index) => positions.set(inverse ? transformPoint(inverse, atom.x, atom.y, atom.z) : [atom.x, atom.y, atom.z], index * 3));
+  showLoading('Finding difference-map peaks');
+  let raw;
+  try {
+    raw = density.source.type === 'server'
+      ? await serverMapPeaks(entry, density, channel, positions, threshold)
+      : await volumeWorker().run('peaks', { key: channel.key ?? `${entry.id}:file`, threshold });
+  } finally {
+    hideLoading();
+  }
+  if (entry.density !== density) return null;
+  const grid = atomGrid(atoms, PEAK_REACH);
+  const peaks = [];
+  // Tiles report their own peaks in order; the list keeps the highest of all.
+  raw.sort((a, b) => Math.abs(b.sigma) - Math.abs(a.sigma));
+  for (const item of raw) {
+    // Map frame → the structure's frame (it may have been superposed).
+    const position = entry.transform ? transformPoint(entry.transform, ...item.position) : item.position;
+    const nearest = grid.nearest(position, PEAK_REACH);
+    if (!nearest) continue;
+    // Tiles overlap only at their edges; a peak found twice keeps its first (larger) copy.
+    if (peaks.some((peak) => Math.hypot(peak.position[0] - position[0], peak.position[1] - position[1], peak.position[2] - position[2]) < 0.7)) continue;
+    peaks.push({ position, sigma: item.sigma, atom: nearest.atom, distance: nearest.distance });
+    if (peaks.length >= MAX_PEAKS) break;
+  }
+  density.peaks = { threshold, list: peaks, positive: peaks.filter((peak) => peak.sigma > 0).length, negative: peaks.filter((peak) => peak.sigma < 0).length };
+  renderDensityPanel();
+  renderLigandCard();
+  return density.peaks;
+}
+
+// Atoms on a grid for nearest-atom searches within a radius.
+function atomGrid(atoms, cell) {
+  const cells = new Map();
+  const keyOf = (x, y, z) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
+  for (const atom of atoms) {
+    const key = keyOf(atom.x, atom.y, atom.z);
+    if (!cells.has(key)) cells.set(key, []);
+    cells.get(key).push(atom);
+  }
+  return {
+    nearest([x, y, z], radius) {
+      let best = null;
+      const [cx, cy, cz] = [x, y, z].map((value) => Math.floor(value / cell));
+      for (let dx = -1; dx <= 1; dx += 1) {
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dz = -1; dz <= 1; dz += 1) {
+            for (const atom of cells.get(`${cx + dx},${cy + dy},${cz + dz}`) ?? []) {
+              const distance = Math.hypot(atom.x - x, atom.y - y, atom.z - z);
+              if (distance <= radius && (!best || distance < best.distance)) best = { atom, distance };
+            }
+          }
+        }
+      }
+      return best;
+    },
+  };
+}
+
+// A peak in words: its height, the atom it is on or near, and a hint of what it may be.
+function peakText(peak) {
+  const atom = peak.atom;
+  const where = `${shortAtomLabel(atom)} ${peak.distance.toFixed(1)} Å`;
+  let hint;
+  if (peak.sigma < 0) hint = peak.distance <= 1.2 ? 'on the atom: not supported by the data' : 'negative density';
+  else if (peak.distance <= 1.2) hint = 'on the atom';
+  else if (peak.distance <= 2.3) hint = 'next to the atom: unmodeled part or alternative position';
+  else if (peak.distance <= 3.4 && ['N', 'O'].includes(String(atom.element).toUpperCase())) hint = 'possible water';
+  else hint = 'unmodeled density';
+  return { sigma: `${peak.sigma > 0 ? '+' : '−'}${Math.abs(peak.sigma).toFixed(1)}σ`, where, hint };
+}
+
+// The difference peaks within reach of a ligand, when they have been found.
+function ligandPeaks(entry, residue) {
+  const peaks = entry?.density?.peaks;
+  if (!peaks) return null;
+  const atoms = residue.atoms.filter((atom) => !atom.isHydrogen);
+  const near = peaks.list.filter((peak) => atoms.some((atom) => Math.hypot(atom.x - peak.position[0], atom.y - peak.position[1], atom.z - peak.position[2]) <= LIGAND_PEAK_DISTANCE));
+  return { threshold: peaks.threshold, list: near.map((peak) => ({ sigma: Number(peak.sigma.toFixed(2)), atom: peak.atom.residueKey === residue.key ? peak.atom.name : shortAtomLabel(peak.atom), distance: Number(peak.distance.toFixed(2)) })) };
+}
+
+function ligandPeakText(peaks) {
+  if (!peaks.list.length) return `none past ±${peaks.threshold}σ within ${LIGAND_PEAK_DISTANCE} Å`;
+  const shown = peaks.list.slice(0, 3).map((peak) => `${peak.sigma > 0 ? '+' : '−'}${Math.abs(peak.sigma).toFixed(1)}σ at ${peak.atom} (${peak.distance.toFixed(1)} Å)`);
+  return `${shown.join('; ')}${peaks.list.length > 3 ? ` and ${peaks.list.length - 3} more` : ''}`;
+}
+
+function renderPeakList(entry) {
+  const peaks = entry?.density?.peaks;
+  els.densityPeakList.hidden = !peaks;
+  if (!peaks) return;
+  const shown = peaks.expanded ? peaks.list : peaks.list.slice(0, 12);
+  els.densityPeakList.innerHTML = `<div>Fo-Fc peaks past ±${peaks.threshold}σ near the model: <strong>${peaks.positive}</strong> positive, <strong>${peaks.negative}</strong> negative${peaks.list.length >= MAX_PEAKS ? ` (the ${MAX_PEAKS} highest)` : ''}. Click one to go to it.</div>${shown.map((peak, index) => {
+    const text = peakText(peak);
+    return `<button type="button" class="peak-row" data-peak="${index}" title="${escapeHTML(`${text.sigma} ${text.where}: ${text.hint}`)}"><strong class="${peak.sigma > 0 ? 'positive' : 'negative'}">${escapeHTML(text.sigma)}</strong><span>${escapeHTML(text.where)}</span><small>${escapeHTML(text.hint)}</small></button>`;
+  }).join('')}${peaks.list.length > shown.length ? `<button type="button" class="link" data-peaks-all>Show all ${peaks.list.length}</button>` : ''}`;
+  for (const button of els.densityPeakList.querySelectorAll('[data-peak]')) {
+    button.addEventListener('click', () => goToPeak(entry, peaks.list[Number(button.dataset.peak)]));
+  }
+  els.densityPeakList.querySelector('[data-peaks-all]')?.addEventListener('click', () => {
+    peaks.expanded = true;
+    renderPeakList(entry);
+  });
+}
+
+// Frames a peak with the atoms around it, selecting the nearest residue so the map follows.
+function goToPeak(entry, peak) {
+  if (entry !== state.active) setActiveEntry(entry);
+  const model = activeModelOf(entry);
+  state.selection = new Set([peak.atom.residueKey]);
+  onSelectionChanged();
+  const around = model.atoms.filter((atom) => !atom.isHydrogen && Math.hypot(atom.x - peak.position[0], atom.y - peak.position[1], atom.z - peak.position[2]) <= 6);
+  fitView(true, false, [...around, { x: peak.position[0], y: peak.position[1], z: peak.position[2] }]);
+  markSceneDirty();
+}
 
 /* ---------- Docking poses ---------- */
 
@@ -3543,6 +4065,10 @@ async function executeCommand(parsed, options) {
       return describeActiveStructure();
     case 'interactions':
       return interactionsCommand(parsed.selection);
+    case 'compound':
+      return compoundCommand(parsed.selection);
+    case 'diagram':
+      return diagramCommand(parsed, options);
     case 'domains':
       return findPAEDomains();
     case 'msa': {
@@ -6136,6 +6662,7 @@ function renderSelectionPanel() {
   els.selectionDetails.replaceChildren();
   const disabled = !keys.length;
   for (const button of [els.focusSelection, els.labelSelection, els.isolateSelection, els.focusButton]) button.disabled = disabled;
+  renderLigandCard();
   if (!model || !keys.length) {
     els.selectionTitle.textContent = 'Nothing selected';
     els.selectionHint.hidden = false;
@@ -8145,6 +8672,7 @@ function removeDensity(entry = state.active) {
   if (entry.color.scheme === 'mapfit') entry.color.scheme = 'chain';
   entry.density = null;
   renderDensityPanel();
+  renderLigandCard();
   markColorsDirty();
   requestRender();
 }
@@ -8458,10 +8986,11 @@ async function fitDensity(entry = state.active) {
   if (entry === state.active) renderProfile();
 }
 
-// A fit on server data: the model's box in tiles the server sends at full resolution (sample
-// rate 1), each at most its largest request, with the fits of the tiles added up. σ values and
-// EMDB's contour level refer to the full map, which downsampling would shift.
-async function fitServerMap(entry, density, channel, positions, groups, groupCount, level) {
+// The model's box in tiles the volume server sends at full resolution (sample rate 1), each at
+// most its largest request, with a two-voxel margin for interpolation. σ values and EMDB's
+// contour level refer to the full map, which downsampling would shift. `cellOf(point)` gives
+// the tile a point falls in; each tile's core is its box without the margin.
+function serverMapTiles(density, positions, pad) {
   const header = density.header ?? {};
   const precisions = header.availablePrecisions ?? [];
   let top = precisions[0];
@@ -8475,7 +9004,7 @@ async function fitServerMap(entry, density, channel, positions, groups, groupCou
   });
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
-  for (let atom = 0; atom < groups.length; atom += 1) {
+  for (let atom = 0; atom < positions.length / 3; atom += 1) {
     for (let axis = 0; axis < 3; axis += 1) {
       const value = positions[atom * 3 + axis];
       if (value < min[axis]) min[axis] = value;
@@ -8483,10 +9012,10 @@ async function fitServerMap(entry, density, channel, positions, groups, groupCou
     }
   }
   for (let axis = 0; axis < 3; axis += 1) {
-    min[axis] = Math.floor(min[axis] - 4);
-    max[axis] = Math.ceil(max[axis] + 4);
+    min[axis] = Math.floor(min[axis] - pad);
+    max[axis] = Math.ceil(max[axis] + pad);
   }
-  // Tiles per axis until each (with a two-voxel margin for interpolation) fits the request limit.
+  // Tiles per axis until each (with its margin) fits the request limit.
   const margin = 2 * (step || 1);
   const tiles = [1, 1, 1];
   const voxelsOf = (axis) => ((max[axis] - min[axis]) / tiles[axis] + 2 * margin) / (step || 1);
@@ -8497,27 +9026,45 @@ async function fitServerMap(entry, density, channel, positions, groups, groupCou
     }
   }
   const size = [0, 1, 2].map((axis) => (max[axis] - min[axis]) / tiles[axis]);
+  const round = (value) => Math.round(value * 1000) / 1000;
+  const tile = (key) => {
+    const cell = key.split(',').map(Number);
+    return {
+      key,
+      low: [0, 1, 2].map((axis) => round(min[axis] + cell[axis] * size[axis] - margin)),
+      high: [0, 1, 2].map((axis) => round(min[axis] + (cell[axis] + 1) * size[axis] + margin)),
+      core: { min: [0, 1, 2].map((axis) => min[axis] + cell[axis] * size[axis]), max: [0, 1, 2].map((axis) => min[axis] + (cell[axis] + 1) * size[axis]) },
+    };
+  };
+  const cellOf = (x, y, z) => [x, y, z].map((value, axis) => Math.max(0, Math.min(tiles[axis] - 1, Math.floor((value - min[axis]) / size[axis])))).join(',');
+  return { top, tile, cellOf };
+}
+
+// Fetches one tile at full resolution into the worker (`${entry.id}:fit:<channel>`).
+async function fetchServerTile(entry, density, tile, top) {
+  const url = `/api/fetch/volume/${density.source.kind}/${encodeURIComponent(density.source.id)}/box?min=${tile.low.join(',')}&max=${tile.high.join(',')}&detail=${top?.precision ?? 0}${volumeServerQuery(density)}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new CommandError(await responseError(response, 'The map could not be loaded at full resolution'));
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return volumeWorker().run('parse-server', { key: `${entry.id}:fit`, bytes: bytes.buffer }, [bytes.buffer]);
+}
+
+// A fit on server data: the model's box in full-resolution tiles, with the fits of the tiles
+// added up.
+async function fitServerMap(entry, density, channel, positions, groups, groupCount, level) {
+  const { top, tile, cellOf } = serverMapTiles(density, positions, 4);
   const members = new Map();
   for (let atom = 0; atom < groups.length; atom += 1) {
-    const cell = [0, 1, 2].map((axis) => Math.min(tiles[axis] - 1, Math.floor((positions[atom * 3 + axis] - min[axis]) / size[axis])));
-    const key = cell.join(',');
+    const key = cellOf(positions[atom * 3], positions[atom * 3 + 1], positions[atom * 3 + 2]);
     if (!members.has(key)) members.set(key, []);
     members.get(key).push(atom);
   }
   const total = { sums: new Float64Array(groupCount), sampled: new Int32Array(groupCount), counts: new Int32Array(groupCount), insideCounts: new Int32Array(groupCount), inside: 0, outside: 0, atoms: groups.length, downsampled: false };
-  const round = (value) => Math.round(value * 1000) / 1000;
   let done = 0;
   for (const [key, list] of members) {
     done += 1;
     if (members.size > 1) setLoading(`Fitting the model to the map · tile ${done} of ${members.size}`);
-    const cell = key.split(',').map(Number);
-    const low = [0, 1, 2].map((axis) => round(min[axis] + cell[axis] * size[axis] - margin));
-    const high = [0, 1, 2].map((axis) => round(min[axis] + (cell[axis] + 1) * size[axis] + margin));
-    const url = `/api/fetch/volume/${density.source.kind}/${encodeURIComponent(density.source.id)}/box?min=${low.join(',')}&max=${high.join(',')}&detail=${top?.precision ?? 0}${volumeServerQuery(density)}`;
-    const response = await fetch(url);
-    if (!response.ok) throw new CommandError(await responseError(response, 'The map could not be loaded for fitting'));
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    const summaries = await volumeWorker().run('parse-server', { key: `${entry.id}:fit`, bytes: bytes.buffer }, [bytes.buffer]);
+    const summaries = await fetchServerTile(entry, density, tile(key), top);
     if ((summaries[0]?.sampleRate ?? 1) > 1) total.downsampled = true;
     const tilePositions = new Float32Array(list.length * 3);
     const tileGroups = new Int32Array(list.length);
@@ -8544,12 +9091,38 @@ async function fitServerMap(entry, density, channel, positions, groups, groupCou
   return { ...total, sigma, inclusion, atomInclusion: total.atoms ? total.inside / total.atoms : NaN };
 }
 
+// Peaks of the difference map near the model, from full-resolution tiles: every tile that has
+// model atoms in or near its core.
+async function serverMapPeaks(entry, density, channel, positions, threshold) {
+  const { top, tile, cellOf } = serverMapTiles(density, positions, PEAK_REACH);
+  const cells = new Set();
+  for (let atom = 0; atom < positions.length / 3; atom += 1) {
+    for (const dx of [-PEAK_REACH, 0, PEAK_REACH]) {
+      for (const dy of [-PEAK_REACH, 0, PEAK_REACH]) {
+        for (const dz of [-PEAK_REACH, 0, PEAK_REACH]) cells.add(cellOf(positions[atom * 3] + dx, positions[atom * 3 + 1] + dy, positions[atom * 3 + 2] + dz));
+      }
+    }
+  }
+  const peaks = [];
+  let done = 0;
+  for (const key of cells) {
+    done += 1;
+    if (cells.size > 1) setLoading(`Finding difference-map peaks · tile ${done} of ${cells.size}`);
+    const part = tile(key);
+    await fetchServerTile(entry, density, part, top);
+    peaks.push(...await volumeWorker().run('peaks', { key: `${entry.id}:fit:${channel.index}`, threshold, core: part.core }));
+  }
+  return peaks;
+}
+
 function renderDensityPanel() {
   const entry = state.active;
   const density = entry?.density;
   els.densityControls.hidden = !density;
   els.densityRemove.disabled = !density;
   els.densityLoad.textContent = density ? 'Reload map' : 'Load map';
+  els.densityPeaks.hidden = !density?.channels.some((channel) => channel.kind === 'fo-fc');
+  renderPeakList(entry);
   if (!density) {
     els.densityResult.hidden = true;
     return;
@@ -8638,6 +9211,23 @@ async function mapCommand(parsed) {
   if (!entry.density) await loadDensity(entry);
   const density = entry.density;
   switch (parsed.action) {
+    case 'peaks': {
+      const peaks = await findDifferencePeaks(entry, parsed.value);
+      if (!peaks) return '';
+      const top = peaks.list[0] ? peakText(peaks.list[0]) : null;
+      return {
+        message: `${peaks.positive} positive and ${peaks.negative} negative Fo-Fc peaks past ±${peaks.threshold}σ near the model${top ? `; the highest, ${top.sigma}, ${top.where} (${top.hint})` : ''}.`,
+        data: {
+          threshold: peaks.threshold,
+          positive: peaks.positive,
+          negative: peaks.negative,
+          peaks: peaks.list.map((peak) => {
+            const text = peakText(peak);
+            return { sigma: Number(peak.sigma.toFixed(2)), position: peak.position.map((value) => Number(value.toFixed(2))), atom: shortAtomLabel(peak.atom), distance: Number(peak.distance.toFixed(2)), hint: text.hint };
+          }),
+        },
+      };
+    }
     case 'fit': {
       await fitDensity(entry);
       const fit = density.fit;

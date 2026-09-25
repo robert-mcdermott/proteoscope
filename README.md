@@ -39,9 +39,13 @@ Highlights:
     Dictionary.
 - **Density maps.** The 2Fo-Fc and Fo-Fc maps of X-ray entries and the
   cryo-EM maps of EMDB, through the PDBe volume server, or your own CCP4/MRC
-  files: meshes or surfaces around the focus, levels in σ, and the model's
-  fit (atom inclusion and per-residue density).
+  files: meshes or surfaces around the focus, levels in σ, the model's fit
+  (atom inclusion and per-residue density), and the peaks of the difference
+  map near the model.
 - **Ligands and docking.**
+  - A ligand card: common name, formula, weight, SMILES, InChIKey and links
+    to PubChem, ChEMBL and DrugBank, with the difference-map peaks near it.
+  - 2D interaction diagrams in the style of LigPlot+, as SVG or PNG.
   - Bond orders, aromaticity and charges from the Chemical Component
     Dictionary, used to draw ligands and to type their interactions.
   - Docking poses from AutoDock Vina, smina, GNINA, Glide, GOLD, DOCK, rDock
@@ -464,6 +468,46 @@ rebuilding geometry; clipped atoms are capped.
 - **Labels.** **Label** (or `L`) adds 3D labels to the selected residues.
   **Isolate chain** hides the other chains.
 
+## Ligands
+
+![A 2D diagram of imatinib in ABL (2HYY): the ligand drawn flat, with the salt bridge to Asp381, hydrogen bonds to Thr315, Met318, Glu286 and Ile360 with their distances, π-stacking with Tyr253 and hydrophobic contacts](docs/images/ligand-diagram.jpg)
+
+- **The ligand card.** Select or focus a ligand and the **Ligand** card (right
+  panel) shows what it is, from the wwPDB Chemical Component Dictionary
+  through RCSB (downloaded once and cached):
+  - its common name (Erlotinib for AQ4, Heme for HEM) and dictionary name;
+  - formula, molecular weight and formal charge;
+  - how many of its heavy atoms the model contains (an incomplete ligand is
+    flagged);
+  - SMILES and InChIKey;
+  - links to RCSB, PDBe, PubChem, ChEMBL, DrugBank and ChEBI, where they
+    list it;
+  - the difference-map peaks near it, once they have been found (see
+    [Density Maps](#density-maps)).
+
+  A docking pose or a ligand without a dictionary code (UNL) is described
+  from the model: its formula is counted from the atoms.
+- **2D interaction diagram.** **2D diagram** on the card, or `diagram`,
+  draws the ligand flat with the residues it interacts with, in the style of
+  LigPlot+ and PoseView:
+  - the interactions of the Interactions card, in their colors: dashed lines
+    with distances for hydrogen bonds, salt bridges, halogen bonds and metal
+    coordination; π contacts from the ring's center; waters between the atoms
+    they bridge; arcs on the ligand atoms for hydrophobic contacts;
+  - each residue placed where it lies around the ligand in the current view,
+    so rotating the structure and drawing again moves them;
+  - atom names on request, for relating the drawing to the 3D model.
+
+  **Save SVG** and **Save PNG** export it for figures. The layout draws rings
+  as regular polygons, fused rings edge to edge and chains as zigzags, and
+  metals at the center of the atoms they bind; flat molecules whose layout
+  would overlap (heme) are drawn from their own 3D shape. Some bridged or
+  caged ligands cannot be drawn flat without overlapping atoms; the diagram
+  says so.
+- **Commands.** `compound [<selection>]` shows the card and returns its
+  facts to scripts; `diagram [<selection>] [names]` opens the diagram, and
+  returns it to scripts as SVG and PNG (to an AI agent, as an image).
+
 ## Docking Poses
 
 ![AutoDock Vina's tutorial poses of imatinib in ABL (1IEP): Vina scores, heavy-atom RMSD to pose 1, interaction summaries and the pose × residue fingerprint map, with pose 1's hydrogen bonds to Met318, Thr315, Glu286, Asp381 and Ile360](docs/images/docking-poses.jpg)
@@ -514,6 +558,8 @@ press Enter to select and frame it. Type a command and Enter runs it.
 | `focus resn HEM and chain A` · `label sele` · `zoom #2` | Focus a ligand, label the selection, frame a structure |
 | `tmalign 1A5R onto 1UBQ` | Superposes SUMO-1 on ubiquitin by structure alone |
 | `map load` · `map level 1.2` · `map fit` | Loads the density map, contours it at 1.2σ, fits the model |
+| `map peaks` | Lists the Fo-Fc difference-map peaks beyond ±3σ near the model |
+| `diagram resn STI` | Draws imatinib's interactions in 2D, for a figure |
 
 **Selection language.** PyMOL-style keywords with ChimeraX-style atom specs:
 
@@ -547,11 +593,13 @@ ball-stick, spheres, cartoon, surface, water, hydrogens, labels, everything),
 `fetch`/`add`/`remove`/`activate`/`list`/`refresh`, `search`, `example`,
 `assembly` (build a biological assembly, or `au`), `interface A B` (contacts
 between two chains), `interactions` (the interactions of residues or a
-ligand), `info` (describe the active structure), `superpose`, `alphafold`,
+ligand), `info` (describe the active structure), `compound` (the ligand
+card), `diagram` (a 2D interaction diagram), `superpose`, `alphafold`,
 `overlay`, `ranking`, `triage` (rank many prediction jobs),
 `domains`, `msa`, `validate` (with `clashes`, `fit`, `refresh` or `off`),
 `missense`, `exposure` (pPSE and disorder), `evidence` (public peptides and
-PTMs), `tmalign`, `map`, `pose`, `conservation`, `preset`, `lighting`, `bg`,
+PTMs), `tmalign`, `map` (with `peaks` for difference-map peaks), `pose`,
+`conservation`, `preset`, `lighting`, `bg`,
 `distance`, `turn`, `spin`, `reset`,
 `save`, `link`, `mvs`, `png` and `help`. The help dialog (`?`) lists the
 syntax of each.
@@ -783,6 +831,23 @@ it in tiles):
 Color by **Fit to the loaded map**, plot it in the profile, or select poorly
 fitting residues with `mapfit < 1`. For 8GUB in EMD-34272, the atom inclusion
 is 0.8935 (EMDB reports 0.896).
+
+**Difference peaks** (X-ray entries, or an Fo-Fc map file; `map peaks [<σ>]`)
+lists the peaks of the Fo-Fc map beyond +3σ and −3σ within 5 Å of the model,
+from full-resolution tiles:
+
+- Each peak's height in σ, refined between grid points, and the atom nearest
+  to it, with a hint: a positive peak on or next to an atom (an unmodeled part
+  or alternative position), 2.4–3.4 Å from a nitrogen or oxygen (a possible
+  water), or away from the model (unmodeled density); a negative peak on an
+  atom (not supported by the data).
+- Click a peak to go to it; the nearest residue is selected, so the map
+  follows.
+- The ligand card lists the peaks within 3 Å of the ligand: the quickest
+  check of whether a ligand, and each part of it, is in the density.
+
+For 1M17 at 2.6 Å, 135 positive and 65 negative peaks lie near the model; two
+of +3.6σ lie next to erlotinib.
 
 ## Analysis Tab
 
@@ -1195,7 +1260,8 @@ Files opened this way are served only to the page on this computer, even when
 `--host` shares Proteoscope with other machines.
 
 `info`, `interactions <selection>`, `interface <chain> <chain>`, `validate`,
-`superpose` and `triage` return their results as data too.
+`superpose`, `triage`, `compound`, `diagram` (SVG and PNG) and `map peaks`
+return their results as data too.
 
 ### AI agents (MCP)
 
@@ -1334,7 +1400,7 @@ weekly.
 | `examples.go` | Bundled examples: the manifest, gzipped files served as they are |
 | `search.go`, `evidence.go` | Structure and model search (RCSB, UniProt, PDBe, 3D-Beacons), model downloads, public proteomics evidence |
 | `validation.go` | wwPDB validation reports, reduced from XML to per-residue JSON |
-| `ligands.go`, `maps.go` | Chemical Component Dictionary entries; density maps from the PDBe volume server (RCSB's copy as a fallback) and EMDB metadata |
+| `ligands.go`, `maps.go` | Chemical Component Dictionary entries and the ligand card's facts; density maps from the PDBe volume server (RCSB's copy as a fallback) and EMDB metadata |
 | `web/app.js` | Application state, UI wiring, render loop, analysis and proteomics panels |
 | `web/lib/parse.js`, `web/lib/bcif.js` | PDB, PDBx/mmCIF and BinaryCIF parsing, assemblies |
 | `web/lib/predictions.js`, `web/lib/interface-scores.js` | Prediction folders (AlphaFold 3, Boltz, Chai-1, ColabFold, Protenix, OpenFold3), tokens, ipSAE, pDockQ, pDockQ2, LIS |
@@ -1360,7 +1426,8 @@ weekly.
 | `web/lib/surface.js`, `web/lib/surface-worker.js`, `web/lib/electrostatics.js` | Surfaces, SASA, Coulombic potential |
 | `web/lib/interactions.js` | Non-covalent interaction detection |
 | `web/lib/chemistry.js`, `web/lib/molfile.js` | Ligand chemistry from the CCD (bond orders, aromaticity, charges, hydrogens); SDF, MOL2 and PDBQT docking poses |
-| `web/lib/volume.js`, `web/lib/volume-worker.js` | CCP4/MRC and volume-server maps, isosurfaces, map fit |
+| `web/lib/depict.js`, `web/lib/ligand-diagram.js` | 2D layout of small molecules; ligand interaction diagrams as SVG |
+| `web/lib/volume.js`, `web/lib/volume-worker.js` | CCP4/MRC and volume-server maps, isosurfaces, map fit, difference-map peaks |
 | `web/lib/tmalign.js` | TM-align and MM-align, ported from US-align |
 | `web/lib/stats.js` | Moderated t-test, normalization, imputation, q-values, PTM adjustment |
 | `web/lib/conservation.js` | Alignment parsing and conservation scores |

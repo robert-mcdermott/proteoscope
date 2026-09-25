@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#050708" />
     <title>Proteoscope</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=0.7.0" />
+    <link rel="stylesheet" href="/styles.css?v=wave8" />
   </head>
   <body>
     <main id="app" class="left-open right-open sequence-open">
@@ -419,9 +419,11 @@
                 </div>
                 <div class="button-row">
                   <button id="density-fit" type="button" title="Map values at every atom: atom inclusion at the contour (cryo-EM) or mean 2Fo-Fc density in σ (X-ray), per residue">Map fit</button>
+                  <button id="density-peaks" type="button" title="The peaks of the Fo-Fc difference map above +3σ and below −3σ near the model: unmodeled density, and atoms the data do not support" hidden>Difference peaks</button>
                 </div>
               </div>
               <div id="density-result" class="result-box" hidden></div>
+              <div id="density-peak-list" class="result-box peak-list" hidden></div>
             </div>
 
             <div class="group" id="validation-group">
@@ -687,6 +689,19 @@
           </div>
         </section>
 
+        <section class="card" id="ligand-card" hidden>
+          <header>
+            <span>Ligand <small id="ligand-code"></small></span>
+            <div class="card-actions">
+              <button id="ligand-diagram-button" type="button" title="A 2D diagram of the ligand and its interactions, for figures (SVG or PNG)">2D diagram</button>
+            </div>
+          </header>
+          <h2 id="ligand-name"></h2>
+          <dl id="ligand-details" class="detail-grid"></dl>
+          <div id="ligand-links" class="ligand-links"></div>
+          <p id="ligand-status" class="hint" hidden></p>
+        </section>
+
         <section class="card" id="interactions-card" hidden>
           <header>
             <span>Interactions <small id="interaction-count"></small></span>
@@ -825,6 +840,22 @@
         </form>
       </dialog>
 
+      <dialog id="diagram-dialog" class="dialog diagram-dialog">
+        <form method="dialog">
+          <h2 id="diagram-title">Ligand interaction diagram</h2>
+          <p class="hint">The ligand drawn flat and turned to match the view, with the residues where they lie around it and the interactions of the Interactions card. Rotate the structure and draw again to move the residues.</p>
+          <div id="diagram-view" class="diagram-view"></div>
+          <p id="diagram-note" class="hint"></p>
+          <label class="check"><input id="diagram-names" type="checkbox" /> Atom names</label>
+          <menu>
+            <button value="close" type="submit">Close</button>
+            <button id="diagram-redraw" type="button" title="Draw again from the current view">Redraw</button>
+            <button id="diagram-save-svg" type="button">Save SVG</button>
+            <button id="diagram-save-png" type="button" class="primary">Save PNG</button>
+          </menu>
+        </form>
+      </dialog>
+
       <dialog id="methods-dialog" class="dialog wide">
         <form method="dialog">
           <h2>Methods and references</h2>
@@ -881,6 +912,6 @@
         </form>
       </dialog>
     </main>
-    <script type="module" src="/app.js?v=0.7.0"></script>
+    <script type="module" src="/app.js?v=wave8"></script>
   </body>
 </html>

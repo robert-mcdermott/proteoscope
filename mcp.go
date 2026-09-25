@@ -819,7 +819,7 @@ var mcpTools = []mcpTool{
 	{
 		Name:        "proteoscope_command",
 		Title:       "Run a Proteoscope command",
-		Description: "Run any command of Proteoscope's command language, as typed in its search box, and return its message and data. Examples: \"example 1m17\" (a bundled example), \"show sticks within 5 of resn AQ4\", \"color plddt\", \"map load\", \"conservation\", \"missense\", \"distance /A:769@N to :AQ4@N2\", \"help\" (the full list).",
+		Description: "Run any command of Proteoscope's command language, as typed in its search box, and return its message and data. Examples: \"example 1m17\" (a bundled example), \"show sticks within 5 of resn AQ4\", \"color plddt\", \"compound resn AQ4\" (a ligand's names, formula, SMILES and database links), \"diagram resn AQ4\" (a 2D diagram of a ligand's interactions, returned as an image), \"map load\" then \"map peaks\" (difference-map peaks near the model), \"conservation\", \"missense\", \"distance /A:769@N to :AQ4@N2\", \"help\" (the full list).",
 		InputSchema: schema(map[string]any{"command": stringProperty("One command line")}, "command"),
 		event: func(s *mcpServer, args map[string]any) (remoteEvent, error) {
 			line, err := textArgument(args, "command", true)

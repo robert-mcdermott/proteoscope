@@ -433,3 +433,17 @@ the completed v0.1 application.
 - [x] 81. Documentation: README (batch triage, results as data, opening files, MCP), `docs/MCP.md` (setup for Claude Code, Claude Desktop, Collomia and other clients; testing, tools, troubleshooting), design, requirements, roadmap (wave 7)
   - _Requirements: 46, 47, 48_
 
+- [x] 82. The ligand card: `GET /api/fetch/compound/{id}` (RCSB chemical component API, cut down and cached; common name from wwPDB and DrugBank names), names, formula, weight, charge, SMILES, InChIKey, modeled heavy atoms, links; `compound` command
+  - _Requirements: 49_
+
+- [x] 83. 2D layout (`depict.js`): smallest set of smallest rings, ring templates (fused, spiro, bridged from 3D), zigzag chains, metals at their partners' center, branch flips, projection fallback, orientation to the view
+  - _Requirements: 50_
+
+- [x] 84. Interaction diagrams (`ligand-diagram.js`): residue labels placed from the view and kept clear, interaction styles with distances, waters, hydrophobic arcs, legend; the diagram dialog with SVG and PNG; `diagram` command, images for agents
+  - _Requirements: 50_
+
+- [x] 85. Difference-map peaks: refined local extrema of the Fo-Fc map in full-resolution tiles (tiling shared with map fit), nearest atoms and hints, the peak list, `map peaks`, peaks on the ligand card
+  - _Requirements: 51_
+
+- [x] 86. Documentation: README (Ligands, difference peaks, commands), `docs/MCP.md`, design, requirements, roadmap (wave 8)
+  - _Requirements: 49, 50, 51_

@@ -2822,3 +2822,90 @@ button:disabled {
 .methods-references li {
   margin-bottom: 4px;
 }
+
+/* Ligand card and diagram */
+.ligand-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 8px;
+  font-size: 0.74rem;
+}
+
+.ligand-links a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.ligand-links a:hover {
+  text-decoration: underline;
+}
+
+.detail-grid dd.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.detail-grid dd .copy {
+  margin-left: 6px;
+  padding: 0 6px;
+  font-size: 0.64rem;
+}
+
+.dialog.diagram-dialog {
+  width: min(1000px, calc(100vw - 32px));
+}
+
+.diagram-view {
+  display: flex;
+  justify-content: center;
+  max-height: 64vh;
+  overflow: auto;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+/* The global icon size (svg { 18px }) does not apply to the drawing; its own size does. */
+.diagram-view > svg {
+  flex: none;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  fill: #000000;
+  stroke: none;
+  stroke-width: 1;
+}
+
+.peak-list .peak-row {
+  display: grid;
+  grid-template-columns: 3.4em 1fr;
+  gap: 0 8px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 3px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.72rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.peak-list .peak-row:hover {
+  background: rgba(248, 245, 238, 0.06);
+}
+
+.peak-list .peak-row small {
+  grid-column: 2;
+  color: var(--text-faint);
+}
+
+.peak-list .positive {
+  color: #52d68a;
+}
+
+.peak-list .negative {
+  color: #ff6b6b;
+}

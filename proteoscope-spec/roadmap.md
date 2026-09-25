@@ -5,7 +5,8 @@ competes in (researched September 2026), what each wave of work delivered
 (`wave1`: the rebuild; `wave2`: structure comparison; `wave3`: selections,
 commands, sessions and scripting; `wave4`: predicted complexes, validation and
 variants; `wave5`: bring your data, find public data; `wave6`: maps, ligand
-chemistry and statistics; `wave7`: agents and batch triage), a review of the bundled
+chemistry and statistics; `wave7`: agents and batch triage; `wave8`: ligand
+evidence), a review of the bundled
 examples and of the public databases Proteoscope can use without API keys, and
 a prioritized plan for what comes next. Waves 1 to 6 were released together
 as version 0.6.0, and wave 7 as version 0.7.0 ([CHANGELOG.md](../CHANGELOG.md)).
@@ -563,7 +564,7 @@ and reading the output of every widely used structure predictor.
 ### Bundled examples (`examples.go`, `data/examples.json`)
 
 - The 18 legacy PDB files (16 MB) became 27 gzipped mmCIF entries (6.2 MB,
-  anisotropic records removed), following the review in section 10: 108D
+  anisotropic records removed), following the review in section 11: 108D
   dropped, 5DS3 replaced by 7KK4, and the AlphaFold model of p53 with its PAE,
   1HHO, 4AKE, 1AKE, 5T35, 5FQD, 4OO8, 8EF5, 1LP3 and 6VXX added. 1LP3 (AAV2)
   was chosen over 1STM for its relevance to gene therapy.
@@ -1080,7 +1081,93 @@ MCP server so that an agent can drive the page the user sees.
 | `validation_report` on 1M17 | Clashscore 11.4 (20th percentile), Ramachandran outliers 2.3%, R-free 0.242 |
 | `superpose` of the AlphaFold DB model of EGFR onto 1M17 | 0.78 Å over 250 pairs, TM-score 0.889, as in the Comparing Structures checks |
 
-## 10. The bundled examples
+## 10. Wave 8: ligand evidence
+
+Wave 8 answers three questions about a ligand in a structure: what it is,
+whether the density supports it, and how it binds, in a form fit for a figure.
+
+### The ligand card (`ligands.go`, `app.js`)
+
+- `GET /api/fetch/compound/{id}` asks RCSB's chemical component API and keeps
+  what the card shows: the dictionary name, a common name, synonyms, type,
+  formula, weight, formal charge, SMILES, InChIKey, the heavy-atom count and
+  the matching PubChem, ChEMBL, DrugBank, ChEBI and CAS entries. The answer is
+  cached like other downloads.
+- **The common name** is a wwPDB synonym that DrugBank also uses (Imatinib,
+  Afatinib), else the shortest wwPDB synonym without digits (Heme), else
+  DrugBank's name for the drug (Acetazolamide), else none.
+- **The card** appears for a focused or selected ligand or ion: names,
+  formula, weight, charge, heavy atoms modeled of those in the dictionary
+  (an incomplete ligand is flagged), SMILES, InChIKey, links, and the
+  difference-map peaks near the ligand once found. A residue counts as its
+  dictionary component when the dictionary's chemistry matched it, the file
+  came from the PDB, or it is an ion; a docking pose or UNL is described from
+  the model, its formula counted from the atoms and their hydrogens.
+- `compound [<selection>]` shows the card and returns it as data.
+
+### 2D interaction diagrams (`depict.js`, `ligand-diagram.js`)
+
+- **Layout.** The smallest set of smallest rings (the shortest ring through
+  each bond, then spanning-tree cycles, kept when independent over GF(2)); ring
+  systems as regular polygons, fused edge to edge, spiro at a shared atom;
+  chains in 120° zigzags from the largest ring system, linear at triple bonds
+  and cumulenes, with other ring systems attached as rigid pieces in the
+  mirror image that overlaps less; substituents in the least crowded gap; then
+  branches flipped about single bonds while that lowers the overlap. Bonds to
+  metals are left out and each metal is placed at the center of the atoms it
+  binds. Bridged ring systems take their template from their own 3D shape.
+  When atoms still overlap and a projection of the 3D coordinates onto one of
+  their principal planes overlaps less, the projection is used (heme,
+  otherwise). The drawing is turned, and mirrored if need be, to match the
+  view on screen.
+- **Diagram.** Bonds with double bonds inside rings and triple bonds;
+  heteroatoms with their hydrogens and charges; coordination bonds dashed.
+  Each interacting residue is a label placed where it lies in the view,
+  walked outward (and turned as little as possible) until it clears the
+  ligand's atoms, bond middles and ring centers and the labels placed before
+  it, then relaxed. Hydrogen bonds, salt bridges, halogen bonds and metal
+  coordination are dashed lines with distances; π contacts start at the ring
+  center; water bridges pass through a water; hydrophobic contacts are arcs on
+  the ligand atoms. A legend lists the types shown. The SVG is standalone
+  (text escaped); PNG is rendered from it at 2× or 3×.
+- `diagram [<selection>] [names]` opens the diagram, or returns SVG and PNG;
+  through MCP, the PNG reaches the agent as an image.
+
+### Difference-map peaks (`volume.js`, `app.js`)
+
+- Local maxima above +nσ and minima below −nσ (26 neighbors, ties to the
+  first in grid order), each refined by a parabola along every grid axis in
+  position and height, from full-resolution tiles of the Fo-Fc map around the
+  model (the tiling now shared with map fit), each tile reporting only the
+  peaks in its core. Peaks within 5 Å of a model atom are kept, the 200
+  highest, with the nearest atom and a hint: on or next to an atom, a possible
+  water (2.4–3.4 Å from N or O), unmodeled density, or (negative) an atom the
+  data do not support.
+- `map peaks [<σ>]`, **Difference peaks** in the Analysis tab (click a peak to
+  go to it), and the peaks within 3 Å of a ligand on its card.
+
+### Validation
+
+- **Tests.** 9 new JavaScript tests, 265 in total, and 2 new Go tests, 77 in
+  total: rings, unit bonds and no overlapping atoms for eleven drug-like CCD
+  components (imatinib, erlotinib, ATP, NAG, FAD, cholesterol, ritonavir,
+  benzamidine, dasatinib, SAM, afatinib); heme's iron at the center of its
+  nitrogens; camphor flagged; orientation to a reference; diagram labels
+  clear of atoms and of each other, escaping, the legend and coordination
+  bonds; peaks refined to within 0.08 Å and their heights to 0.3σ on a
+  synthetic map, tile cores, flat tops; the compound route, its common name
+  and cross-references; command parsing.
+- **Checks on real data:**
+
+| Check | Result |
+| --- | --- |
+| Erlotinib in 1M17 | Card: Erlotinib, C22H23N3O4, 393.44 g/mol, 29 of 29 heavy atoms, PubChem 176870, ChEMBL553, DB00530. Diagram: the hinge hydrogen bond to Met769 (2.70 Å) and hydrophobic contacts with Leu694, Leu764, Leu768, Thr766 and Lys721 |
+| Imatinib in 2HYY | The salt bridge to Asp381, hydrogen bonds to Thr315, Met318, Glu286 and Ile360, π-stacking with Tyr253 |
+| Heme in 4HHB, acetazolamide in 3HS4, ATP in 1ATP | The iron at the porphyrin's center with His87; zinc on the sulfonamide nitrogen (1.94 Å); both manganese ions and the phosphate contacts |
+| Fo-Fc peaks of 1M17 (2.6 Å) | 135 positive and 65 negative peaks beyond ±3σ within 5 Å of the model in 3 seconds; two of +3.6σ next to erlotinib |
+| A docking pose (erlotinib written as SDF) | Described from the model: formula C22H23N3O4 as in the dictionary; the same seven interactions |
+
+## 11. The bundled examples
 
 **Done in wave 5** (section 7): the recommendations below were followed, with
 1LP3 as the capsid and 8EF5 as the GPCR complex. The review is kept for the
@@ -1144,7 +1231,7 @@ AlphaFold DB's complex entries (`/api/complex/…`) or a ModelArchive entry with
 PAE (for example `ma-dm-prc-171`, EZH2–PCGF5 from ColabFold) are the
 candidates. Both are better fetched than bundled; see the next section.
 
-## 11. Public databases without API keys
+## 12. Public databases without API keys
 
 Everything Proteoscope fetches goes through its own server, which allows only
 known hosts, caches downloads, and honors `--offline`. Services checked live
@@ -1207,14 +1294,15 @@ Each new source is a small Go route (host allowlist, size limit, cache kind,
 User-Agent) plus a page-side parser. The RCSB, NCBI, STRING and gnomAD limits
 argue for caching and one request at a time.
 
-## 12. Roadmap
+## 13. Roadmap
 
 Priorities are ordered by value to researchers, weighed against effort.
 Wave 6 delivered density maps, ligand chemistry, docking poses, structure-only
 alignment, differential statistics, conservation, the methods paragraph,
 continuous integration and the validation suite (section 8). Wave 7
 delivered batch triage, results as data for scripts, opening files by path
-and the MCP server (section 9).
+and the MCP server (section 9). Wave 8 delivered the ligand card, 2D
+interaction diagrams and difference-map peaks (section 10).
 
 Proteoscope's lead is breadth in one private session: prediction triage,
 experimental validation, density, docking and structural proteomics with
@@ -1239,11 +1327,10 @@ model.
   - a structure-similarity search (Foldseek) against the PDB and AlphaFold
     DB, for remote homologs that sequence search misses.
 - **Maps.** Maps in MolViewSpec exports, and MolViewSpec import; Q-score for
-  any model and map; a list of difference-map peaks, for checking ligands and
-  waters.
-- **Ligands.** A ligand card with the CCD name, formula, identifiers and
-  links to PubChem and ChEMBL, and a 2D diagram of the ligand's interactions
-  for figures.
+  any model and map.
+- **Ligand follow-ups.** Ligand geometry against the dictionary (bond
+  lengths and angles), 2D diagrams for docking poses side by side, and
+  stereochemistry (wedges) in the diagram.
 - **Statistics.** More than two groups, paired designs and protein-level
   summarization.
 
@@ -1312,7 +1399,7 @@ model.
 - **Publication.** A software paper (an application note or JOSS), a Zenodo
   DOI for each release, and short videos of the main workflows.
 
-## 13. Known limitations
+## 14. Known limitations
 
 - **Structure-only superposition** is rigid: in a hinge motion it fits one
   domain, as TM-align does. MM-align switches to US-align's faster, slightly
@@ -1351,6 +1438,16 @@ model.
 - **Batch triage** needs the page open: scoring runs in the browser. Sessions
   keep the prediction models that are open, not the whole campaign. The
   tools' own ranking scores do not compare across tools; the table says so.
+- **2D diagrams** draw no stereochemistry (no wedges), and some bridged and
+  caged ligands (camphor) and crowded macrocycles cannot be drawn flat without
+  overlapping atoms; the diagram says so. Residues are placed from the current
+  view, so a dense site (ATP's phosphates) can still have crossing lines;
+  rotating and drawing again changes them.
+- **Difference-map peaks** need an Fo-Fc map (X-ray entries at the PDBe volume
+  server, or an Fo-Fc map file); cryo-EM maps have none. The hints (possible
+  water, unmodeled density) come from distances alone, not from peak shape or
+  hydrogen-bonding geometry. Peaks more than 5 Å from the model, such as a
+  whole unmodeled ligand in a solvent channel, are not listed.
 - **The MCP server** drives a browser page; with none connected, tools fail
   after 30 seconds. Any program that can start `proteoscope mcp` controls the
   page and can open local files in it, as can any program on this computer

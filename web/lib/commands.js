@@ -42,7 +42,9 @@ export const COMMANDS = [
   { name: 'msa', aliases: [], syntax: 'msa', summary: 'Color by MSA depth (AlphaFold DB models, prediction folders, dropped .a3m files)' },
   { name: 'validate', aliases: ['validation', 'report'], syntax: 'validate [clashes|fit|refresh|off]', summary: 'Load the wwPDB validation report and color outliers, show clashes or density fit' },
   { name: 'conservation', aliases: ['consurf', 'conserved'], syntax: 'conservation [jsd|entropy|off]', summary: 'Color by conservation from the prediction\'s MSA, AlphaFold DB\'s, or a dropped alignment (Jensen–Shannon divergence, ConSurf-style grades)' },
-  { name: 'map', aliases: ['density', 'volume'], syntax: 'map [load|refresh|fit|off] · map level <σ> [2fofc|fofc|em] · map style mesh|surface · map region focus|view|all · map radius <Å> · map zone <Å>|off', summary: 'Load the X-ray or cryo-EM map of a PDB entry, contour it, and fit the model to it' },
+  { name: 'map', aliases: ['density', 'volume'], syntax: 'map [load|refresh|fit|off] · map peaks [<σ>] · map level <σ> [2fofc|fofc|em] · map style mesh|surface · map region focus|view|all · map radius <Å> · map zone <Å>|off', summary: 'Load the X-ray or cryo-EM map of a PDB entry, contour it, fit the model to it, or list the peaks of the difference map' },
+  { name: 'compound', aliases: ['chem', 'component', 'ccd'], syntax: 'compound [<selection>]', summary: 'Show the ligand card: names, formula, weight, SMILES, InChIKey and links to PubChem, ChEMBL and DrugBank' },
+  { name: 'diagram', aliases: ['ligplot', 'poseview'], syntax: 'diagram [<selection>] [names]', summary: 'Draw a 2D diagram of a ligand and its interactions, for figures (SVG or PNG); names adds atom names' },
   { name: 'pose', aliases: ['poses', 'docking'], syntax: 'pose [<n>|next|previous|fingerprints|off]', summary: 'Show a docking pose (opened from SDF, MOL2 or PDBQT), compute interaction fingerprints, or remove the poses' },
   { name: 'missense', aliases: ['alphamissense', 'am'], syntax: 'missense [<UniProt accession>]', summary: 'Color by AlphaMissense pathogenicity (human proteins)' },
   { name: 'refresh', aliases: ['reload'], syntax: 'refresh', summary: 'Download the active structure again, bypassing the cache' },
@@ -218,6 +220,11 @@ export function parseCommand(text, options = {}) {
         return { ...parsed, action };
       }
       const value = words[1]?.toLowerCase();
+      if (action === 'peaks' || action === 'peak') {
+        const sigma = value === undefined ? 3 : Number(value.replace(/σ|sigma$/i, ''));
+        if (!(sigma >= 1 && sigma <= 20) || words.length > 2) throw new CommandError('Usage: map peaks [<σ>], for example "map peaks 3.5" (1 to 20).');
+        return { ...parsed, action: 'peaks', value: sigma };
+      }
       if (action === 'level') {
         const sigma = Number(value?.replace(/σ|sigma$/i, ''));
         const channel = words[2]?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? null;
@@ -231,6 +238,13 @@ export function parseCommand(text, options = {}) {
         if (Number.isFinite(distance) && distance >= 0 && distance <= 60) return { ...parsed, action, value: distance };
       }
       throw new CommandError(`Usage: ${command.syntax}`);
+    }
+    case 'compound':
+      return { ...parsed, selection: rest || null };
+    case 'diagram': {
+      const names = words.length > 0 && /^(names|atoms|labels)$/i.test(words[words.length - 1]);
+      const selection = (names ? words.slice(0, -1) : words).join(' ');
+      return { ...parsed, selection: selection || null, names };
     }
     case 'pose': {
       if (!words.length) return { ...parsed, action: 'list' };
