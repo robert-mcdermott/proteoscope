@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.0 (2026-09-24)
+
+- A ligand card: select or focus a ligand to see its common name, formula,
+  molecular weight, charge, SMILES and InChIKey from the Chemical Component
+  Dictionary, how many of its heavy atoms are modeled, and links to RCSB,
+  PDBe, PubChem, ChEMBL, DrugBank and ChEBI. The `compound` command shows it
+  and returns it to scripts.
+- 2D interaction diagrams: `diagram`, or **2D diagram** on the card, draws the
+  ligand flat with the residues it interacts with, in the style of LigPlot+
+  and PoseView, placed as they lie in the view; save it as SVG or PNG.
+  Scripts get both, and AI agents an image.
+- Difference-map peaks: `map peaks`, or **Difference peaks** in the Analysis
+  tab, lists the Fo-Fc peaks beyond ±3σ near the model with the nearest atom
+  and a hint of what each may be; the ligand card shows those near the
+  ligand.
+
 ## 0.7.0 (2026-09-24)
 
 - Batch triage: open many prediction jobs at once (a design campaign, a

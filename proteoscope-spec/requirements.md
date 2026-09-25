@@ -598,3 +598,33 @@ selection, distance measurement, and PNG export.
 2. THE tools SHALL act on the page the user sees, return structured results, and report failures as tool errors
 3. THE MCP server SHALL write only protocol messages to standard output, follow the rules of remote control, accept commands only through MCP, and stop when the agent disconnects
 
+### Requirement 49: What a Ligand Is
+
+**User Story:** As a structural biologist, I want to see what a ligand is without leaving the viewer, so that I can identify it and look it up.
+
+#### Acceptance Criteria
+
+1. WHEN a ligand or ion is focused or selected, THE System SHALL show its common and dictionary names, formula, molecular weight, formal charge, SMILES, InChIKey, how many of its heavy atoms are modeled, and links to the databases that list it
+2. WHEN a ligand has no dictionary code, or the dictionary cannot be reached, THE System SHALL describe it from the model and say so
+3. THE `compound` command SHALL show the card and return its facts to scripts
+
+### Requirement 50: 2D Interaction Diagrams
+
+**User Story:** As a structural biologist writing a paper, I want a 2D diagram of a ligand and its interactions, so that I can show how it binds in a figure.
+
+#### Acceptance Criteria
+
+1. WHEN asked, THE System SHALL draw the ligand in 2D with the residues it interacts with, each interaction in its type's style with its distance, and a legend
+2. THE diagram SHALL place residues as they lie around the ligand in the current view, keep their labels clear of the ligand and of each other, and say when the ligand's own layout has overlapping atoms
+3. THE diagram SHALL be saved as SVG and PNG, and returned to scripts and agents
+
+### Requirement 51: Difference-Map Peaks
+
+**User Story:** As a crystallographer, I want the peaks of the difference map near the model, so that I can find unmodeled density and atoms the data do not support.
+
+#### Acceptance Criteria
+
+1. WHEN an Fo-Fc map is loaded, THE System SHALL list its peaks beyond a threshold in σ (3 by default) within reach of the model, with their refined heights, the nearest atom and a hint of what each may be
+2. THE System SHALL go to a peak when it is chosen, and show the peaks near a ligand on its card
+3. WHEN no difference map is available, THE System SHALL say why
+

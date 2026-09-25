@@ -200,6 +200,8 @@ absolute paths. For example:
 - "Open the prediction folders in /data/campaign/, rank them by ipSAE for
   chains A and B, and show me the best one."
 - "Which interface residues of the best model have pLDDT below 70?"
+- "Is the ligand in 1M17 supported by the density? Show me its interaction
+  diagram."
 
 **What you see.** The agent's tools act on the Proteoscope page in your
 browser. It opens when the agent first needs it, and again if you close it.
@@ -221,7 +223,9 @@ ends, its Proteoscope stops.
 
 **Beyond the tools.** `proteoscope_command` runs any command from
 [Selections and Commands](../README.md#selections-and-commands), such as
-`color plddt`, `show sticks within 5 of resn AQ4`, `map load` or
+`color plddt`, `show sticks within 5 of resn AQ4`, `compound resn AQ4` (what
+a ligand is), `diagram resn AQ4` (its 2D interaction diagram, as an image),
+`map load` then `map peaks` (difference-map peaks near the model), or
 `conservation`. The agent can run `help` for the full list, or
 `help <command>` for one command.
 
@@ -257,7 +261,8 @@ refused; render them at scale 1. To send images to the model, the client and
 its model provider must accept images in tool results. Claude does.
 
 Commands run through `proteoscope_command` return their images as images
-too. `triage gallery` gives the agent a thumbnail of each of the best models
+too. `diagram` gives the agent the ligand's 2D interaction diagram, and
+`triage gallery` gives it a thumbnail of each of the best models
 (480 pixels wide), each captioned with its rank, job, model and score, so
 it can compare the jobs by eye. In the structured data, each image is replaced
 by its number among the images returned. The images of one result are limited

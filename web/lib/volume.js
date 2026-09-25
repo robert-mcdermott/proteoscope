@@ -534,3 +534,62 @@ export function mapFit(volume, positions, groups, groupCount, level) {
   }
   return { atomInclusion: groups.length ? inside / groups.length : NaN, atoms: groups.length, inside, outside, sigma, inclusion, counts, sums, sampled, insideCounts };
 }
+
+/* ---------- Difference-map peaks ---------- */
+
+// Local maxima above `threshold`·σ and minima below −`threshold`·σ (26 neighbors), as a
+// crystallographer lists the peaks of an Fo-Fc map. Each position is refined to a parabola along
+// each grid axis. Only peaks inside `core` (a Cartesian box, the part of a tile that no other
+// tile covers) are kept. σ is the whole map's, from volume.stats. Sorted by height, largest first.
+export function mapPeaks(volume, threshold = 3, core = null) {
+  const [n0, n1, n2] = volume.dims;
+  const { data } = volume;
+  const rms = volume.stats?.rms > 0 ? volume.stats.rms : 1;
+  const mean = Number.isFinite(volume.stats?.mean) ? volume.stats.mean : 0;
+  const high = mean + threshold * rms;
+  const low = mean - threshold * rms;
+  const at = (i, j, k) => data[i + n0 * (j + n1 * k)];
+  const peaks = [];
+  for (let k = 1; k < n2 - 1; k += 1) {
+    for (let j = 1; j < n1 - 1; j += 1) {
+      for (let i = 1; i < n0 - 1; i += 1) {
+        const value = at(i, j, k);
+        const positive = value >= high;
+        if (!positive && value > low) continue;
+        let extreme = true;
+        for (let dk = -1; dk <= 1 && extreme; dk += 1) {
+          for (let dj = -1; dj <= 1 && extreme; dj += 1) {
+            for (let di = -1; di <= 1; di += 1) {
+              if (!di && !dj && !dk) continue;
+              const other = at(i + di, j + dj, k + dk);
+              // Ties go to the first point in grid order, so a flat top gives one peak.
+              const before = dk < 0 || (dk === 0 && (dj < 0 || (dj === 0 && di < 0)));
+              if (positive ? other > value || (other === value && before) : other < value || (other === value && before)) {
+                extreme = false;
+                break;
+              }
+            }
+          }
+        }
+        if (!extreme) continue;
+        // The parabola through three points along each axis gives the offset of its vertex and
+        // how much higher (or lower) the vertex is than the grid point.
+        let height = value;
+        const offset = (minus, plus) => {
+          const curvature = minus - 2 * value + plus;
+          if (Math.abs(curvature) < 1e-12) return 0;
+          const shift = Math.max(-0.5, Math.min(0.5, (minus - plus) / (2 * curvature)));
+          height -= ((minus - plus) * shift) / 4;
+          return shift;
+        };
+        const gi = i + offset(at(i - 1, j, k), at(i + 1, j, k));
+        const gj = j + offset(at(i, j - 1, k), at(i, j + 1, k));
+        const gk = k + offset(at(i, j, k - 1), at(i, j, k + 1));
+        const position = toCartesian(volume, gi, gj, gk);
+        if (core && [0, 1, 2].some((axis) => position[axis] < core.min[axis] || position[axis] >= core.max[axis])) continue;
+        peaks.push({ position, sigma: (height - mean) / rms });
+      }
+    }
+  }
+  return peaks.sort((a, b) => Math.abs(b.sigma) - Math.abs(a.sigma));
+}

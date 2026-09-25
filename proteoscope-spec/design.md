@@ -163,6 +163,7 @@ embedded. `--dev` serves `web/` and `data/` from disk instead.
 | `/api/fetch/model?url=` | A model file listed by 3D-Beacons, from an allowed provider host |
 | `/api/fetch/proteomics/{accession}` | Public peptides and PTM sites (EBI Proteins API), merged |
 | `/api/fetch/ccd/{id}` | A Chemical Component Dictionary entry (RCSB), for ligand bond orders, aromaticity and charges |
+| `/api/fetch/compound/{id}` | Facts for the ligand card from RCSB's chemical component API, cut down: names, formula, weight, charge, SMILES, InChIKey, heavy atoms and cross-references (with DrugBank's drug name when the wwPDB has no common name) |
 | `/api/fetch/volume/{source}/{id}` | Volume-server header for an X-ray entry (`x-ray`, PDB ID) or a cryo-EM map (`em`, EMDB ID): sampling levels, statistics and cell. PDBe first, RCSB's copy second |
 | `/api/fetch/volume/{source}/{id}/box?min=&max=&detail=` | The map inside a Cartesian box, as BinaryCIF (at most 1,000 Å a side) |
 | `/api/fetch/volume/{source}/{id}/cell?detail=` | The whole map, as BinaryCIF |
@@ -452,6 +453,13 @@ ambient occlusion or outlines.
   in EMDB's count), and per residue the mean value in σ and the fraction of
   atoms inside. Server maps are fitted at full resolution, in tiles of at
   most the server's largest request, whose results are added up.
+- **Difference peaks.** `mapPeaks` finds local extrema of an Fo-Fc volume
+  beyond ±nσ (26 neighbors, ties to the first point in grid order) and refines
+  each along the three grid axes with a parabola, in position and height. On
+  server maps it runs per full-resolution tile (the tiling map fit uses),
+  keeping peaks in the tile's core so overlaps count once; the page maps the
+  peaks to the structure's frame, keeps those within 5 Å of an atom (a grid
+  lookup), and labels each with its nearest atom and a distance-based hint.
 - **Sessions** keep the source, channel levels and style; maps from the
   server are fetched again, files must be opened again.
 
@@ -475,6 +483,31 @@ ambient occlusion or outlines.
   aromatic rings are those the dictionary marks or that are planar with sp2
   atoms; charged groups follow protonation rules (amines by cluster and
   basicity, carboxylates, acylsulfonamides, tetrazoles, permanent charges).
+
+- **Ligand card.** Shown for a focused or selected ligand or ion. Facts come
+  from `/api/fetch/compound/{id}` (one request per code, cached in the page
+  and on disk) when the residue is that component: its chemistry matched the
+  dictionary, the file came from the PDB, or it is an ion. Otherwise, and
+  while the answer is pending, the formula is counted from the model.
+- **2D layout** (`depict.js`). Rings: the shortest ring through each bond,
+  completed with spanning-tree cycles, kept when independent over GF(2).
+  Ring systems are laid out from polygons (fused across a shared bond, spiro
+  at a shared atom; a bridged system from the projection of its 3D atoms).
+  A breadth-first walk from the largest system places chains in zigzags and
+  attaches other systems as rigid templates, choosing the mirror image and
+  the angular gap with least crowding; branches are then flipped about
+  acyclic bonds while the overlap score falls. Metals are excluded and
+  placed at the centroid of their partners. If atoms still overlap, the best
+  of three principal-plane projections of the 3D coordinates replaces the
+  layout when it overlaps less. A Procrustes fit (rotation and reflection)
+  turns the result to the atoms' screen positions and maps partner positions
+  into the drawing.
+- **Diagrams** (`ligand-diagram.js`). One label per residue, placed by
+  walking out from its contact atoms along its direction in the view (then
+  turning) until clear of atoms, bond midpoints, ring centers and earlier
+  labels, then relaxed with springs and repulsion. The SVG is built as text
+  with escaped content; the page shows it in a dialog and renders PNG through
+  an image and a canvas.
 
 ## Selections, Commands and Sessions
 

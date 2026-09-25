@@ -81,3 +81,17 @@ test('triage, info and interactions', () => {
 function fields(object, ...keys) {
   return Object.fromEntries(keys.map((key) => [key, object[key]]));
 }
+
+test('compound, diagram and map peaks', () => {
+  const parse = (text) => parseCommand(text);
+  assert.deepEqual([parse('compound').name, parse('compound').selection], ['compound', null]);
+  assert.equal(parse('chem resn STI').selection, 'resn STI');
+  assert.deepEqual([parse('diagram').selection, parse('diagram').names], [null, false]);
+  assert.deepEqual([parse('diagram resn AQ4 names').selection, parse('diagram resn AQ4 names').names], ['resn AQ4', true]);
+  assert.equal(parse('ligplot').name, 'diagram');
+  assert.deepEqual([parse('map peaks').action, parse('map peaks').value], ['peaks', 3]);
+  assert.equal(parse('map peaks 3.5σ').value, 3.5);
+  assert.throws(() => parse('map peaks 0.2'), /map peaks/);
+  // "ligand" stays a selection keyword.
+  assert.equal(parse('ligand'), null);
+});
