@@ -566,3 +566,35 @@ selection, distance measurement, and PNG export.
 2. THE repository SHALL include a validation suite that compares the analyses with the numbers of their reference tools, without including those tools
 3. THE validation suite SHALL run offline once its public inputs are cached, and weekly in continuous integration
 4. WHEN a version tag is pushed, THE release workflow SHALL check that the tag matches the application version, run the tests, and attach every release target with its SHA-256 checksum to a draft release
+
+### Requirement 46: Batch Triage of Predictions
+
+**User Story:** As a protein designer, I want to rank the models of hundreds of prediction jobs on one table, so that I can find the designs worth a closer look without opening each job.
+
+#### Acceptance Criteria
+
+1. WHEN several prediction jobs are opened together (dropped, chosen, in one folder or named on the command line), THE System SHALL score every model of every job and open the best
+2. THE System SHALL rank jobs, by their best model, or all models by ipSAE, pDockQ2, pDockQ, LIS, ipTM, pTM, the tool's own score, mean pLDDT or the share of satisfied cross-links, for each model's best interface or a named chain pair
+3. THE System SHALL compute ipSAE, pDockQ, pDockQ2 and LIS the same way for every predictor, and say which scores are each tool's own
+4. WHEN the user asks, THE System SHALL show any row's model, render a gallery of the best models in a shared orientation, and export every model and interface as CSV
+
+### Requirement 47: Results and Files for Scripts
+
+**User Story:** As a computational biologist, I want commands to return their results as data and to open files by path from a script, so that I can build analyses on Proteoscope.
+
+#### Acceptance Criteria
+
+1. THE commands `info`, `interactions`, `interface`, `validate`, `superpose` and `triage` SHALL return their results as structured data to scripts
+2. WHEN remote control is on and a script on this computer posts absolute paths to `/api/remote/open` with the token printed at startup, THE System SHALL open those files and folders in the page and return what opened
+3. THE System SHALL refuse relative paths, paths with no supported files, requests without the token, and requests from other machines, and SHALL serve files opened this way only to this computer
+
+### Requirement 48: An MCP Server for AI Agents
+
+**User Story:** As a researcher working with an AI agent, I want the agent to use Proteoscope, so that it can open structures and predictions, rank them, inspect interactions and validation, and show me what it did.
+
+#### Acceptance Criteria
+
+1. WHEN started as `proteoscope mcp`, THE System SHALL serve the Model Context Protocol over standard input and output, with tools to open structures and files, describe, select, list interactions and interface contacts, superpose, load the validation report, rank predictions, render an image and run any command
+2. THE tools SHALL act on the page the user sees, return structured results, and report failures as tool errors
+3. THE MCP server SHALL write only protocol messages to standard output, follow the rules of remote control, accept commands only through MCP, and stop when the agent disconnects
+

@@ -21,9 +21,18 @@ type localFile struct {
 	Size int64  `json:"size"`
 	Path string `json:"path,omitempty"`
 	path string
+	// Opened by a script while running, rather than named on the command line: served only to
+	// requests from this computer.
+	runtime bool
 }
 
-const maxFolderFiles = 4000
+const (
+	// A design campaign can hold hundreds of prediction jobs of a dozen files each.
+	maxFolderFiles = 20000
+	// A folder walk stops after this many entries, so a path such as the home folder or a slow
+	// network mount does not walk for ever.
+	maxFolderEntries = 200000
+)
 
 type startupInfo struct {
 	Version       string      `json:"version"`
@@ -33,35 +42,117 @@ type startupInfo struct {
 }
 
 func loadLocalFiles(paths []string) []localFile {
-	files := []localFile{}
-	for _, name := range paths {
-		if info, err := os.Stat(name); err == nil && info.IsDir() {
-			files = append(files, localFolder(name, len(files))...)
-			continue
-		}
-		file, err := localStructure(name, len(files))
-		if err != nil {
-			log.Printf("skipping %s: %v", name, err)
-			continue
-		}
-		files = append(files, file)
+	files, problems := collectLocalFiles(paths, 0)
+	for _, problem := range problems {
+		log.Print(problem)
 	}
 	return files
 }
 
+// collectLocalFiles lists the files of paths (files or folders), numbering them from start, and
+// describes the paths it skipped or cut short.
+func collectLocalFiles(paths []string, start int) ([]localFile, []string) {
+	files := []localFile{}
+	var problems []string
+	for _, name := range paths {
+		if info, err := os.Stat(name); err == nil && info.IsDir() {
+			found, problem := localFolder(name, start+len(files))
+			if problem != "" {
+				problems = append(problems, problem)
+			}
+			if len(found) == 0 && problem == "" {
+				problems = append(problems, fmt.Sprintf("skipping %s: no structure or prediction files in the folder", name))
+			}
+			files = append(files, found...)
+			continue
+		}
+		file, err := localStructure(name, start+len(files))
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("skipping %s: %v", name, err))
+			continue
+		}
+		files = append(files, file)
+	}
+	return files, problems
+}
+
+// addLocalFiles makes more files available to the page while it runs, for remote control and
+// the MCP server: a script on this computer names the paths, and the page opens them.
+func (a *app) addLocalFiles(paths []string) ([]localFile, error) {
+	if len(paths) == 0 {
+		return nil, errors.New("name at least one file or folder")
+	}
+	expanded := make([]string, 0, len(paths))
+	for _, name := range paths {
+		name = strings.TrimSpace(name)
+		if name == "~" || strings.HasPrefix(name, "~/") || strings.HasPrefix(name, `~\`) {
+			if home, err := os.UserHomeDir(); err == nil {
+				name = filepath.Join(home, name[1:])
+			}
+		}
+		if !filepath.IsAbs(name) {
+			return nil, fmt.Errorf("%s: use an absolute path", name)
+		}
+		expanded = append(expanded, name)
+	}
+	// The folders are walked before the list is locked, so the page keeps reading files meanwhile.
+	found, problems := collectLocalFiles(expanded, 0)
+	if len(found) == 0 {
+		return nil, errors.New(strings.Join(problems, "; "))
+	}
+	for _, problem := range problems {
+		log.Print(problem)
+	}
+	a.filesMu.Lock()
+	defer a.filesMu.Unlock()
+	if a.fileIndex == nil {
+		a.fileIndex = map[string]int{}
+		for index, file := range a.files {
+			a.fileIndex[file.path] = index
+		}
+	}
+	// A path opened again keeps its number, so repeated requests do not grow the list.
+	files := make([]localFile, 0, len(found))
+	for _, file := range found {
+		index, known := a.fileIndex[file.path]
+		if !known {
+			index = len(a.files)
+			a.fileIndex[file.path] = index
+			file.URL = "/api/local/" + strconv.Itoa(index)
+			file.runtime = true
+			a.files = append(a.files, file)
+		}
+		registered := a.files[index]
+		registered.Path = file.Path
+		files = append(files, registered)
+	}
+	return files, nil
+}
+
+func (a *app) localFiles() []localFile {
+	a.filesMu.RLock()
+	defer a.filesMu.RUnlock()
+	return a.files
+}
+
 // Collects the structures and confidence files of a folder (and its subfolders), skipping hidden
-// entries, so "proteoscope af3_output/job/" opens a whole prediction.
-func localFolder(dir string, start int) []localFile {
+// entries, so "proteoscope af3_output/job/" opens a whole prediction. The second result says
+// why the walk stopped early, if it did.
+func localFolder(dir string, start int) ([]localFile, string) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		log.Printf("skipping %s: %v", dir, err)
-		return nil
+		return nil, fmt.Sprintf("skipping %s: %v", dir, err)
 	}
 	parent := filepath.Dir(abs)
 	var files []localFile
+	visited := 0
 	filepath.WalkDir(abs, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
+		}
+		visited++
+		if visited > maxFolderEntries {
+			return filepath.SkipAll
 		}
 		if strings.HasPrefix(entry.Name(), ".") && path != abs {
 			if entry.IsDir() {
@@ -85,10 +176,13 @@ func localFolder(dir string, start int) []localFile {
 		files = append(files, file)
 		return nil
 	})
-	if len(files) >= maxFolderFiles {
-		log.Printf("%s: only the first %d files are served", dir, maxFolderFiles)
+	switch {
+	case len(files) >= maxFolderFiles:
+		return files, fmt.Sprintf("%s: only the first %d files are served", dir, maxFolderFiles)
+	case visited > maxFolderEntries:
+		return files, fmt.Sprintf("%s: stopped after %d entries; name the prediction folders themselves", dir, maxFolderEntries)
 	}
-	return files
+	return files, ""
 }
 
 // Structures plus the files predictors write next to them: confidence JSON, NumPy arrays,
@@ -150,11 +244,14 @@ func trimGzip(name string) string {
 
 func (a *app) serveStartup(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, startupInfo{Version: version, Offline: a.offline, RemoteControl: a.control != nil, Files: a.files})
+	writeJSON(w, startupInfo{Version: version, Offline: a.offline, RemoteControl: a.control != nil, Files: a.startupFiles})
 }
 
 func (a *app) serveLocal(w http.ResponseWriter, r *http.Request) {
 	file, ok := a.localFileAt(r.PathValue("index"))
+	if ok && file.runtime && !isLoopbackRequest(r) {
+		ok = false
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "No local file with that index.")
 		return
@@ -181,11 +278,12 @@ func (a *app) serveLocal(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) localFileAt(raw string) (localFile, bool) {
+	files := a.localFiles()
 	index, err := strconv.Atoi(raw)
-	if err != nil || index < 0 || index >= len(a.files) || strconv.Itoa(index) != raw {
+	if err != nil || index < 0 || index >= len(files) || strconv.Itoa(index) != raw {
 		return localFile{}, false
 	}
-	return a.files[index], true
+	return files[index], true
 }
 
 func openRegular(name string) (*os.File, fs.FileInfo, error) {

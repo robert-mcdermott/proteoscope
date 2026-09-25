@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"mime"
@@ -17,13 +19,14 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 //go:embed web/index.html web/styles.css web/app.js web/favicon.svg web/lib/*.js data
 var content embed.FS
 
-var version = "0.6.1"
+var version = "0.7.0"
 
 type sample struct {
 	ID             string `json:"id"`
@@ -60,7 +63,9 @@ type config struct {
 	dev         bool
 	showVersion bool
 	remote      bool
-	files       []string
+	// mcp: started as "proteoscope mcp"; the agent talks to the hub in-process.
+	mcp   bool
+	files []string
 }
 
 type app struct {
@@ -69,9 +74,14 @@ type app struct {
 	control  *remoteHub
 	assetDir string
 	assets   fs.FS
-	files    []localFile
-	cache    *diskCache
-	remote   *upstream
+	// files grows when a script opens more files (remote control, MCP); startupFiles are the
+	// ones named on the command line, which the page opens when it loads.
+	filesMu      sync.RWMutex
+	files        []localFile
+	fileIndex    map[string]int
+	startupFiles []localFile
+	cache        *diskCache
+	remote       *upstream
 }
 
 func init() {
@@ -81,6 +91,9 @@ func init() {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		os.Exit(runMCP(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	cfg, err := parseConfig(os.Args[1:])
 	if errors.Is(err, flag.ErrHelp) {
 		return
@@ -92,24 +105,55 @@ func main() {
 		fmt.Printf("proteoscope %s\n", version)
 		return
 	}
+	running, err := start(cfg, os.Stdout)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := running.serve(); err != nil {
+		log.Fatalf("server error: %v", err)
+	}
+}
 
+// A prepared server: the app, its listener and address.
+type runningServer struct {
+	app      *app
+	server   *http.Server
+	listener net.Listener
+	url      string
+	cancel   context.CancelFunc
+}
+
+// stop ends open event streams (their requests share the server's context) and shuts down.
+func (s *runningServer) stop(timeout time.Duration) {
+	s.cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	s.server.Shutdown(ctx)
+}
+
+func (s *runningServer) serve() error {
+	if err := s.server.Serve(s.listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// start prepares the app, listens, prints the banner to out and opens the browser.
+func start(cfg config, out io.Writer) (*runningServer, error) {
 	a, err := newApp(cfg)
 	if err != nil {
-		log.Fatalf("failed to prepare app: %v", err)
+		return nil, fmt.Errorf("failed to prepare app: %w", err)
 	}
 	handler, err := a.handler()
 	if err != nil {
-		log.Fatalf("failed to prepare app: %v", err)
+		return nil, fmt.Errorf("failed to prepare app: %w", err)
 	}
-
 	listener, actualPort, err := listen(cfg.host, cfg.port)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		return nil, fmt.Errorf("failed to listen: %w", err)
 	}
-
 	url := "http://" + net.JoinHostPort(cfg.host, strconv.Itoa(actualPort))
-	a.printBanner(url)
-
+	a.printBanner(out, url)
 	if !cfg.noOpen {
 		go func() {
 			time.Sleep(300 * time.Millisecond)
@@ -118,14 +162,13 @@ func main() {
 			}
 		}()
 	}
-
+	base, cancel := context.WithCancel(context.Background())
 	server := &http.Server{
 		Handler:           protect(handler, cfg.host, actualPort),
 		ReadHeaderTimeout: 5 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return base },
 	}
-	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("server error: %v", err)
-	}
+	return &runningServer{app: a, server: server, listener: listener, url: url, cancel: cancel}, nil
 }
 
 func parseConfig(args []string) (config, error) {
@@ -143,6 +186,7 @@ func parseConfig(args []string) (config, error) {
 	flags.BoolVar(&cfg.remote, "remote-control", false, "accept commands from scripts on this computer at /api/remote/command (for example Jupyter)")
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "Usage: proteoscope [flags] [structure files or prediction folders...]")
+		fmt.Fprintln(flags.Output(), "       proteoscope mcp [flags]   (an MCP server for AI agents, on stdin and stdout)")
 		flags.PrintDefaults()
 	}
 	files, err := parseArgs(flags, args)
@@ -177,8 +221,11 @@ func newApp(cfg config) (*app, error) {
 		cache:   openCache(cfg.cacheDir, cfg.noCache, cfg.cacheMaxAge),
 		remote:  defaultUpstream(),
 	}
+	a.startupFiles = a.files
 	if cfg.remote {
 		a.control = newRemoteHub()
+		a.control.open = a.addLocalFiles
+		a.control.scripts = !cfg.mcp
 	}
 	if !cfg.dev {
 		return a, nil
@@ -195,29 +242,30 @@ func newApp(cfg config) (*app, error) {
 	return a, nil
 }
 
-func (a *app) printBanner(url string) {
-	fmt.Printf("Proteoscope %s is running at %s\n", version, url)
+func (a *app) printBanner(out io.Writer, url string) {
+	fmt.Fprintf(out, "Proteoscope %s is running at %s\n", version, url)
 	if a.dev {
-		fmt.Printf("Dev mode: serving web/ and data/ from disk in %s (no-store)\n", a.assetDir)
+		fmt.Fprintf(out, "Dev mode: serving web/ and data/ from disk in %s (no-store)\n", a.assetDir)
 	}
 	if a.offline {
-		fmt.Println("Offline mode: remote fetching is disabled.")
+		fmt.Fprintln(out, "Offline mode: remote fetching is disabled.")
 	}
 	if a.cache != nil && a.cache.maxAge > 0 {
-		fmt.Printf("Download cache: %s (refreshed after %s)\n", a.cache.dir, formatAge(a.cache.maxAge))
+		fmt.Fprintf(out, "Download cache: %s (refreshed after %s)\n", a.cache.dir, formatAge(a.cache.maxAge))
 	} else if a.cache != nil {
-		fmt.Printf("Download cache: %s\n", a.cache.dir)
+		fmt.Fprintf(out, "Download cache: %s\n", a.cache.dir)
 	} else {
-		fmt.Println("Download cache: disabled")
+		fmt.Fprintln(out, "Download cache: disabled")
 	}
-	if a.control != nil {
-		fmt.Printf("Remote control: POST {\"command\": ...} to %s/api/remote/command\n", url)
+	if a.control != nil && a.control.scripts {
+		fmt.Fprintf(out, "Remote control: POST {\"command\": ...} to %s/api/remote/command\n", url)
+		fmt.Fprintf(out, "Opening files by path: POST {\"paths\": [...]} to %s/api/remote/open with the header %s: %s\n", url, remoteTokenHeader, a.control.token)
 	}
 	folders := map[string]int{}
 	var order []string
 	for _, file := range a.files {
 		if file.Path == "" {
-			fmt.Printf("Local file %s: %s\n", file.URL, file.path)
+			fmt.Fprintf(out, "Local file %s: %s\n", file.URL, file.path)
 			continue
 		}
 		folder := strings.SplitN(file.Path, "/", 2)[0]
@@ -227,12 +275,15 @@ func (a *app) printBanner(url string) {
 		folders[folder]++
 	}
 	for _, folder := range order {
-		fmt.Printf("Local folder %s: %d files\n", folder, folders[folder])
+		fmt.Fprintf(out, "Local folder %s: %d files\n", folder, folders[folder])
 	}
-	fmt.Println("Press Ctrl+C to stop.")
+	fmt.Fprintln(out, "Press Ctrl+C to stop.")
 }
 
 func (a *app) handler() (http.Handler, error) {
+	if a.startupFiles == nil {
+		a.startupFiles = a.files
+	}
 	webFS, err := fs.Sub(a.assets, "web")
 	if err != nil {
 		return nil, err

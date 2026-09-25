@@ -151,7 +151,8 @@ embedded. `--dev` serves `web/` and `data/` from disk instead.
 | `/` and static assets | Embedded application |
 | `/api/health`, `/api/samples` | Health check and the examples manifest, in manifest order (listed examples are described by the manifest, not parsed, so startup stays fast) |
 | `/api/startup` | Version, offline flag and files given on the command line (with folder-relative paths) |
-| `/api/local/{index}` | A file named on the command line, or found in a folder named there (gzip decoded) |
+| `/api/local/{index}` | A file named on the command line or opened by a script, or found in a folder named there (gzip decoded) |
+| `/api/remote/command`, `/api/remote/open`, `/api/remote/events`, `/api/remote/result/{id}` | Remote control (`--remote-control`, `proteoscope mcp`): commands and paths from scripts on this computer, relayed to the page |
 | `/api/fetch/pdb/{id}` | RCSB PDBx/mmCIF by PDB ID, including extended `pdb_` IDs |
 | `/api/fetch/afdb/{accession}` | AlphaFold DB model; the file URL comes from the prediction API |
 | `/api/fetch/afdb/{accession}/pae` | AlphaFold DB PAE JSON |
@@ -503,7 +504,25 @@ ambient occlusion or outlines.
   grouped into residue ranges or per-element selectors.
 - **Remote control** (`remote.go`) relays commands from
   `POST /api/remote/command` to the newest page over Server-Sent Events and
-  returns the page's posted result, with a timeout.
+  returns the page's posted result, with a timeout. `POST /api/remote/open`
+  takes the per-run token printed at startup (`X-Proteoscope-Token`, compared
+  in constant time), registers paths (`local.go`: walked without the lock,
+  then added under it and deduplicated, served at `/api/local/{index}` only
+  to loopback requests and not reopened when the page reloads) and sends the
+  page an event with the file list. Only loopback connections that name a
+  loopback Host are accepted, whatever `--host`. One request is in the page
+  at a time, and a page that disconnects fails its pending request at once.
+- **MCP** (`mcp.go`): `proteoscope mcp` starts the server with remote control
+  on for the page only (the script routes are not registered, and a
+  non-loopback `--host` is refused) and reads JSON-RPC from stdin, one
+  message per line. The browser opens when a tool first needs the page. Each
+  tool call becomes a command line or an open event through the same
+  dispatch as remote control; the page's `{ ok, message, data }` becomes the
+  tool result (`structuredContent` plus text, or an image for
+  `render_image`); image data URLs anywhere in the data become captioned
+  image content, and the data keeps their numbers. Tool calls run concurrently with other messages, can be
+  cancelled, and report progress when asked; at end of input they get a
+  second before being cancelled. The banner and logs go to stderr.
 
 ## Predictions, Validation and Variants
 
@@ -520,6 +539,14 @@ ambient occlusion or outlines.
   matrices are read again when a model is opened.
 - **Entries.** Opened models are ordinary entries tagged with their set and
   model, so superposition, sessions and every panel work unchanged.
+- **Batch triage** (`triage.js`). Several sets opened together are all
+  scored; rows (one per model) carry the tool's scores and those of each
+  model's best interface by ipSAE or a named chain pair, and are ranked by
+  one metric, per job (its best model) or per model. Alignments are read when
+  a model opens. Showing a row opens its model, hides the other prediction
+  models and releases the oldest beyond six; the gallery opens the best
+  models, superposes the new ones on the first, renders each framed on its
+  own, and closes them again.
 - **Validation reports** are reduced on the server (streaming XML) and mapped
   on the page per model (NMR ensembles differ). Criteria, levels, fit values
   and clash atoms are computed once per model and cached. Clash hydrogens map
@@ -616,7 +643,7 @@ The canvas fills the window, and panels float over it.
 
 ## Known Limitations
 
-See `roadmap.md` §12. In particular:
+See `roadmap.md` §13. In particular:
 
 - Structure-only superposition is rigid.
 - Electrostatics are qualitative (formal charges, ε = 4r).

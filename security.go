@@ -81,6 +81,25 @@ func (g *guard) allowedOrigin(origin string) bool {
 	return port == g.port && g.hosts[normalizeHost(u.Hostname())]
 }
 
+// isLoopbackRequest reports whether a request comes from this computer and names it: a loopback
+// peer and a loopback Host header, so neither another machine nor a web page that rebinds its
+// own domain to 127.0.0.1 passes, whatever --host the server listens on.
+func isLoopbackRequest(r *http.Request) bool {
+	peer, _, err := net.SplitHostPort(r.RemoteAddr)
+	if ip := net.ParseIP(peer); err != nil || ip == nil || !ip.IsLoopback() {
+		return false
+	}
+	return isLoopbackName(requestHostname(r.Host))
+}
+
+func isLoopbackName(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func requestHostname(hostport string) string {
 	if host, _, err := net.SplitHostPort(hostport); err == nil {
 		return normalizeHost(host)

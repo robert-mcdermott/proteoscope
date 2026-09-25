@@ -5,10 +5,10 @@ competes in (researched September 2026), what each wave of work delivered
 (`wave1`: the rebuild; `wave2`: structure comparison; `wave3`: selections,
 commands, sessions and scripting; `wave4`: predicted complexes, validation and
 variants; `wave5`: bring your data, find public data; `wave6`: maps, ligand
-chemistry and statistics), a review of the bundled
+chemistry and statistics; `wave7`: agents and batch triage), a review of the bundled
 examples and of the public databases Proteoscope can use without API keys, and
 a prioritized plan for what comes next. Waves 1 to 6 were released together
-as version 0.6.0 ([CHANGELOG.md](../CHANGELOG.md)).
+as version 0.6.0, and wave 7 as version 0.7.0 ([CHANGELOG.md](../CHANGELOG.md)).
 
 ## 1. Where v0.4 stood
 
@@ -563,7 +563,7 @@ and reading the output of every widely used structure predictor.
 ### Bundled examples (`examples.go`, `data/examples.json`)
 
 - The 18 legacy PDB files (16 MB) became 27 gzipped mmCIF entries (6.2 MB,
-  anisotropic records removed), following the review in section 9: 108D
+  anisotropic records removed), following the review in section 10: 108D
   dropped, 5DS3 replaced by 7KK4, and the AlphaFold model of p53 with its PAE,
   1HHO, 4AKE, 1AKE, 5T35, 5FQD, 4OO8, 8EF5, 1LP3 and 6VXX added. 1LP3 (AAV2)
   was chosen over 1STM for its relevance to gene therapy.
@@ -946,7 +946,141 @@ suite that checks the new analyses against their reference tools.
 | DIA-NN report of MZ1 vs DMSO (the MSstatsPTM example data) on 5T35 | 38 GlyGly features tested with imputation, 20 significant, including BRD4 K362, K404, K431 and K445 (log2FC 4.1–6.2, q ≤ 1e-5) |
 | Erlotinib (1M17) with CCD chemistry | 17 aromatic bonds (8 double in the Kekulé form) and 1 triple bond; chemistry adds 10–15% to structure derivation |
 
-## 9. The bundled examples
+## 9. Wave 7: agents and batch triage
+
+Wave 7 makes Proteoscope usable at the scale of a prediction campaign and by
+AI agents. It ranks the models of many prediction jobs on one table, returns
+the results of commands as data, lets scripts open files by path, and adds an
+MCP server so that an agent can drive the page the user sees.
+
+### Batch triage (`triage.js`, `app.js`)
+
+- **Opening.** Several prediction jobs opened together (dropped, chosen, one
+  folder holding them, or named on the command line) are all scored: the
+  tool's scores, and interface scores from each model's PAE and coordinates.
+  The best model of the best job opens, and the triage table appears.
+- **The table.** One row per job (its best model under the chosen score) or
+  per model, ranked by ipSAE, pDockQ2, pDockQ, LIS, ipTM, pTM, the tool's
+  own score, mean pLDDT or the share of satisfied cross-links. The interface
+  is each model's best chain pair by ipSAE, or a named pair (the target and
+  the binder). A filter narrows the jobs by name. ipSAE, pDockQ, pDockQ2 and
+  LIS are computed alike for every predictor, so they compare jobs from
+  different tools; the table says which scores are each tool's own.
+- **Showing a model.** A row (clicked, or Enter from the keyboard) opens its
+  model in place of the other prediction models; models the table opened are
+  released after six, and structures opened otherwise stay.
+- **Gallery.** The 12 best models, each superposed on the first (models
+  already in the scene stay where they are) and framed on its own, rendered
+  as thumbnails; the models are closed again and the scene left as it was.
+  While it renders, the table does not respond and spinning pauses.
+- **Scope.** The table ranks the jobs of the current scene: opening a
+  structure in place of the scene clears it, and adding jobs extends it.
+- **Export.** Every model and interface of every job as CSV.
+- **Scale.** Alignments are read only when a model opens, and folders named
+  on the command line or opened by path can hold 20,000 files.
+- **Commands.** `triage [by <metric>] [top <n>] [jobs|models] [pair <chain>
+  <chain>|best]`, `triage show <n>`, `triage gallery [<n>]`, `triage export`.
+
+### Results as data (`app.js`)
+
+- `info` describes the active structure: source, method and resolution or
+  mean pLDDT, chains with their molecules and UniProt accessions, ligands,
+  prediction scores, comparison and validation summary.
+- `interactions <selection>` focuses residues or a ligand and returns their
+  interactions (type, residues, atoms, distance); `interface` returns the
+  contacts between two chains; `validate` returns the report's metrics with
+  percentiles, ligand fit and worst residues; `triage` returns ranked rows.
+
+### Opening files from scripts (`remote.go`, `local.go`)
+
+- `POST /api/remote/open` with absolute paths registers the files with the
+  running server and has the page open them, as if named on the command line.
+  Because it reads files from disk, it needs a token that Proteoscope prints
+  at startup (new each run) in the `X-Proteoscope-Token` header. Registered
+  files are served only to requests from this computer and are not reopened
+  when the page reloads; a path opened again keeps its address. Relative
+  paths and paths without supported files are refused, and nothing is
+  registered while no page is connected. Folder walks stop after 200,000
+  entries. Opening a campaign may take up to 30 minutes before the request
+  times out.
+- Remote-control requests must come from this computer and name it in their
+  Host header, which also blocks DNS rebinding when `--host` shares
+  Proteoscope on the network. The page runs one remote request at a time,
+  and a request fails at once if the page closes.
+
+### MCP server (`mcp.go`)
+
+- `proteoscope mcp` starts Proteoscope and serves the Model Context Protocol
+  (versions 2024-11-05 to 2025-11-25) as newline-delimited JSON-RPC on stdin
+  and stdout. The banner and logs go to stderr. The browser opens when a tool
+  first needs the page (and again if the page is closed). Only a local
+  `--host` is accepted, and the HTTP routes for scripts are off: the agent's
+  commands arrive only through MCP. When the agent closes stdin, calls in
+  progress get a moment to finish and Proteoscope stops.
+- Calls run concurrently with pings and can be cancelled
+  (`notifications/cancelled`); long calls send progress notifications when
+  the client asks for them. Malformed, overlong and batched messages get
+  JSON-RPC errors, and images over 8 MB are refused with a hint to render
+  smaller.
+- Twelve tools: `open_structure`, `open_files`, `describe_structure`,
+  `list_structures`, `select_residues`, `get_interactions`,
+  `interface_contacts`, `superpose`, `validation_report`, `rank_predictions`,
+  `render_image` and `proteoscope_command`. Each becomes one command line or
+  an open event in the page; results come back as structured content and
+  text, and `render_image` as a PNG. Images inside a command's result (the
+  triage gallery, `png`) become captioned image content, up to 8 MB per
+  result, and the data keeps their numbers. Tool arguments cannot add a second
+  command line, and every `rank_predictions` call states all its settings.
+- The tools act on the visible page, so the user sees what the agent does
+  and can take over. A tool call waits up to 30 seconds for a page to
+  connect.
+
+### Validation
+
+- **Tests.** 7 new JavaScript tests, 256 in total, and 14 new Go tests, 75
+  in total: triage ranking, exact chain pairs, filters, records and CSV rows
+  (with repeated job names); the parsing of `triage`, `info` and
+  `interactions`; the MCP handshake, tool list, command lines built from tool
+  arguments, images (including those inside command results, and their size
+  limit), tool errors, protocol edge cases (batches, bad versions,
+  overlong lines, cancellation), opening files by path, the
+  `/api/remote/open` endpoint (token, requests from other machines, DNS
+  rebinding), MCP mode without the script routes, one request at a time, and
+  requests failing when the page goes.
+- **End to end.** A script drove `proteoscope mcp` over stdin and stdout,
+  with headless Chrome as the page, through all twelve tools on a campaign of
+  three jobs from AlphaFold Server, ColabFold and AlphaFold 3, then on 1M17
+  and the AlphaFold DB model of EGFR. Standard output carried only protocol
+  messages, and the server exited cleanly when stdin closed. The triage table
+  was checked in the browser: Enter in its fields, keyboard rows, the
+  highlighted row, the gallery refusing clicks while it renders and leaving
+  colors, comparison and spin as they were, and the table clearing when
+  another structure replaces the scene.
+- **Review.** A review of the wave (server and protocol, page) found and
+  fixed, among others:
+  - `/api/remote/open` reachable through DNS rebinding when `--host` shares
+    Proteoscope, and runtime files served to other machines; it now needs a
+    per-run token and serves those files only locally.
+  - A closed page leaving requests waiting for their full timeout, and two
+    requests interleaving in the page.
+  - Calls cut off when the agent closed stdin, cancellations ignored, and
+    folders walked without a bound while holding the file list's lock.
+  - Triage settings and jobs outliving the scene they came from, the
+    dialog's filter applied to commands, clicks during the gallery opening
+    models into its scene, and models from saved sessions released by the
+    table.
+  - Chain pairs matched without regard to case (mmCIF chains `a` and `A`
+    differ), and a job without the named pair reporting its overall ipTM.
+- **Checks on real data:**
+
+| Check | Result |
+| --- | --- |
+| Aurora A–TPX2 (AlphaFold Server) and RAF1–KSR1–MEK1 (ColabFold), the examples of the IPSAE repository, triaged together | Ranked by ipSAE: Aurora A–TPX2 0.87 (pDockQ2 0.71, LIS 0.66), then RAF1–KSR1–MEK1 0.60 on its best interface (A–C) |
+| `get_interactions` on erlotinib in 1M17 | 7 interactions, including the hinge hydrogen bond to Met769 N at 2.70 Å |
+| `validation_report` on 1M17 | Clashscore 11.4 (20th percentile), Ramachandran outliers 2.3%, R-free 0.242 |
+| `superpose` of the AlphaFold DB model of EGFR onto 1M17 | 0.78 Å over 250 pairs, TM-score 0.889, as in the Comparing Structures checks |
+
+## 10. The bundled examples
 
 **Done in wave 5** (section 7): the recommendations below were followed, with
 1LP3 as the capsid and 8EF5 as the GPCR complex. The review is kept for the
@@ -1010,7 +1144,7 @@ AlphaFold DB's complex entries (`/api/complex/…`) or a ModelArchive entry with
 PAE (for example `ma-dm-prc-171`, EZH2–PCGF5 from ColabFold) are the
 candidates. Both are better fetched than bundled; see the next section.
 
-## 10. Public databases without API keys
+## 11. Public databases without API keys
 
 Everything Proteoscope fetches goes through its own server, which allows only
 known hosts, caches downloads, and honors `--offline`. Services checked live
@@ -1073,27 +1207,63 @@ Each new source is a small Go route (host allowlist, size limit, cache kind,
 User-Agent) plus a page-side parser. The RCSB, NCBI, STRING and gnomAD limits
 argue for caching and one request at a time.
 
-## 11. Roadmap
+## 12. Roadmap
 
 Priorities are ordered by value to researchers, weighed against effort.
 Wave 6 delivered density maps, ligand chemistry, docking poses, structure-only
 alignment, differential statistics, conservation, the methods paragraph,
-continuous integration and the validation suite (section 8).
+continuous integration and the validation suite (section 8). Wave 7
+delivered batch triage, results as data for scripts, opening files by path
+and the MCP server (section 9).
 
-### Next: follow-ups to wave 6
+Proteoscope's lead is breadth in one private session: prediction triage,
+experimental validation, density, docking and structural proteomics with
+statistics, each checked against its reference tool. The plan keeps building
+on that, and adds what it lacks: WebGPU is used only to render, surfaces and
+isosurfaces are computed on the CPU, and scenes stop at 300,000 atoms per
+model.
 
+### Next: prediction-era workflows
+
+- **Triage without a window.** The same ranking from the command line
+  (`proteoscope triage campaign/ --csv ranking.csv`), for clusters and
+  pipelines, with the gallery as image files.
+- **MCP follow-ups.** The Streamable HTTP transport next to stdio, and the
+  session and the methods paragraph as MCP resources.
 - **Predicted complexes to fetch.** AlphaFold DB complexes and ModelArchive
   entries with PAE, listed next to the 3D-Beacons models.
-- **Alignments on request.** AlphaFold DB no longer serves its MSAs, so
-  conservation needs a prediction's MSA or a dropped alignment. An opt-in
-  search on the ColabFold MMseqs2 server would close the gap, behind a notice
-  that the sequence leaves the computer.
-- **Maps.** Maps in MolViewSpec exports; Q-score for any model and map; a
-  list of difference-map peaks, for checking ligands and waters.
+- **Searches on request,** each opt-in and behind a notice that the sequence
+  or structure leaves the computer:
+  - an MMseqs2 search on the ColabFold server, for conservation of models
+    without an alignment (AlphaFold DB no longer serves its MSAs);
+  - a structure-similarity search (Foldseek) against the PDB and AlphaFold
+    DB, for remote homologs that sequence search misses.
+- **Maps.** Maps in MolViewSpec exports, and MolViewSpec import; Q-score for
+  any model and map; a list of difference-map peaks, for checking ligands and
+  waters.
 - **Ligands.** A ligand card with the CCD name, formula, identifiers and
-  links to PubChem and ChEMBL.
+  links to PubChem and ChEMBL, and a 2D diagram of the ligand's interactions
+  for figures.
 - **Statistics.** More than two groups, paired designs and protein-level
   summarization.
+
+### Then: WebGPU compute and scale
+
+- **Compute on the GPU.** Move the heavy grid and pairwise work to WebGPU
+  compute shaders, keeping the CPU code as the fallback and as the reference
+  in tests: Gaussian and molecular surfaces and map isosurfaces first, then
+  SASA, contact and distance matrices, Coulombic potentials and interface
+  scoring of many models.
+- **Large structures.**
+  - Instanced rendering of symmetric assemblies, so a capsid is one copy
+    drawn many times rather than 60 copies in memory; this lifts the
+    300,000-atom limit where it is most visible.
+  - Typed-array atom storage, level of detail and GPU culling, toward
+    millions of atoms.
+- **A public benchmark.** Frame rate, time to first frame and time to a
+  surface on a fixed set (a small protein, the 1VQ5 ribosome, a capsid, a
+  cryo-EM map), as a script anyone can rerun, with the results on the
+  website.
 
 ### Then: proteomics follow-ups
 
@@ -1111,19 +1281,38 @@ continuous integration and the validation suite (section 8).
 - **Molecular dynamics:** trajectory playback (DCD and XTC), RMSF coloring
   and contact persistence.
 - **Glycans:** SNFG symbols, for glycoproteomics.
+- **Clashscore without a report:** hydrogens added and contact dots counted
+  as Reduce and Probe do, for local and predicted models.
+- **Electrostatics:** a Poisson–Boltzmann solution as an option next to the
+  Coulombic map, once grid work runs on the GPU.
+- **Predictions on this computer:** run a local Boltz, Protenix or OpenFold3
+  installation from the page and open its output folder when it finishes.
 - **Undo and redo** for commands and styling.
 
-### Later: scale and reach
+### Later: rendering, reach and maintenance
 
-- **Large structures.**
-  - Typed-array atom storage.
-  - Level-of-detail rendering and GPU-computed Gaussian surfaces, to handle
-    ten million atoms.
+- **Browsers without WebGPU.** A WebGL2 renderer with surfaces to replace
+  the Canvas fallback, for Safari before macOS Tahoe, Firefox on Linux and
+  Intel Macs, and Linux GPUs without WebGPU; and regular testing in Safari 26
+  on Tahoe and in Firefox, not only in Chromium browsers.
+- **A figure mode with path tracing:** progressive soft shadows, global
+  illumination and depth of field on WebGPU compute, for still images.
+- **A hosted build.** A version on the website that needs no download:
+  parsing and analysis already run in the page, but the local server's jobs
+  (searches, the fetch cache, validation-report reduction, map requests)
+  would move into the page wherever the services allow cross-origin requests.
+  The binary remains the way to work offline and to script Proteoscope.
+- **Embedding.** A web component and a Jupyter widget, so notebooks and web
+  pages can show a Proteoscope view.
 - **Export.** glTF, OBJ, and STL for 3D printing and AR; MP4 via WebCodecs;
   scripted figure batches.
 - **Other.** WebXR, localization, and accessibility audits.
+- **Maintenance.** Split `web/app.js` (about 10,700 lines) into modules by
+  panel, with JSDoc types, before outside contributions start.
+- **Publication.** A software paper (an application note or JOSS), a Zenodo
+  DOI for each release, and short videos of the main workflows.
 
-## 12. Known limitations
+## 13. Known limitations
 
 - **Structure-only superposition** is rigid: in a hinge motion it fits one
   domain, as TM-align does. MM-align switches to US-align's faster, slightly
@@ -1159,6 +1348,13 @@ continuous integration and the validation suite (section 8).
   Ramachandran classes but no rotamer outliers or clashscore, because those
   need hydrogens added by Reduce and contact dots from Probe. Cryo-EM atom
   inclusion needs the map loaded (*Map fit*).
+- **Batch triage** needs the page open: scoring runs in the browser. Sessions
+  keep the prediction models that are open, not the whole campaign. The
+  tools' own ranking scores do not compare across tools; the table says so.
+- **The MCP server** drives a browser page; with none connected, tools fail
+  after 30 seconds. Any program that can start `proteoscope mcp` controls the
+  page and can open local files in it, as can any program on this computer
+  that reads the token Proteoscope prints for remote control.
 - **Prediction folders.** AlphaFold 3, AlphaFold Server, Boltz-2, ColabFold,
   Protenix and OpenFold3 were checked with real outputs; Chai-1 only with the
   documented layout.

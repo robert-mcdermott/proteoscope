@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.7.0 (2026-09-24)
+
+- Batch triage: open many prediction jobs at once (a design campaign, a
+  screen of partners) and rank every model of every job on one table by
+  ipSAE, pDockQ2, pDockQ, LIS, ipTM, pTM, the tool's own score, mean pLDDT or
+  satisfied cross-links, for each model's best interface or a named chain
+  pair. Show any model, render a gallery of the best, or export every model
+  and interface as CSV. The `triage` command does the same from the command
+  line.
+- An MCP server for AI agents: `proteoscope mcp` lets an agent such as Claude
+  open structures and prediction folders, rank predictions, list
+  interactions and interface contacts, superpose, load validation reports,
+  render images and run any command, in the page you see.
+  Images come back as images, so an agent sees the triage gallery's
+  thumbnails. [docs/MCP.md](docs/MCP.md) covers the setup for Claude Code,
+  Claude Desktop, Collomia and other clients.
+- Scripts can open files and folders by path (`POST /api/remote/open`, with
+  the token Proteoscope prints at startup), and the new `info` and
+  `interactions` commands, and `interface`, `validate` and `triage`, return
+  their results as data; `help` returns the command list.
+- Remote control also refuses requests whose Host header does not name this
+  computer, which blocks DNS rebinding when `--host` shares Proteoscope, and
+  the page runs one remote request at a time. **Scripts that reach
+  Proteoscope on this computer by another name now get 403** (a hosts-file
+  alias for 127.0.0.1, or a local reverse proxy that passes its own Host
+  header); use `127.0.0.1` or `localhost`. An SSH tunnel
+  (`ssh -L 8765:127.0.0.1:8765`) keeps working.
+- Folders named on the command line can hold up to 20,000 files, and a
+  prediction's alignment is read only when one of its models opens.
+
 ## 0.6.1 (2026-09-23) 
 
 - Installers for macOS and Linux (`install.sh`) and Windows (`install.ps1`).
