@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 (2026-09-24)
 
 - A ligand card: select or focus a ligand to see its common name, formula,
   molecular weight, charge, SMILES and InChIKey from the Chemical Component

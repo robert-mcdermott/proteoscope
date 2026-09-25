@@ -9,7 +9,8 @@ chemistry and statistics; `wave7`: agents and batch triage; `wave8`: ligand
 evidence), a review of the bundled
 examples and of the public databases Proteoscope can use without API keys, and
 a prioritized plan for what comes next. Waves 1 to 6 were released together
-as version 0.6.0, and wave 7 as version 0.7.0 ([CHANGELOG.md](../CHANGELOG.md)).
+as version 0.6.0, wave 7 as version 0.7.0 and wave 8 as version 0.8.0
+([CHANGELOG.md](../CHANGELOG.md)).
 
 ## 1. Where v0.4 stood
 
@@ -1166,6 +1167,7 @@ whether the density supports it, and how it binds, in a form fit for a figure.
 | Heme in 4HHB, acetazolamide in 3HS4, ATP in 1ATP | The iron at the porphyrin's center with His87; zinc on the sulfonamide nitrogen (1.94 Å); both manganese ions and the phosphate contacts |
 | Fo-Fc peaks of 1M17 (2.6 Å) | 135 positive and 65 negative peaks beyond ±3σ within 5 Å of the model in 3 seconds; two of +3.6σ next to erlotinib |
 | A docking pose (erlotinib written as SDF) | Described from the model: formula C22H23N3O4 as in the dictionary; the same seven interactions |
+| Map fit after its tiling moved into a shared helper, against v0.7.0 | Identical: 1M17 84.16% of 2,526 atoms above 1σ; 8GUB in EMD-34272 atom inclusion 0.8935 of 10,358 atoms; the same per-residue values |
 
 ## 11. The bundled examples
 

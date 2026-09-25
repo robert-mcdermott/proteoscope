@@ -447,3 +447,6 @@ the completed v0.1 application.
 
 - [x] 86. Documentation: README (Ligands, difference peaks, commands), `docs/MCP.md`, design, requirements, roadmap (wave 8)
   - _Requirements: 49, 50, 51_
+
+- [x] 87. Release 0.8.0: version in `main.go` and `CITATION.cff`, `CHANGELOG.md`; map fit checked unchanged against v0.7.0
+  - _Requirements: 45_

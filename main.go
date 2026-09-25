@@ -26,7 +26,7 @@ import (
 //go:embed web/index.html web/styles.css web/app.js web/favicon.svg web/lib/*.js data
 var content embed.FS
 
-var version = "0.7.0"
+var version = "0.8.0"
 
 type sample struct {
 	ID             string `json:"id"`
