@@ -59,3 +59,25 @@ function pick(parsed) {
   const { name, command, text, ...rest } = parsed;
   return rest;
 }
+
+test('triage, info and interactions', () => {
+  assert.deepEqual(fields(parseCommand('triage'), 'action', 'metric', 'limit', 'level', 'pair'), { action: 'rank', metric: null, limit: null, level: null, pair: undefined });
+  assert.deepEqual(fields(parseCommand('triage by pDockQ2 top 10 models pair A B'), 'action', 'metric', 'limit', 'level', 'pair'), { action: 'rank', metric: 'pdockq2', limit: 10, level: 'models', pair: ['A', 'B'] });
+  assert.deepEqual(fields(parseCommand('batch lis best jobs'), 'name', 'metric', 'level', 'pair'), { name: 'triage', metric: 'lis', level: 'jobs', pair: null });
+  assert.deepEqual(fields(parseCommand('triage show #3'), 'action', 'position'), { action: 'show', position: 3 });
+  assert.deepEqual(fields(parseCommand('triage gallery'), 'action', 'count'), { action: 'gallery', count: 12 });
+  assert.equal(parseCommand('triage csv').action, 'export');
+  assert.equal(parseCommand('triage by auto top 20 jobs best').metric, 'auto');
+  assert.throws(() => parseCommand('triage by rmsd'), /Rank by ipsae/);
+  assert.throws(() => parseCommand('triage gallery 40'), /1 to 24/);
+  assert.throws(() => parseCommand('triage pair A'), /triage pair <chain> <chain>/);
+  assert.throws(() => parseCommand('triage show'), /Usage/);
+  assert.equal(parseCommand('info').name, 'info');
+  assert.equal(parseCommand('describe').name, 'info');
+  assert.equal(parseCommand('interactions resn STI').selection, 'resn STI');
+  assert.throws(() => parseCommand('interactions'), /Usage/);
+});
+
+function fields(object, ...keys) {
+  return Object.fromEntries(keys.map((key) => [key, object[key]]));
+}

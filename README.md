@@ -76,6 +76,9 @@ Highlights:
     pDockQ, pDockQ2 and LIS, reproducing Dunbrack's `ipsae.py`.
   - Contact probabilities, per-atom ligand pLDDT and MSA depth.
   - How many of your cross-links each model satisfies.
+  - Batch triage: open a folder of many jobs, such as a design campaign, and
+    rank every model of every job on one table by ipSAE, pDockQ2, LIS, ipTM
+    or pLDDT, with a gallery of the best and CSV export.
 - **Validation.**
   - The wwPDB validation report on the structure: outliers per residue,
     clashes drawn in 3D, and fit to density (RSRZ, or Q-score for cryo-EM)
@@ -119,9 +122,12 @@ Highlights:
   and history.
 - **Sessions and sharing.** Save and reopen the whole workspace, copy a link
   that rebuilds the view, or export MolViewSpec to open the view in Mol*.
-- **Scripting.** Drive Proteoscope from Python or Jupyter with
-  `--remote-control`: fetch, superpose, select and render images from a
-  notebook.
+- **Scripting and agents.** Drive Proteoscope from Python or Jupyter with
+  `--remote-control`, or from an AI agent such as Claude Code through its MCP
+  server (`proteoscope mcp`, see [Using Proteoscope with AI
+  agents](docs/MCP.md)): open structures and prediction folders, rank
+  predictions, list interactions, superpose, load validation reports and
+  render images.
 - **Figures.** Supersampled PNG up to 4× with transparent background and
   legend; clipboard copy; spin videos.
 - **Methods and citations.** A methods paragraph for what a session used:
@@ -540,7 +546,9 @@ ball-stick, spheres, cartoon, surface, water, hydrogens, labels, everything),
 `color` (a name, a hex value, a scheme, or `default`), `label`/`unlabel`,
 `fetch`/`add`/`remove`/`activate`/`list`/`refresh`, `search`, `example`,
 `assembly` (build a biological assembly, or `au`), `interface A B` (contacts
-between two chains), `superpose`, `alphafold`, `overlay`, `ranking`,
+between two chains), `interactions` (the interactions of residues or a
+ligand), `info` (describe the active structure), `superpose`, `alphafold`,
+`overlay`, `ranking`, `triage` (rank many prediction jobs),
 `domains`, `msa`, `validate` (with `clashes`, `fit`, `refresh` or `off`),
 `missense`, `exposure` (pPSE and disorder), `evidence` (public peptides and
 PTMs), `tmalign`, `map`, `pose`, `conservation`, `preset`, `lighting`, `bg`,
@@ -683,6 +691,36 @@ differs in the fourth decimal.)
   each model satisfies.
 
 Sessions keep the model, its PAE, contact probabilities and scores.
+
+### Batch triage
+
+![Two predictions from two tools ranked on one table: Aurora A with TPX2 from AlphaFold Server (the example of the IPSAE repository) and RAF1–KSR1–MEK1 from ColabFold, with ipSAE, pDockQ2, LIS, ipTM and pLDDT, and a gallery of the models](docs/images/prediction-triage.jpg)
+
+A design campaign or a screen of interaction partners produces many jobs,
+more than anyone opens one by one. Drop or choose several prediction folders
+at once, a folder that holds them, or name it on the command line
+(`proteoscope campaign/`), and Proteoscope scores every model of every job,
+opens the best, and shows the **Triage** table (Structure tab, **Open
+table**):
+
+- **One row per job** (its best model under the chosen score) or per model,
+  ranked by ipSAE, pDockQ2, pDockQ, LIS, ipTM, pTM, the tool's own score,
+  mean pLDDT, or the share of your cross-links each model satisfies. Click a
+  column header to rank by it.
+- **The interface** is each model's best chain pair by ipSAE, or the chains
+  you name (for example `A B`, the target and the binder).
+- ipSAE, pDockQ, pDockQ2 and LIS are computed from each model's PAE and
+  coordinates the same way for every predictor, so they compare jobs from
+  different tools; ipTM, pTM and the score are each tool's own.
+- **Click a row** to show that model; **Gallery** renders the 12 best,
+  each superposed on the first so they share a view; **Export CSV** saves
+  every model and interface of every job.
+- A folder named on the command line or opened by path can hold up to
+  20,000 files. Alignments are read only when a model opens, so scoring stays
+  fast.
+
+From the command line: `triage` (rank, for example `triage by pdockq2 top 10
+pair A B`), `triage show 3`, `triage gallery 12` and `triage export`.
 
 ## Validation
 
@@ -1071,6 +1109,7 @@ it under *Cite this repository*).
 
 ```text
 proteoscope [flags] [structure files or prediction folders...]
+proteoscope mcp [flags]    an MCP server for AI agents (see Scripting)
 
   --host string       interface to bind (default 127.0.0.1)
   --port int          preferred port; nearby ports are tried if busy (default 8765)
@@ -1135,6 +1174,88 @@ Commands go to the most recently opened Proteoscope page. Remote control is
 off unless the flag is given; it accepts requests only from this computer,
 whatever `--host` is, and requests from web pages on other sites are refused,
 but any program on your computer can send commands while it is on.
+
+**Opening files from scripts.** POST absolute paths of files or folders to
+`/api/remote/open`, and the page opens them as if they had been named on the
+command line; several prediction folders are ranked together. Because this
+reads files from your disk, it also needs the token that Proteoscope prints when
+it starts (a new one each run), in the `X-Proteoscope-Token` header:
+
+```python
+TOKEN = "..."   # from the "Opening files by path" line Proteoscope printed
+
+reply = requests.post("http://127.0.0.1:8765/api/remote/open",
+                      headers={"X-Proteoscope-Token": TOKEN},
+                      json={"paths": ["/runs/campaign"]}, timeout=1800).json()
+print(reply["message"])                  # "Opened 48 prediction jobs (240 models) ..."
+best = ps("triage by ipsae top 5 pair A B")["data"]["rows"]
+```
+
+Files opened this way are served only to the page on this computer, even when
+`--host` shares Proteoscope with other machines.
+
+`info`, `interactions <selection>`, `interface <chain> <chain>`, `validate`,
+`superpose` and `triage` return their results as data too.
+
+### AI agents (MCP)
+
+`proteoscope mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
+server, so an AI agent such as Claude can use Proteoscope. It starts
+Proteoscope, answers the agent on standard input and output, and opens
+Proteoscope in your browser when the agent first needs the page (unless
+`--no-open`; then open the address it prints). When the agent disconnects,
+Proteoscope stops. It takes the usual flags, such as `--port` and `--offline`,
+but only a local `--host`.
+
+For Claude Code, with the full path the installer printed:
+
+```sh
+claude mcp add proteoscope --scope user -- /Users/you/.local/bin/proteoscope mcp
+```
+
+For Collomia:
+
+```sh
+collo mcp add proteoscope --global --timeout 600 -- /Users/you/.local/bin/proteoscope mcp
+```
+
+For Claude Desktop, Cursor, Gemini CLI and other clients, add it to their MCP
+configuration:
+
+```json
+{
+  "mcpServers": {
+    "proteoscope": { "command": "/Users/you/.local/bin/proteoscope", "args": ["mcp"] }
+  }
+}
+```
+
+[Using Proteoscope with AI agents](docs/MCP.md) covers the setup for each client
+(including VS Code and Codex), testing with the MCP Inspector, example prompts,
+the tools and their arguments, images, privacy and troubleshooting.
+
+| Tool | What it does |
+| --- | --- |
+| `open_structure` | Fetch a PDB entry or an AlphaFold DB model |
+| `open_files` | Open files and prediction folders by path; several jobs are ranked together |
+| `describe_structure` | Source, method and resolution or confidence, chains, ligands, prediction scores, validation summary |
+| `list_structures` | The structures in the scene and their superpositions |
+| `select_residues` | Select with the selection language; returns the residues |
+| `get_interactions` | Focus residues or a ligand and list its interactions |
+| `interface_contacts` | The contacts between two chains |
+| `superpose` | Superpose by sequence or by structure alone (TM-align, MM-align); RMSD, TM-score, lDDT |
+| `validation_report` | The wwPDB validation report's summary, ligand fit and worst residues |
+| `rank_predictions` | Rank the opened prediction jobs by ipSAE, pDockQ2, LIS, ipTM, pLDDT or cross-links |
+| `render_image` | The current view as a PNG |
+| `proteoscope_command` | Any other command, for example `color plddt` or `map load` |
+
+The tools act on the page you see, so you can watch what the agent does and
+take over at any time. Results come back as text and as structured data. The
+MCP server runs only on your computer: the agent's commands reach the page
+through the MCP connection alone (the HTTP routes for scripts are off in this
+mode), and files the agent opens are read by the page, as your own are. Some
+tools take a while on large jobs; clients with a short default timeout (30
+seconds in some) should allow a few minutes.
 
 ## Development
 
@@ -1229,7 +1350,9 @@ weekly.
 | `web/lib/align.js`, `web/lib/superpose.js`, `web/lib/compare.js` | Sequence alignment, least-squares superposition, TM-score, lDDT, RMSF, chain pairing |
 | `web/lib/select.js`, `web/lib/commands.js` | Selection language and command-line parsing |
 | `web/lib/mvs.js`, `web/lib/zip.js`, `web/lib/codec.js` | MolViewSpec export, ZIP reading and writing, session compression and links |
-| `remote.go` | Remote control for scripts (`--remote-control`) |
+| `remote.go` | Remote control for scripts (`--remote-control`): commands, opening files by path |
+| `mcp.go` | The MCP server for AI agents (`proteoscope mcp`) |
+| `web/lib/triage.js` | Batch triage: ranking the models of many prediction jobs, CSV rows |
 | `web/lib/scene.js`, `web/lib/coloring.js` | Representation and color-scheme logic |
 | `web/lib/renderer.js` | WebGPU renderer: impostors, G-buffer, SSAO, outlines, FXAA, picking, capture |
 | `web/lib/renderer-canvas.js` | Canvas 2D fallback renderer |

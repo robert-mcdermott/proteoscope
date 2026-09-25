@@ -417,3 +417,19 @@ the completed v0.1 application.
 
 - [x] 76. Installers: `install.sh` (macOS, Linux) and `install.ps1` (Windows) with checksum and version checks, `docs/INSTALLING.md`, and a CI job that runs them on all three systems
   - _Requirements: 1, 45_
+
+- [x] 77. Batch triage: several prediction jobs scored together, the triage table (jobs or models, metrics, chain pair, filter), gallery, CSV, `triage` command; alignments read when a model opens
+  - _Requirements: 28, 46_
+
+- [x] 78. Results as data for scripts: `info`, `interactions`, and data from `interface`, `validate` and `triage`
+  - _Requirements: 27, 47_
+
+- [x] 79. Opening files by path from scripts: `POST /api/remote/open` with a per-run token, files registered while running and served only locally, folders of up to 20,000 files; loopback Host check, one remote request at a time
+  - _Requirements: 27, 47_
+
+- [x] 80. The MCP server (`proteoscope mcp`): stdio JSON-RPC, twelve tools, structured and image results, tests and an end-to-end check with a browser
+  - _Requirements: 48_
+
+- [x] 81. Documentation: README (batch triage, results as data, opening files, MCP), `docs/MCP.md` (setup for Claude Code, Claude Desktop, Collomia and other clients; testing, tools, troubleshooting), design, requirements, roadmap (wave 7)
+  - _Requirements: 46, 47, 48_
+

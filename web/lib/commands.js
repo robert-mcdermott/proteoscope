@@ -2,6 +2,8 @@
 // "superpose 1AKE onto 4AKE fit /A:1-29" into plain objects. Execution lives in the app; this
 // module only understands syntax, so it can be tested and reused by the remote-control API.
 
+import { triageMetric } from './triage.js';
+
 export class CommandError extends Error {
   constructor(message) {
     super(message);
@@ -32,8 +34,10 @@ export const COMMANDS = [
   { name: 'evidence', aliases: ['public', 'peptideatlas'], syntax: 'evidence', summary: 'Load public peptides and PTM sites (EBI Proteins API) and color their coverage' },
   { name: 'exposure', aliases: ['ppse', 'structuremap'], syntax: 'exposure', summary: 'Part-sphere exposure (pPSE) and disorder as in StructureMap, and color by pPSE' },
   { name: 'interface', aliases: ['contacts'], syntax: 'interface <chain> <chain>', summary: 'List the contacts between two chains and frame their interface' },
+  { name: 'interactions', aliases: ['plip'], syntax: 'interactions <selection>', summary: 'Focus residues or a ligand and list their interactions' },
   { name: 'overlay', aliases: [], syntax: 'overlay [on|off]', summary: 'Overlay all models of an ensemble' },
   { name: 'ranking', aliases: ['models', 'predictions'], syntax: 'ranking [<rank>]', summary: 'List the models of an opened prediction, or show the one at a rank' },
+  { name: 'triage', aliases: ['batch', 'campaign'], syntax: 'triage [by <metric>] [top <n>] [jobs|models] [pair <chain> <chain>|best] · triage show <n> · triage gallery [<n>] · triage export', summary: 'Rank every opened prediction job by ipSAE, pDockQ2, LIS, ipTM, pLDDT or another score; show a job, render a gallery of the best, or export the table' },
   { name: 'domains', aliases: ['paedomains'], syntax: 'domains', summary: 'Find rigid domains in the PAE matrix and color by them' },
   { name: 'msa', aliases: [], syntax: 'msa', summary: 'Color by MSA depth (AlphaFold DB models, prediction folders, dropped .a3m files)' },
   { name: 'validate', aliases: ['validation', 'report'], syntax: 'validate [clashes|fit|refresh|off]', summary: 'Load the wwPDB validation report and color outliers, show clashes or density fit' },
@@ -54,6 +58,7 @@ export const COMMANDS = [
   { name: 'mvs', aliases: ['molviewspec'], syntax: 'mvs', summary: 'Export the view as MolViewSpec for Mol*' },
   { name: 'png', aliases: ['image', 'snapshot', 'export'], syntax: 'png [1-4] [transparent]', summary: 'Save an image' },
   { name: 'list', aliases: ['structures', 'ls'], syntax: 'list', summary: 'List the structures in the scene' },
+  { name: 'info', aliases: ['describe', 'about'], syntax: 'info', summary: 'Describe the active structure: source, method, chains, ligands and scores' },
   { name: 'help', aliases: ['?', 'commands'], syntax: 'help [command]', summary: 'List commands' },
 ];
 
@@ -114,6 +119,7 @@ export function parseCommand(text, options = {}) {
   switch (command.name) {
     case 'select':
     case 'focus':
+    case 'interactions':
       if (!rest) throw new CommandError(`Usage: ${command.syntax}`);
       return { ...parsed, selection: rest };
     case 'zoom':
@@ -189,6 +195,8 @@ export function parseCommand(text, options = {}) {
       if (!Number.isInteger(rank) || rank < 1 || words.length > 1) throw new CommandError(`Usage: ${command.syntax}`);
       return { ...parsed, rank };
     }
+    case 'triage':
+      return parseTriage(parsed, words);
     case 'validate': {
       const mode = words[0]?.toLowerCase() ?? 'load';
       if (!['load', 'clashes', 'fit', 'refresh', 'off'].includes(mode) || words.length > 1) throw new CommandError(`Usage: ${command.syntax}`);
@@ -277,6 +285,53 @@ export function parseCommand(text, options = {}) {
       // "exposure"): followed by more words, the text is a selection such as "msa < 30".
       return words.length ? null : parsed;
   }
+}
+
+// "triage by ipsae top 10 models pair A B", "triage show 3", "triage gallery 12", "triage export".
+function parseTriage(parsed, words) {
+  const usage = () => new CommandError(`Usage: ${parsed.command.syntax}`);
+  const first = words[0]?.toLowerCase();
+  if (first === 'show' || first === 'open') {
+    const position = Number(words[1]?.replace(/^#/, ''));
+    if (words.length !== 2 || !Number.isInteger(position) || position < 1) throw usage();
+    return { ...parsed, action: 'show', position };
+  }
+  if (first === 'gallery') {
+    const count = words[1] === undefined ? 12 : Number(words[1]);
+    if (words.length > 2 || !Number.isInteger(count) || count < 1 || count > 24) throw new CommandError('Usage: triage gallery [<n>], with n from 1 to 24.');
+    return { ...parsed, action: 'gallery', count };
+  }
+  if (first === 'export' || first === 'csv') {
+    if (words.length > 1) throw usage();
+    return { ...parsed, action: 'export' };
+  }
+  const result = { ...parsed, action: 'rank', metric: null, limit: null, level: null, pair: undefined };
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index].toLowerCase();
+    if (word === 'by' || word === 'sort') {
+      result.metric = /^(auto|default)$/i.test(words[index + 1] ?? '') ? 'auto' : triageMetric(words[index + 1]);
+      if (!result.metric) throw new CommandError(`Rank by ipsae, pdockq2, pdockq, lis, iptm, ranking, ptm, plddt or crosslinks, not "${words[index + 1] ?? ''}".`);
+      index += 1;
+    } else if (word === 'top') {
+      result.limit = Number(words[index + 1]);
+      if (!Number.isInteger(result.limit) || result.limit < 1) throw usage();
+      index += 1;
+    } else if (word === 'jobs' || word === 'models') {
+      result.level = word;
+    } else if (word === 'pair' || word === 'chains') {
+      const chains = words.slice(index + 1, index + 3);
+      if (chains.length !== 2 || chains.some((chain) => !/^[A-Za-z0-9]{1,4}$/.test(chain))) throw new CommandError('Usage: triage pair <chain> <chain>, for example "triage pair A B".');
+      result.pair = chains;
+      index += 2;
+    } else if (word === 'best') {
+      result.pair = null;
+    } else if (triageMetric(word)) {
+      result.metric = triageMetric(word);
+    } else {
+      throw usage();
+    }
+  }
+  return result;
 }
 
 // Commands whose name starts with the typed word, for suggestions in the search box.

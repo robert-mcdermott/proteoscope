@@ -30,6 +30,7 @@ import { RAMA_CATEGORIES, RAMA_FAVORED, classifyRamachandran, loadTop8000, ramaD
 import { combineDepth, depthSummary, msaDepth } from './lib/msa.js';
 import { readNpz, readNpy, squareMatrix } from './lib/npy.js';
 import { interfaceScores } from './lib/interface-scores.js';
+import { TRIAGE_METRICS, defaultTriageMetric, rankTriage, triageCSVRows, triageRecords, triageRows } from './lib/triage.js';
 import {
   detectPredictionSets,
   flatSquare,
@@ -308,6 +309,26 @@ const els = {
   predictionDetail: document.querySelector('#prediction-detail'),
   predictionSuperpose: document.querySelector('#prediction-superpose'),
   predictionExport: document.querySelector('#prediction-export'),
+  triageGroup: document.querySelector('#triage-group'),
+  triageCount: document.querySelector('#triage-count'),
+  triageSummary: document.querySelector('#triage-summary'),
+  triageMetric: document.querySelector('#triage-metric'),
+  triageTop: document.querySelector('#triage-top'),
+  triageOpen: document.querySelector('#triage-open'),
+  triageGallery: document.querySelector('#triage-gallery'),
+  triageExport: document.querySelector('#triage-export'),
+  triageDialog: document.querySelector('#triage-dialog'),
+  triageDialogSummary: document.querySelector('#triage-dialog-summary'),
+  triageDialogMetric: document.querySelector('#triage-dialog-metric'),
+  triageLevel: document.querySelector('#triage-level'),
+  triagePair: document.querySelector('#triage-pair'),
+  triageFilter: document.querySelector('#triage-filter'),
+  triageHead: document.querySelector('#triage-head'),
+  triageBody: document.querySelector('#triage-body'),
+  triageMore: document.querySelector('#triage-more'),
+  triageGalleryGrid: document.querySelector('#triage-gallery-grid'),
+  triageDialogExport: document.querySelector('#triage-dialog-export'),
+  triageDialogGallery: document.querySelector('#triage-dialog-gallery'),
   validationLoad: document.querySelector('#validation-load'),
   validationColor: document.querySelector('#validation-color'),
   validationFit: document.querySelector('#validation-fit'),
@@ -430,6 +451,10 @@ const state = {
   startup: null,
   entries: [],
   predictionSets: [],
+  nextPredictionId: 1,
+  // Batch triage: the metric (null: ipSAE for complexes, else pLDDT), one row per job or per
+  // model, a fixed chain pair (null: each model's best interface) and a job-name filter.
+  triage: { metric: null, level: 'jobs', pair: null, filter: '', gallery: [] },
   crosslinkRequest: null,
   pairMetric: 'iptm',
   paeView: 'pae',
@@ -912,6 +937,7 @@ function bindEvents() {
   els.msaDepth.addEventListener('click', () => runCommand('msa'));
   els.predictionSuperpose.addEventListener('click', () => guardedLoad(superposePredictionModels));
   els.predictionExport.addEventListener('click', exportPredictionCSV);
+  bindTriageEvents();
   document.querySelector('#docking-fingerprints').addEventListener('click', () => guardedLoad(() => computePoseFingerprints()));
   els.densityLoad.addEventListener('click', () => runCommand('map'));
   els.conservationRun.addEventListener('click', () => runCommand('conservation'));
@@ -1072,13 +1098,14 @@ function bindEvents() {
 
 /* ---------- Loading ---------- */
 
-async function guardedLoad(task) {
+async function guardedLoad(task, options = {}) {
   try {
     await task();
   } catch (error) {
     console.error(error);
     hideLoading();
     showToast(error.message || String(error), true);
+    if (options.rethrow) throw error;
   }
 }
 
@@ -1173,12 +1200,16 @@ function normalizeFetchQuery(query) {
 // model sets; structures (.pdb, .cif, .bcif, optionally compressed with gzip or Zstandard) open as
 // entries; JSON files are sessions or PAE matrices; .npz PAE, .a3m alignments, search reports,
 // cross-links and HDX tables annotate the active structure.
-async function openFiles(files) {
+// Opens dropped, chosen or named files. options.add adds to the scene (default: the checkbox);
+// options.rethrow lets a script see a failure; options.table opens the triage table for a batch.
+async function openFiles(files, options = {}) {
+  const addMode = options.add ?? els.addMode.checked;
   await guardedLoad(async () => {
     let refs = files.map((item) => (item.read ? item : fileRef(item)));
     refs = await expandArchives(refs);
     const { sets, rest: unclaimed } = detectPredictionSets(refs);
-    for (const [index, set] of sets.entries()) await openPredictionSet(set, { add: index > 0 || els.addMode.checked });
+    if (sets.length > 1) await openPredictionBatch(sets, { add: addMode, table: options.table ?? true });
+    else if (sets.length) await openPredictionSet(sets[0], { add: addMode });
     // The logs, settings, templates and inputs in a prediction folder are left alone.
     const rest = unclaimed.filter((ref) => !insidePredictionFolder(ref, sets));
     const molecules = rest.filter((ref) => MOLECULE_FILE.test(ref.name));
@@ -1188,11 +1219,11 @@ async function openFiles(files) {
     for (const [index, ref] of structures.entries()) {
       showLoading(`Reading ${ref.name}`);
       const text = await structureFileText(ref);
-      const entry = await loadStructureFromText(text, ref.name.replace(/\.bcif$/i, '.cif'), { source: 'Local file', add: sets.length > 0 || index > 0 || els.addMode.checked });
+      const entry = await loadStructureFromText(text, ref.name.replace(/\.bcif$/i, '.cif'), { source: 'Local file', add: sets.length > 0 || index > 0 || addMode });
       first ??= entry;
     }
     if (structures.length || sets.length) {
-      if (!els.addMode.checked) setSampleSelection(null);
+      if (!addMode) setSampleSelection(null);
       history.replaceState(null, '', location.pathname);
       if (structures.length > 1) {
         setActiveEntry(first);
@@ -1206,7 +1237,7 @@ async function openFiles(files) {
     const alignments = others.filter((item) => isAlignmentFile(item.name));
     if (alignments.length) await openAlignmentFiles(alignments);
     for (const ref of others.filter((item) => !isAlignmentFile(item.name))) await openAnnotationFile(ref);
-  });
+  }, options);
 }
 
 const STRUCTURE_FILE = /\.(pdb|ent|cif|mmcif|bcif)$/i;
@@ -1499,6 +1530,8 @@ function setActiveEntry(entry, options = {}) {
 function removeEntry(entry) {
   if (!entry || state.entries.length < 2) return;
   state.entries = state.entries.filter((item) => item !== entry);
+  const predicted = entry.prediction ? predictionModelOf(entry) : null;
+  if (predicted?.entryId === entry.id) predicted.entryId = null;
   releaseEntryMeshes(entry);
   const described = [els.compareResult.dataset.reference, ...(els.compareResult.dataset.mobiles ?? '').split(',')];
   if (described.includes(String(entry.id))) els.compareResult.hidden = true;
@@ -1521,6 +1554,9 @@ function removeEntry(entry) {
 function removeAllEntries() {
   for (const entry of state.entries) releaseEntryMeshes(entry);
   state.entries = [];
+  // A new scene starts a new triage; prediction jobs being opened now are kept.
+  state.predictionSets = state.predictionSets.filter((set) => set.incoming);
+  state.triage = { ...state.triage, metric: null, pair: null, filter: '', gallery: [] };
   state.active = null;
   state.parts = [];
   state.partByModel = new Map();
@@ -3501,6 +3537,12 @@ async function executeCommand(parsed, options) {
     }
     case 'ranking':
       return rankingCommand(parsed.rank);
+    case 'triage':
+      return triageCommand(parsed, options);
+    case 'info':
+      return describeActiveStructure();
+    case 'interactions':
+      return interactionsCommand(parsed.selection);
     case 'domains':
       return findPAEDomains();
     case 'msa': {
@@ -3542,7 +3584,7 @@ async function executeCommand(parsed, options) {
         return message || `Colored by ${validationOf(entry).fit.kind === 'qscore' ? 'Q-score' : 'RSRZ'}.`;
       }
       setColorScheme('validation', [entry]);
-      return message || 'Colored by validation outliers.';
+      return { message: message || 'Colored by validation outliers.', data: validationSummaryRecord(entry, validationOf(entry)) };
     }
     case 'map':
       return mapCommand(parsed);
@@ -3636,6 +3678,8 @@ async function executeCommand(parsed, options) {
         if (!command) throw new CommandError(`No command "${parsed.topic}".`);
         return `${command.syntax}: ${command.summary}.`;
       }
+      // Scripts and agents get the list; people get the help dialog.
+      if (options.remote) return COMMANDS.map((command) => `${command.syntax}: ${command.summary}.`).join('\n');
       els.helpDialog.showModal();
       els.helpCommands.scrollIntoView({ block: 'start' });
       return '';
@@ -3668,15 +3712,142 @@ async function assemblyCommand(id) {
 }
 
 async function interfaceCommand([chainA, chainB]) {
-  const chains = state.structure.chains.map((chain) => chain.id);
+  const chains = state.structure.chains.filter((chain) => chain.polymerKind).map((chain) => chain.id);
   for (const chain of [chainA, chainB]) {
-    if (!chains.includes(chain)) throw new CommandError(`${state.active.name} has no chain ${chain}. Chains: ${chains.join(', ')}.`);
+    if (!chains.includes(chain)) throw new CommandError(`${state.active.name} has no polymer chain ${chain}. Polymer chains: ${chains.join(', ')}.`);
   }
   if (chainA === chainB) throw new CommandError('Choose two different chains, for example "interface A B".');
   els.interfaceA.value = chainA;
   els.interfaceB.value = chainB;
   const count = await runInterfaceAnalysis();
-  return `${count ?? 0} contacts between chains ${chainA} and ${chainB}.`;
+  if (count === undefined) throw new CommandError(`The interface between chains ${chainA} and ${chainB} could not be analyzed.`);
+  const contacts = interactionRecords(state.interactions.list);
+  const residues = new Set(contacts.flatMap((item) => [item.residue, item.partner]));
+  return {
+    message: `${count ?? 0} contacts between chains ${chainA} and ${chainB}${count ? `: ${interactionCounts(contacts)}` : ''}.`,
+    data: { chains: [chainA, chainB], residues: [...residues], contacts },
+  };
+}
+
+// Interactions as plain records: type, residues, atoms (or ring centroids) and distance.
+function interactionRecords(list) {
+  const model = activeModel();
+  const labels = new Map(state.interactionTypes.map((type) => [type.id, type.label]));
+  return list.map((item) => {
+    const a = model.residueMap.get(item.residueA);
+    const b = model.residueMap.get(item.residueB);
+    return {
+      type: item.type,
+      label: labels.get(item.type) ?? item.type,
+      residue: a ? shortResidueLabel(a) : null,
+      atom: model.atoms[item.atomA]?.name ?? 'centroid',
+      partner: b ? shortResidueLabel(b) : null,
+      partnerAtom: model.atoms[item.atomB]?.name ?? 'centroid',
+      distance: Number.isFinite(item.distance) ? Number(item.distance.toFixed(2)) : null,
+    };
+  });
+}
+
+function interactionCounts(records) {
+  const counts = new Map();
+  for (const item of records) counts.set(item.label, (counts.get(item.label) ?? 0) + 1);
+  return [...counts].map(([label, count]) => `${count} ${label.toLowerCase()}`).join(', ');
+}
+
+// "interactions <selection>": focuses the residues (as a double-click does) and lists what
+// the interaction panel shows.
+async function interactionsCommand(selection) {
+  const resolved = requireSelection(selection);
+  const target = resolved.results.find((result) => result.entry === state.active) ?? resolved.results[0];
+  if (target.keys.size > 400) throw new CommandError(`"${selection}" matches ${formatNumber(target.keys.size)} residues; focus a ligand or a few residues, or use "interface <chain> <chain>" for a whole interface.`);
+  setActiveEntry(target.entry);
+  await focusResidues([...target.keys]);
+  const records = interactionRecords(state.interactions.list);
+  const model = activeModel();
+  const residues = [...target.keys].map((key) => model.residueMap.get(key)).filter(Boolean).map(shortResidueLabel);
+  return {
+    message: `${records.length} interaction${records.length === 1 ? '' : 's'} of ${state.interactions.title || residues.join(', ')}${records.length ? `: ${interactionCounts(records)}` : ''}.`,
+    data: { residues, interactions: records },
+  };
+}
+
+// "info": what a reader of the Structure tab would learn about the active structure.
+function describeActiveStructure() {
+  const entry = state.active;
+  const structure = entry.structure;
+  const meta = structure.meta;
+  const model = activeModelOf(entry);
+  const polymer = (residue) => residue.kind === 'protein' || residue.kind === 'nucleic';
+  const chains = structure.chains.filter((chain) => chain.polymerKind).map((chain) => {
+    const sequence = structure.sequences?.get(chain.id);
+    return {
+      id: chain.id,
+      kind: chain.polymerKind,
+      molecule: chain.description || null,
+      modeledResidues: model.residues.filter((residue) => residue.chain === chain.id && polymer(residue)).length,
+      sequenceLength: sequence?.sequence?.length ?? null,
+      uniprot: sequence?.uniprot?.find((segment) => segment.accession)?.accession ?? null,
+    };
+  });
+  const ligands = model.residues.filter((residue) => residue.kind === 'ligand' || residue.kind === 'ion').slice(0, 200).map((residue) => ({
+    residue: shortResidueLabel(residue),
+    name: structure.componentNames?.get(residue.resName) ?? null,
+    atoms: residue.atoms.filter((atom) => !atom.isHydrogen).length,
+  }));
+  const plddts = meta.isPredicted ? model.residues.filter(polymer).map((residue) => residue.confidence).filter(Number.isFinite) : [];
+  const set = predictionSetOf(entry);
+  const predicted = predictionModelOf(entry);
+  const mapped = validationOf(entry);
+  const resolution = parseFloat(meta.resolution);
+  const data = {
+    name: entry.name,
+    title: meta.title || null,
+    source: entry.origin?.type === 'fetch' ? `fetched ${entry.fetchId}` : entry.origin?.type === 'sample' ? 'bundled example' : entry.origin?.type ? `${entry.origin.type}${entry.origin.name ? ` ${entry.origin.name}` : ''}` : null,
+    method: meta.isPredicted && !meta.method ? 'predicted model' : meta.method || null,
+    resolution: Number.isFinite(resolution) ? resolution : null,
+    rFree: meta.rFree ? Number(meta.rFree) : null,
+    organism: meta.organism || null,
+    depositionDate: meta.depositionDate || null,
+    predicted: Boolean(meta.isPredicted),
+    meanPlddt: plddts.length ? Number((plddts.reduce((sum, value) => sum + value, 0) / plddts.length).toFixed(1)) : null,
+    atoms: model.atoms.length,
+    models: structure.models.length,
+    chains,
+    ligands,
+    prediction: set && predicted ? {
+      tool: set.toolLabel,
+      job: set.name,
+      model: predicted.label,
+      rank: predicted.rank,
+      rankingScore: predicted.scores?.rankingScore ?? null,
+      ptm: predicted.scores?.ptm ?? null,
+      iptm: predicted.scores?.iptm ?? null,
+      interfaces: (predicted.metrics?.pairs ?? []).map((pair) => ({ chains: [pair.chainA, pair.chainB], ipsae: pair.ipsae, pdockq: pair.pdockq, pdockq2: pair.pdockq2, lis: pair.lis, contacts: pair.contacts })),
+    } : null,
+    comparison: entry.comparison ? { reference: entryById(entry.comparison.referenceId)?.name ?? null, ...entry.comparison.stats } : null,
+    validation: mapped ? validationSummaryRecord(entry, mapped) : null,
+    scene: state.entries.map((item, index) => ({ index: index + 1, name: item.name, active: item === entry, visible: item.visible })),
+  };
+  const method = data.method ? `${data.method}${data.resolution ? `, ${data.resolution.toFixed(2)} Å` : ''}` : 'unknown method';
+  return {
+    message: `${entry.name}${data.title ? `: ${data.title}` : ''} (${method}${data.meanPlddt ? `, mean pLDDT ${data.meanPlddt}` : ''}); ${chains.length} polymer chain${chains.length === 1 ? '' : 's'}, ${ligands.length} ligand${ligands.length === 1 ? '' : 's'} and ions.`,
+    data,
+  };
+}
+
+// The validation report's summary, ligands and worst residues, for scripts and agents.
+function validationSummaryRecord(entry, mapped) {
+  const model = activeModelOf(entry);
+  const residues = [...mapped.residues].map(([key, record]) => ({ record, residue: model.residueMap.get(key) })).filter((item) => item.residue);
+  const number = (value, digits) => (Number.isFinite(value) ? Number(value.toFixed(digits)) : null);
+  return {
+    entry: entry.validation.code,
+    metrics: mapped.summary.metrics.map((metric) => ({ label: metric.label, value: metric.value, unit: metric.unit || null, percentile: number(metric.absolute, 0) })),
+    outlierResidues: mapped.outlierKeys.size,
+    clashes: mapped.clashes.length,
+    ligands: residues.filter((item) => item.residue.kind === 'ligand').slice(0, 50).map((item) => ({ residue: shortResidueLabel(item.residue), rscc: number(item.record.rscc, 3), rsrz: number(item.record.rsrz, 2), qscore: number(item.record.qscore, 3), outliers: item.record.criteria })),
+    worst: residues.filter((item) => item.record.criteria.length).sort((a, b) => b.record.criteria.length - a.record.criteria.length || (b.record.rsrz || 0) - (a.record.rsrz || 0)).slice(0, 25).map((item) => ({ residue: shortResidueLabel(item.residue), outliers: item.record.criteria })),
+  };
 }
 
 function representationCommand({ name, representation, selection }) {
@@ -3881,7 +4052,7 @@ function connectRemoteControl() {
     } catch {
       return;
     }
-    const result = await runCommand(request.command, { remote: true, returnImage: true });
+    const result = request.files ? await openRemoteFiles(request.files, request.add) : await runCommand(request.command, { remote: true, returnImage: true });
     try {
       await fetch(`/api/remote/result/${encodeURIComponent(request.id)}`, {
         method: 'POST',
@@ -3893,6 +4064,40 @@ function connectRemoteControl() {
     }
   });
   els.gpuBadge.title = `${els.gpuBadge.title} · remote control is on`;
+}
+
+// Files a script named by path (POST /api/remote/open, or the MCP server's open_files). The
+// reply says what opened; for several prediction jobs, how they rank.
+async function openRemoteFiles(files, add) {
+  const before = new Set(state.entries.map((entry) => entry.id));
+  const setsBefore = new Set(state.predictionSets.map((set) => set.id));
+  try {
+    await openFiles(files.map(urlRef), { add: Boolean(add), rethrow: true, table: false });
+  } catch (error) {
+    return { ok: false, message: error.message || String(error) };
+  }
+  const opened = state.entries.filter((entry) => !before.has(entry.id));
+  const sets = state.predictionSets.filter((set) => !setsBefore.has(set.id));
+  const data = {
+    structures: opened.map((entry) => ({ name: entry.name, atoms: activeModelOf(entry).atoms.length, chains: entry.structure.chains.filter((chain) => chain.polymerKind).map((chain) => chain.id) })),
+    predictionJobs: sets.map((set) => ({ job: set.name, tool: set.toolLabel, models: set.models.length })),
+  };
+  if (sets.length > 1) {
+    // The ranking of the jobs just opened, whatever else is open.
+    const rows = triageRows(sets, { crosslinks: crosslinkCounter() });
+    const metric = defaultTriageMetric(rows);
+    data.triage = { metric, rows: triageRecords(rankTriage(rows, { metric }).slice(0, 20)) };
+  }
+  if (!opened.length && !sets.length) {
+    // PAE matrices, alignments, maps and tables annotate the active structure.
+    if (!state.active) return { ok: false, message: `Nothing in ${files.length} file${files.length === 1 ? '' : 's'} could be opened.` };
+    return { ok: true, message: `Opened ${files.length} file${files.length === 1 ? '' : 's'} into ${state.active.name}.`, data };
+  }
+  const models = sets.reduce((sum, set) => sum + set.models.length, 0);
+  const message = sets.length > 1
+    ? `Opened ${sets.length} prediction jobs (${formatNumber(models)} models) and ranked them by ${triageMetricLabel(data.triage.metric)}; the best, ${data.triage.rows[0]?.job ?? ''}, is shown.`
+    : `Opened ${opened.map((entry) => entry.name).join(', ')}.`;
+  return { ok: true, message, data };
 }
 
 /* ---------- Structures and comparison ---------- */
@@ -4033,6 +4238,8 @@ function runSuperposition(options = {}) {
       results.push({ mobile, error });
     }
   }
+  // A quiet superposition (the triage gallery's) only moves the structures.
+  if (options.quiet) return results;
   const predicted = results.filter((item) => item.result && stylePredictedComparison(reference, item.mobile));
   renderCompareResult(reference, results, {
     fitOnSelection: Boolean(fitKeys),
@@ -4746,7 +4953,7 @@ function predictionSessionFields(entry) {
 function restorePrediction(entry, saved) {
   if (!saved?.model) return;
   const model = { ...saved.model, files: {}, entryId: entry.id, calpha: saved.model.calpha ? new Map(saved.model.calpha) : null, meanPlddt: saved.model.meanPlddt ?? NaN };
-  const set = { id: `prediction-${state.predictionSets.length + 1}`, tool: saved.tool, toolLabel: saved.toolLabel, name: saved.name, models: [model], files: [], affinityResult: saved.affinity, restored: true };
+  const set = { id: `prediction-${state.nextPredictionId++}`, tool: saved.tool, toolLabel: saved.toolLabel, name: saved.name, models: [model], files: [], affinityResult: saved.affinity, restored: true };
   state.predictionSets.push(set);
   entry.prediction = { setId: set.id, modelId: model.id };
 }
@@ -6687,11 +6894,13 @@ function bindPAEEvents() {
 
 /* ---------- Prediction sets ---------- */
 
-// Reads the scores of every model, ranks them, computes interface metrics from each model's PAE
-// and coordinates, and opens the top-ranked model. Other models open on demand.
-async function openPredictionSet(set, options = {}) {
-  set.id = `prediction-${state.predictionSets.length + 1}`;
-  showLoading(`Reading ${set.toolLabel} scores for ${set.name}`);
+// Reads the scores of every model, ranks them and computes interface metrics from each model's
+// PAE and coordinates. The alignment is read when a model opens.
+async function scorePredictionSet(set, progress = '') {
+  set.id = `prediction-${state.nextPredictionId++}`;
+  // Kept when its first model replaces the scene; the opener clears the mark.
+  set.incoming = true;
+  showLoading(`${progress}Reading ${set.toolLabel} scores for ${set.name}`);
   for (const model of set.models) {
     try {
       model.scores = await readPredictionScores(set, model);
@@ -6703,10 +6912,15 @@ async function openPredictionSet(set, options = {}) {
   }
   rankModels(set.models);
   set.models.sort((a, b) => a.rank - b.rank);
-  if (set.affinity) set.affinityResult = parseBoltzAffinity(JSON.parse(await set.affinity.text()));
-  set.msa = await readPredictionMSA(set);
+  if (set.affinity) {
+    try {
+      set.affinityResult = parseBoltzAffinity(JSON.parse(await set.affinity.text()));
+    } catch (error) {
+      console.warn('Affinity not read', error);
+    }
+  }
   for (const [index, model] of set.models.entries()) {
-    showLoading(`Scoring ${set.name}: model ${index + 1} of ${set.models.length}`);
+    showLoading(`${progress}Scoring ${set.name}: model ${index + 1} of ${set.models.length}`);
     await nextFrame();
     try {
       await scorePredictionModel(set, model);
@@ -6716,7 +6930,17 @@ async function openPredictionSet(set, options = {}) {
     }
   }
   state.predictionSets.push(set);
-  const entry = await loadPredictionModel(set, set.models[0], { add: options.add });
+}
+
+// One prediction: its models are scored and the top-ranked one opens; others open on demand.
+async function openPredictionSet(set, options = {}) {
+  let entry;
+  try {
+    await scorePredictionSet(set);
+    entry = await loadPredictionModel(set, set.models[0], { add: options.add });
+  } finally {
+    delete set.incoming;
+  }
   hideLoading();
   const complex = set.models[0].metrics?.pairs.length;
   showToast(`Opened ${set.toolLabel} prediction ${set.name}: ${set.models.length} model${set.models.length === 1 ? '' : 's'}, ranked by ${rankingScoreLabel(set)}${complex ? '; interface scores in the Structure tab' : ''}.`);
@@ -6880,7 +7104,11 @@ async function loadPredictionModel(set, model, options = {}) {
   } catch (error) {
     console.warn('PAE not read', error);
   }
-  applyPredictionMSA(set, entry);
+  if (options.msa !== false) {
+    set.msaPromise ??= readPredictionMSA(set);
+    set.msa = await set.msaPromise;
+    applyPredictionMSA(set, entry);
+  }
   if (options.showOnly !== false) showOnlyPredictionModel(set, entry);
   markColorsDirty();
   hideLoading();
@@ -6979,6 +7207,7 @@ function scoreText(value, digits = 2) {
 }
 
 function renderPrediction() {
+  renderTriage();
   const entry = state.active;
   const set = predictionSetOf(entry);
   els.predictionGroup.hidden = !set;
@@ -7127,20 +7356,12 @@ async function superposePredictionModels() {
 function exportPredictionCSV() {
   const set = predictionSetOf();
   if (!set) return;
-  const header = ['tool', 'job', 'rank', 'model', 'ranking_score', 'ptm', 'iptm', 'mean_plddt', 'chain_a', 'chain_b', 'chain_pair_iptm', 'ipsae', 'ipsae_a_to_b', 'ipsae_b_to_a', 'iptm_from_pae', 'pdockq', 'pdockq2', 'lis', 'contacts', 'xl_satisfied', 'xl_total'];
-  const rows = [header];
-  const format = (value) => (Number.isFinite(value) ? Number(value.toFixed(4)) : '');
-  for (const model of set.models) {
-    const xl = state.crosslinkRequest ? crosslinkSatisfaction(model, state.crosslinkRequest) : null;
-    const base = [set.toolLabel, set.name, model.rank, model.label, format(model.scores?.rankingScore), format(model.scores?.ptm), format(model.scores?.iptm), format(model.meanPlddt)];
-    const pairs = model.metrics?.pairs.length ? model.metrics.pairs : [null];
-    for (const pair of pairs) {
-      const chains = model.scores?.chainIds ?? model.chains ?? [];
-      const reported = pair ? model.scores?.chainPairIptm?.[chains.indexOf(pair.chainA)]?.[chains.indexOf(pair.chainB)] : NaN;
-      rows.push([...base, pair?.chainA ?? '', pair?.chainB ?? '', format(reported), format(pair?.ipsae), format(pair?.ipsaeAB), format(pair?.ipsaeBA), format(pair?.iptm), format(pair?.pdockq), format(pair?.pdockq2), format(pair?.lis), pair?.contacts ?? '', xl?.satisfied ?? '', xl?.total ?? '']);
-    }
-  }
-  downloadText(`${set.name}_ranking.csv`, csvText(rows), 'text/csv');
+  downloadText(`${set.name}_ranking.csv`, csvText(triageCSVRows([set], { crosslinks: crosslinkCounter() })), 'text/csv');
+}
+
+function crosslinkCounter() {
+  const request = state.crosslinkRequest;
+  return request ? (model) => crosslinkSatisfaction(model, request) : null;
 }
 
 function rankingCommand(rank) {
@@ -7164,6 +7385,376 @@ function rankingCommand(rank) {
   const model = set.models.find((item) => item.rank === rank);
   if (!model) throw new CommandError(`${set.name} has ${set.models.length} models.`);
   return loadPredictionModel(set, model).then((entry) => `Showing ${entry.name} (${model.label}).`);
+}
+
+/* ---------- Batch triage ---------- */
+
+// Several prediction jobs at once (a design campaign, a screen of partners): every model of every
+// job is scored, the best model of the best job opens, and the triage table ranks them all.
+async function openPredictionBatch(sets, options = {}) {
+  try {
+    for (const [index, set] of sets.entries()) await scorePredictionSet(set, `Job ${index + 1} of ${sets.length} · `);
+    state.triage = { ...state.triage, metric: null, pair: null, filter: '', gallery: [] };
+    // The best of these jobs opens, whatever else is open.
+    const best = rankTriage(triageRows(sets, { crosslinks: crosslinkCounter() }))[0];
+    const target = best ? triageTarget(best) : { set: sets[0], model: sets[0].models[0] };
+    const entry = await loadPredictionModel(target.set, target.model, { add: options.add });
+    entry.fromTriage = true;
+  } finally {
+    for (const set of sets) delete set.incoming;
+  }
+  const { metric } = rankedTriage();
+  hideLoading();
+  renderTriage();
+  const models = sets.reduce((sum, set) => sum + set.models.length, 0);
+  showToast(`Scored ${sets.length} prediction jobs (${formatNumber(models)} models) and ranked them by ${triageMetricLabel(metric)}; the best is open.`);
+  if (options.table) openTriageDialog();
+}
+
+function triageMetricLabel(id) {
+  return TRIAGE_METRICS.find((metric) => metric.id === id)?.label ?? id;
+}
+
+// The rows of every opened prediction, ranked with the table's settings (or overrides).
+function rankedTriage(overrides = {}) {
+  const settings = { ...state.triage, ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => value !== undefined)) };
+  const all = triageRows(state.predictionSets, { pair: settings.pair, crosslinks: crosslinkCounter() });
+  const metric = settings.metric ?? defaultTriageMetric(all);
+  return { metric, settings, total: all.length, rows: rankTriage(all, { metric, level: settings.level, filter: settings.filter }) };
+}
+
+// The gallery and a model opening from the table each change the scene for a while.
+function checkTriageIdle() {
+  if (state.triage.busy === 'gallery') throw new CommandError('The gallery is being rendered; try again when it is done.');
+  if (state.triage.busy) throw new CommandError('A model is still opening; try again in a moment.');
+}
+
+// A model restored from a session has no files to open it again once its structure is closed.
+function canOpenTriageModel(set, model) {
+  return !set.restored || Boolean(model.entryId && entryById(model.entryId));
+}
+
+function isActiveTriageRow(row) {
+  const prediction = state.active?.prediction;
+  return Boolean(prediction && prediction.setId === row.setId && prediction.modelId === row.modelId);
+}
+
+// Click, or Enter or Space from the keyboard.
+function onActivate(element, action) {
+  element.addEventListener('click', action);
+  element.addEventListener('keydown', (event) => {
+    if (event.target !== element || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault();
+    action();
+  });
+}
+
+function triageTarget(row) {
+  const set = state.predictionSets.find((item) => item.id === row.setId);
+  return { set, model: set?.models.find((model) => model.id === row.modelId) };
+}
+
+// Opens a row's model in place of the other prediction models (other structures stay as they
+// were) and frames it. Models opened earlier are let go after a while, to keep memory in check.
+async function showTriageRow(row) {
+  checkTriageIdle();
+  const { set, model } = triageTarget(row);
+  if (!set || !model) throw new CommandError('That model is no longer open; open its folder again.');
+  if (!canOpenTriageModel(set, model)) throw new CommandError('That model came from a saved session and is no longer in the scene; open its prediction folder again.');
+  state.triage.busy = 'model';
+  let entry;
+  try {
+    entry = await loadPredictionModel(set, model, { add: true, showOnly: false });
+  } finally {
+    state.triage.busy = false;
+  }
+  for (const item of state.entries) if (item.prediction) item.visible = item === entry;
+  if (!set.restored) entry.fromTriage = true;
+  entry.lastShown = performance.now();
+  setActiveEntry(entry);
+  // Models the table opened are let go after six; other structures stay.
+  const stale = state.entries.filter((item) => item.fromTriage && item !== entry).sort((a, b) => (b.lastShown ?? 0) - (a.lastShown ?? 0)).slice(6);
+  for (const item of stale) removeEntry(item);
+  renderStructureList();
+  renderPrediction();
+  fitView(true);
+  markSceneDirty();
+  return entry;
+}
+
+function triageScore(value, digits = 2) {
+  return Number.isFinite(value) ? value.toFixed(digits) : '–';
+}
+
+const TRIAGE_COLUMNS = [
+  ['ipsae', 'ipSAE', 2], ['pdockq2', 'pDockQ2', 2], ['lis', 'LIS', 2], ['iptm', 'ipTM', 2], ['plddt', 'pLDDT', 1], ['ranking', 'Score', 2],
+];
+
+function populateTriageMetrics(select, metric) {
+  if (!select.options.length) {
+    select.innerHTML = TRIAGE_METRICS.map((item) => `<option value="${item.id}" title="${escapeHTML(item.title)}">${escapeHTML(item.label)}</option>`).join('');
+  }
+  select.value = metric;
+}
+
+// The Triage group in the Structure tab: shown when more than one prediction job is open.
+function renderTriage() {
+  const sets = state.predictionSets;
+  els.triageGroup.hidden = sets.length < 2;
+  if (sets.length < 2) return;
+  const { rows, metric, total } = rankedTriage({ filter: '', level: 'jobs' });
+  populateTriageMetrics(els.triageMetric, metric);
+  els.triageCount.textContent = String(sets.length);
+  els.triageSummary.textContent = `${sets.length} jobs · ${formatNumber(total)} models · each job by its best model under ${triageMetricLabel(metric)}${state.triage.pair ? ` · chains ${state.triage.pair.join('–')}` : ''}`;
+  const shown = rows.slice(0, 8);
+  els.triageTop.innerHTML = `<table class="prediction-table"><thead><tr><th>#</th><th>Job</th><th>${escapeHTML(triageMetricLabel(metric))}</th></tr></thead><tbody>${shown.map((row) => `<tr class="${isActiveTriageRow(row) ? 'is-active' : ''}" tabindex="0" data-position="${row.position}" title="${escapeHTML(`${row.job} · ${row.tool} · ${row.model}`)}"><td>${row.position}</td><td>${escapeHTML(row.job)}</td><td>${triageScore(row[metric], metric === 'plddt' ? 1 : 2)}</td></tr>`).join('')}</tbody></table>${rows.length > shown.length ? `<p class="hint">…and ${rows.length - shown.length} more in the table.</p>` : ''}`;
+  for (const tr of els.triageTop.querySelectorAll('[data-position]')) {
+    onActivate(tr, () => guardedLoad(() => showTriageRow(rows[Number(tr.dataset.position) - 1])));
+  }
+  if (els.triageDialog.open) renderTriageTable();
+}
+
+function openTriageDialog() {
+  if (state.predictionSets.length < 2) return;
+  if (!els.triageDialog.open) els.triageDialog.showModal();
+  renderTriageTable();
+}
+
+function renderTriageTable() {
+  const { rows, metric, settings, total } = rankedTriage();
+  populateTriageMetrics(els.triageDialogMetric, metric);
+  els.triageLevel.value = settings.level;
+  if (document.activeElement !== els.triagePair) els.triagePair.value = settings.pair ? settings.pair.join(' ') : '';
+  if (document.activeElement !== els.triageFilter) els.triageFilter.value = settings.filter;
+  const links = Boolean(state.crosslinkRequest);
+  els.triageDialogSummary.textContent = `${state.predictionSets.length} jobs and ${formatNumber(total)} models, ranked by ${triageMetricLabel(metric)}${settings.pair ? ` of chains ${settings.pair.join('–')}` : ' of each model’s best interface'}.`;
+  const columns = [...TRIAGE_COLUMNS, ...(links ? [['crosslinks', 'XL', 0]] : [])];
+  // The metric ranked by is always a column (pDockQ and pTM are not shown otherwise).
+  if (!columns.some(([id]) => id === metric)) columns.unshift([metric, triageMetricLabel(metric), 2]);
+  els.triageHead.innerHTML = `<tr><th>#</th><th>Job</th><th>Tool</th><th>Model</th><th>Chains</th>${columns.map(([id, label]) => `<th data-metric="${id}" class="num${id === metric ? ' is-sorted' : ''}" tabindex="0" aria-sort="${id === metric ? 'descending' : 'none'}" title="${escapeHTML(TRIAGE_METRICS.find((item) => item.id === id)?.title ?? '')}; click to rank by it">${escapeHTML(label)}${id === metric ? ' ▾' : ''}</th>`).join('')}</tr>`;
+  const limit = 500;
+  els.triageBody.innerHTML = rows.slice(0, limit).map((row) => `<tr class="${isActiveTriageRow(row) ? 'is-active' : ''}" tabindex="0" data-position="${row.position}" title="${escapeHTML(row.problem ?? 'Show this model')}">
+    <td>${row.position}</td><td class="job">${escapeHTML(row.job)}${row.problem ? ' <span class="warn" role="img" aria-label="Problem">⚠</span>' : ''}</td><td>${escapeHTML(row.tool)}</td><td>${escapeHTML(row.model)}${row.models > 1 ? ` <span class="hint">#${row.rank}/${row.models}</span>` : ''}</td><td>${row.chains ? escapeHTML(row.chains.join('–')) : '–'}</td>
+    ${columns.map(([id, , digits]) => `<td class="num${id === metric ? ' is-sorted' : ''}">${id === 'crosslinks' ? (row.crosslinkCounts ? `${row.crosslinkCounts.satisfied}/${row.crosslinkCounts.total}` : '–') : triageScore(row[id], digits)}</td>`).join('')}</tr>`).join('');
+  els.triageMore.textContent = rows.length > limit ? `Showing ${limit} of ${formatNumber(rows.length)} rows; export the CSV for all of them.` : rows.length ? '' : 'No job matches the filter.';
+  for (const th of els.triageHead.querySelectorAll('[data-metric]')) {
+    onActivate(th, () => {
+      state.triage.metric = th.dataset.metric;
+      renderTriage();
+      renderTriageTable();
+    });
+  }
+  for (const tr of els.triageBody.querySelectorAll('[data-position]')) {
+    onActivate(tr, () => guardedLoad(async () => {
+      await showTriageRow(rows[Number(tr.dataset.position) - 1]);
+      renderTriageTable();
+    }));
+  }
+  renderTriageGalleryGrid();
+}
+
+function renderTriageGalleryGrid() {
+  const images = state.triage.gallery ?? [];
+  els.triageGalleryGrid.hidden = !images.length;
+  els.triageGalleryGrid.replaceChildren(...images.map((item) => {
+    const figure = document.createElement('figure');
+    figure.innerHTML = `<img alt="${escapeHTML(`${item.row.job}, ${item.row.model}`)}" src="${item.url}" /><figcaption><strong>#${item.row.position} ${escapeHTML(item.row.job)}</strong><br />${escapeHTML(`${item.row.model} · ${triageMetricLabel(item.metric)} ${triageScore(item.row[item.metric], item.metric === 'plddt' ? 1 : 2)}`)}</figcaption>`;
+    figure.title = 'Show this model';
+    figure.tabIndex = 0;
+    figure.setAttribute('role', 'button');
+    onActivate(figure, () => guardedLoad(async () => {
+      await showTriageRow(item.row);
+      renderTriageTable();
+    }));
+    return figure;
+  }));
+}
+
+// Images of the best models, each superposed on the first so they share a view. The models are
+// opened for the images and closed again; the scene is left as it was.
+async function renderTriageGallery(count = 12, overrides = {}) {
+  checkTriageIdle();
+  const { rows, metric } = rankedTriage(overrides);
+  const picks = rows.filter((row) => {
+    const { set, model } = triageTarget(row);
+    return set && model && canOpenTriageModel(set, model);
+  }).slice(0, count);
+  if (!picks.length) throw new CommandError('No prediction models can be opened; open the prediction folders again.');
+  // Clicks in the table would open models in the middle of the gallery's scene.
+  state.triage.busy = 'gallery';
+  els.triageDialog.inert = true;
+  const spinning = state.spin;
+  if (spinning) setSpin(false);
+  const before = new Set(state.entries.map((entry) => entry.id));
+  const visibility = new Map(state.entries.map((entry) => [entry, entry.visible]));
+  const previous = state.active;
+  const camera = cloneCamera(state.camera);
+  const exportSettings = { size: els.exportSize.value, transparent: els.exportTransparent.checked, legend: els.exportLegend.checked, labels: els.exportLabels.checked };
+  const images = [];
+  try {
+    const opened = [];
+    for (const [index, row] of picks.entries()) {
+      showLoading(`Gallery: opening model ${index + 1} of ${picks.length}`);
+      const { set, model } = triageTarget(row);
+      opened.push(await loadPredictionModel(set, model, { add: true, showOnly: false, msa: false }));
+    }
+    // Models that were already in the scene keep their place.
+    const mobiles = opened.slice(1).filter((entry) => !before.has(entry.id));
+    if (mobiles.length) {
+      try {
+        runSuperposition({ reference: opened[0], mobiles, quiet: true });
+      } catch (error) {
+        console.warn('Gallery superposition failed', error);
+      }
+    }
+    for (const entry of state.entries) entry.visible = entry === opened[0];
+    setActiveEntry(opened[0]);
+    fitView(false, true);
+    els.exportSize.value = '1';
+    els.exportTransparent.checked = false;
+    els.exportLegend.checked = false;
+    els.exportLabels.checked = false;
+    for (const [index, entry] of opened.entries()) {
+      showLoading(`Gallery: rendering ${index + 1} of ${opened.length}`);
+      for (const item of state.entries) item.visible = item === entry;
+      // Each image frames its model; superposed models share the first one's orientation. The
+      // view is fitted between the panels, but the image covers the whole canvas.
+      fitView(false, false, activeModelOf(entry).atoms);
+      const region = viewportRegion();
+      state.camera.distance *= Math.max(region.width / window.innerWidth, region.height / window.innerHeight) * 1.08;
+      markSceneDirty();
+      await nextFrame();
+      const canvas = await renderImageCanvas();
+      images.push({ row: picks[index], metric, url: thumbnailURL(canvas, 480) });
+    }
+  } finally {
+    els.exportSize.value = exportSettings.size;
+    els.exportTransparent.checked = exportSettings.transparent;
+    els.exportLegend.checked = exportSettings.legend;
+    els.exportLabels.checked = exportSettings.labels;
+    for (const entry of state.entries.filter((item) => !before.has(item.id))) removeEntry(entry);
+    for (const [entry, visible] of visibility) if (state.entries.includes(entry)) entry.visible = visible;
+    if (previous && state.entries.includes(previous)) setActiveEntry(previous);
+    Object.assign(state.camera, camera);
+    state.cameraAnimation = null;
+    if (spinning) setSpin(true);
+    state.triage.busy = false;
+    els.triageDialog.inert = false;
+    renderStructureList();
+    markSceneDirty();
+    hideLoading();
+  }
+  state.triage.gallery = images;
+  return images;
+}
+
+function thumbnailURL(canvas, width) {
+  const scale = Math.min(1, width / canvas.width);
+  const thumbnail = document.createElement('canvas');
+  thumbnail.width = Math.round(canvas.width * scale);
+  thumbnail.height = Math.round(canvas.height * scale);
+  thumbnail.getContext('2d').drawImage(canvas, 0, 0, thumbnail.width, thumbnail.height);
+  return thumbnail.toDataURL('image/jpeg', 0.85);
+}
+
+function exportTriageCSV() {
+  if (!state.predictionSets.length) return;
+  downloadText('prediction_triage.csv', csvText(triageCSVRows(state.predictionSets, { crosslinks: crosslinkCounter() })), 'text/csv');
+}
+
+function parseTriagePair(text) {
+  const chains = String(text ?? '').trim().split(/[\s,:/–-]+/).filter(Boolean);
+  if (!chains.length || /^best$/i.test(chains[0])) return null;
+  return chains.length === 2 ? chains : undefined;
+}
+
+function bindTriageEvents() {
+  const rerender = () => {
+    renderTriage();
+    renderTriageTable();
+  };
+  els.triageMetric.addEventListener('change', () => {
+    state.triage.metric = els.triageMetric.value;
+    renderTriage();
+  });
+  els.triageDialogMetric.addEventListener('change', () => {
+    state.triage.metric = els.triageDialogMetric.value;
+    rerender();
+  });
+  els.triageLevel.addEventListener('change', () => {
+    state.triage.level = els.triageLevel.value;
+    renderTriageTable();
+  });
+  els.triagePair.addEventListener('change', () => {
+    const pair = parseTriagePair(els.triagePair.value);
+    if (pair === undefined) {
+      showToast('Name two chains, such as "A B", or leave the field empty for each model’s best interface.', true);
+      return;
+    }
+    state.triage.pair = pair;
+    rerender();
+  });
+  // Enter in a text field would submit the dialog's form, which closes it.
+  for (const input of [els.triagePair, els.triageFilter]) {
+    input.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      input.dispatchEvent(new Event('change'));
+    });
+  }
+  els.triageFilter.addEventListener('input', () => {
+    state.triage.filter = els.triageFilter.value;
+    renderTriageTable();
+  });
+  els.triageOpen.addEventListener('click', openTriageDialog);
+  els.triageExport.addEventListener('click', exportTriageCSV);
+  els.triageDialogExport.addEventListener('click', exportTriageCSV);
+  const gallery = () => guardedLoad(async () => {
+    await renderTriageGallery(12);
+    openTriageDialog();
+    els.triageGalleryGrid.scrollIntoView({ block: 'nearest' });
+  });
+  els.triageGallery.addEventListener('click', gallery);
+  els.triageDialogGallery.addEventListener('click', gallery);
+}
+
+// "triage": rank the jobs (and return them to scripts), show one, render a gallery or export.
+async function triageCommand(parsed, options) {
+  if (!state.predictionSets.length) throw new CommandError('Open prediction folders first: drop them on the window, name them on the command line, or open them from a script.');
+  if (parsed.action === 'export') {
+    const rows = triageCSVRows(state.predictionSets, { crosslinks: crosslinkCounter() });
+    if (options.remote) return { message: `${rows.length - 1} rows of scores.`, data: { csv: csvText(rows) } };
+    exportTriageCSV();
+    return '';
+  }
+  if (parsed.action === 'gallery') {
+    const images = await renderTriageGallery(parsed.count, { filter: '' });
+    if (!options.remote) openTriageDialog();
+    return { message: `Rendered ${images.length} models, each superposed on the best.`, data: options.remote ? images.map((item) => ({ position: item.row.position, job: item.row.job, model: item.row.model, image: item.url })) : undefined };
+  }
+  if (parsed.action === 'show') {
+    const { rows } = rankedTriage({ filter: '' });
+    const row = rows[parsed.position - 1];
+    if (!row) throw new CommandError(`The table has ${rows.length} rows.`);
+    const entry = await showTriageRow(row);
+    return { message: `Showing #${row.position}: ${row.job}, ${row.model} (${entry.name}).`, data: triageRecords([row])[0] };
+  }
+  if (parsed.metric) state.triage.metric = parsed.metric === 'auto' ? null : parsed.metric;
+  if (parsed.level) state.triage.level = parsed.level;
+  if (parsed.pair !== undefined) state.triage.pair = parsed.pair;
+  // The dialog's job filter is for reading the table; commands rank every job.
+  const { rows, metric, settings } = rankedTriage({ filter: '' });
+  renderTriage();
+  if (!options.remote && state.predictionSets.length > 1) openTriageDialog();
+  const limit = parsed.limit ?? 20;
+  const top = rows.slice(0, limit);
+  const best = top[0];
+  return {
+    message: best
+      ? `${rows.length} ${settings.level === 'models' ? 'models' : 'jobs'} ranked by ${triageMetricLabel(metric)}; best: ${best.job} ${best.model} (${triageScore(best[metric], metric === 'plddt' ? 1 : 2)}).`
+      : 'No models to rank.',
+    data: { metric, level: settings.level, pair: settings.pair, total: rows.length, rows: triageRecords(top) },
+  };
 }
 
 // Sets an entry's PAE from a matrix, mapping rows to residues by tokenization.

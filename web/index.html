@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#050708" />
     <title>Proteoscope</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=0.6.0" />
+    <link rel="stylesheet" href="/styles.css?v=wave7" />
   </head>
   <body>
     <main id="app" class="left-open right-open sequence-open">
@@ -101,6 +101,20 @@
               </div>
               <p class="hint">Searches RCSB PDB, UniProt, PDBe and 3D-Beacons, which need no account. The query, or a pasted sequence, is sent to those services.</p>
               <div id="discover-result" class="discover-result" hidden></div>
+            </div>
+
+            <div class="group" id="triage-group" hidden>
+              <h3>Triage <span id="triage-count" class="count-badge"></span></h3>
+              <p id="triage-summary" class="hint"></p>
+              <label class="field wide"><span>Rank jobs by</span>
+                <select id="triage-metric" title="ipSAE, pDockQ2, pDockQ and LIS are computed the same way for every predictor; ipTM, pTM and the score are each tool's own"></select>
+              </label>
+              <div id="triage-top" class="prediction-models"></div>
+              <div class="button-row">
+                <button id="triage-open" type="button" title="Every job and model in one table">Open table</button>
+                <button id="triage-gallery" type="button" title="Images of the 12 best models, superposed on the first">Gallery</button>
+                <button id="triage-export" type="button" title="Every model and interface of every job as CSV">Export CSV</button>
+              </div>
             </div>
 
             <div class="group" id="prediction-group" hidden>
@@ -784,6 +798,33 @@
         </form>
       </dialog>
 
+      <dialog id="triage-dialog" class="dialog triage-dialog">
+        <form method="dialog">
+          <h2>Prediction triage</h2>
+          <p id="triage-dialog-summary" class="hint"></p>
+          <div class="triage-controls">
+            <label class="field"><span>Rank by</span><select id="triage-dialog-metric"></select></label>
+            <label class="field"><span>Rows</span>
+              <select id="triage-level">
+                <option value="jobs">Best model of each job</option>
+                <option value="models">Every model</option>
+              </select>
+            </label>
+            <label class="field"><span>Interface</span><input id="triage-pair" type="text" placeholder="best" title="Chains to score, such as &quot;A B&quot;; empty for each model's best interface by ipSAE" autocomplete="off" spellcheck="false" /></label>
+            <label class="field"><span>Filter jobs</span><input id="triage-filter" type="text" placeholder="Name" autocomplete="off" spellcheck="false" /></label>
+          </div>
+          <div class="triage-table-wrap"><table class="prediction-table triage-table"><thead id="triage-head"></thead><tbody id="triage-body"></tbody></table></div>
+          <p id="triage-more" class="hint"></p>
+          <div id="triage-gallery-grid" class="triage-gallery" hidden></div>
+          <p class="hint">ipSAE, pDockQ, pDockQ2 and LIS are computed from each model's PAE and coordinates the same way for every predictor, so they compare jobs from different tools. ipTM, pTM and the score are each tool's own. Click a row to show that model.</p>
+          <menu>
+            <button value="close" type="submit">Close</button>
+            <button id="triage-dialog-export" type="button">Export CSV</button>
+            <button id="triage-dialog-gallery" type="button" class="primary">Gallery of the top 12</button>
+          </menu>
+        </form>
+      </dialog>
+
       <dialog id="methods-dialog" class="dialog wide">
         <form method="dialog">
           <h2>Methods and references</h2>
@@ -840,6 +881,6 @@
         </form>
       </dialog>
     </main>
-    <script type="module" src="/app.js?v=0.6.0"></script>
+    <script type="module" src="/app.js?v=wave7"></script>
   </body>
 </html>

@@ -165,7 +165,14 @@ func TestRemoteControlRefusesOtherMachines(t *testing.T) {
 	if rec := serve(h, events); rec.Code != http.StatusForbidden {
 		t.Fatalf("events from another machine: status %d", rec.Code)
 	}
-	local := httptest.NewRequest(http.MethodPost, "http://192.168.1.20:8765/api/remote/command", strings.NewReader(`{"command":"help"}`))
+	// A page on another site that rebinds its name to 127.0.0.1 reaches the port from this
+	// computer, but under its own name.
+	rebound := httptest.NewRequest(http.MethodPost, "http://evil.example:8765/api/remote/command", strings.NewReader(`{"command":"help"}`))
+	rebound.RemoteAddr = "127.0.0.1:51234"
+	if rec := serve(h, rebound); rec.Code != http.StatusForbidden {
+		t.Fatalf("rebinding: status %d, want 403", rec.Code)
+	}
+	local := httptest.NewRequest(http.MethodPost, "http://[::1]:8765/api/remote/command", strings.NewReader(`{"command":"help"}`))
 	local.RemoteAddr = "[::1]:51234"
 	if rec := serve(h, local); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("local command: status %d, want 503 (no page connected)", rec.Code)
