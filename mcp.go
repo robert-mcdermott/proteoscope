@@ -755,9 +755,9 @@ var mcpTools = []mcpTool{
 	{
 		Name:        "rank_predictions",
 		Title:       "Rank predictions",
-		Description: "Rank the opened prediction jobs (open them with open_files) by a score that is computed alike for every tool (ipsae, pdockq2, lis) or by the tools' own scores (iptm, ranking, ptm), mean pLDDT (plddt) or satisfied cross-links (crosslinks). Returns each job's best model with its scores; with level \"models\", every model.",
+		Description: "Rank the opened prediction jobs (open them with open_files) by a score that is computed alike for every tool (ipsae, pdockq2, pdockq, lis; a model without a PAE has pdockq only) or by the tools' own scores (iptm, ranking, ptm), mean pLDDT (plddt), satisfied cross-links (crosslinks), the share of PoseBusters' pose checks the ligands pass (pose), or Boltz-2's predicted affinity (affinity, lowest first) and binder probability (binder). Returns each job's best model with its scores; with level \"models\", every model.",
 		InputSchema: schema(map[string]any{
-			"metric": map[string]any{"type": "string", "enum": []string{"ipsae", "pdockq2", "pdockq", "lis", "iptm", "ranking", "ptm", "plddt", "crosslinks"}, "description": "The score to rank by (default: ipsae for complexes, plddt otherwise)"},
+			"metric": map[string]any{"type": "string", "enum": []string{"ipsae", "pdockq2", "pdockq", "lis", "iptm", "ranking", "ptm", "plddt", "crosslinks", "pose", "affinity", "binder"}, "description": "The score to rank by (default: ipsae for complexes, pdockq when no model has a PAE, plddt otherwise)"},
 			"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 1000, "description": "How many rows to return (default 20)"},
 			"level":  map[string]any{"type": "string", "enum": []string{"jobs", "models"}, "description": "One row per job (its best model) or per model"},
 			"chains": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 2, "maxItems": 2, "description": "Score this chain pair instead of each model's best interface, for example [\"A\", \"B\"]"},

@@ -226,6 +226,7 @@ function parseMOL2(text) {
       const element = mol2Element(type, fields[1]);
       const atom = newAtom(element, Number(fields[2]), Number(fields[3]), Number(fields[4]), type === 'N.4' ? 1 : 0);
       atom.sourceName = fields[1];
+      atom.tripos = type;
       atom.partialCharge = Number(fields[8]);
       if (/\.ar$/.test(type)) atom.aromatic = true;
       if (fields[7]) molecule.residueName ??= fields[7].replace(/\d+$/, '').slice(0, 3).toUpperCase();
@@ -237,7 +238,124 @@ function parseMOL2(text) {
       addBond(molecule, indexOf.get(fields[1]), indexOf.get(fields[2]), type === 'ar' ? 4 : MOL2_ORDERS[type] ?? 1);
     }
   }
+  for (const item of molecules) chargedGroups(item);
   return molecules;
+}
+
+// The charged groups SYBYL types stand for, whose bonds MOL2 files write as aromatic ("ar") or
+// in any Kekulé form, set as RDKit reads them (Mol2FileParser.cpp, cleanUpMol2Substructures).
+// O.co2 oxygens on a C.2 or S.o2 atom (carboxylates, sulfonates): the first single-bonded with a
+// −1 charge, the others double-bonded; on a P.3 atom (phosphates): the first double-bonded, the
+// others −1. A C.cat carbon (amidinium, guanidinium) gets one C=N⁺ bond: of an amidinium, to the
+// nitrogen of an N-oxide, else the one with more hydrogens, else the one in more rings, else the
+// second; of a guanidinium, to the first with the fewest heavy neighbors (a C.cat counting two).
+// Groups RDKit turns down are left as written; S.O2 is taken for S.o2 too.
+function chargedGroups(molecule) {
+  const { atoms, bonds } = molecule;
+  const neighbors = atoms.map(() => []);
+  for (const bond of bonds) {
+    neighbors[bond.a].push(bond);
+    neighbors[bond.b].push(bond);
+  }
+  const other = (bond, index) => (bond.a === index ? bond.b : bond.a);
+  const type = (index) => String(atoms[index].tripos ?? '').toLowerCase();
+  const setOrder = (bond, order) => {
+    bond.order = order;
+    bond.aromatic = false;
+  };
+  // A ring bond joins atoms that stay connected without it.
+  const inRing = (bond) => {
+    const seen = new Set([bond.a]);
+    const queue = [bond.a];
+    while (queue.length) {
+      const current = queue.pop();
+      for (const next of neighbors[current]) {
+        if (next === bond) continue;
+        const atom = other(next, current);
+        if (atom === bond.b) return true;
+        if (!seen.has(atom)) {
+          seen.add(atom);
+          queue.push(atom);
+        }
+      }
+    }
+    return false;
+  };
+  const rings = (index) => Math.max(0, neighbors[index].filter(inRing).length - 1);
+  const fixed = new Uint8Array(atoms.length);
+  atoms.forEach((atom, index) => {
+    if (fixed[index]) return;
+    if (type(index) === 'o.co2') {
+      if (neighbors[index].length !== 1) return;
+      const bond = neighbors[index][0];
+      const center = other(bond, index);
+      if (type(center) === 'p.3') {
+        setOrder(bond, 2);
+        atom.aromatic = false;
+        fixed[index] = 1;
+        for (const next of neighbors[center]) {
+          const oxygen = other(next, center);
+          if (fixed[oxygen] || type(oxygen) !== 'o.co2') continue;
+          setOrder(next, 1);
+          atoms[oxygen].charge = -1;
+          atoms[oxygen].aromatic = false;
+          fixed[oxygen] = 1;
+        }
+        atoms[center].aromatic = false;
+        fixed[center] = 1;
+      } else if (type(center) === 'c.2' || type(center) === 's.o2') {
+        const first = !fixed[center];
+        setOrder(bond, first ? 1 : 2);
+        if (first) atom.charge = -1;
+        atom.aromatic = false;
+        atoms[center].aromatic = false;
+        fixed[index] = 1;
+        fixed[center] = 1;
+      }
+    } else if (type(index) === 'c.cat') {
+      fixed[index] = 1;
+      const nitrogens = neighbors[index].map((bond) => other(bond, index)).filter((neighbor) => atoms[neighbor].element === 'N');
+      if (nitrogens.length < 2 || nitrogens.length > 3) return;
+      let charged;
+      if (nitrogens.length === 2) {
+        for (const bond of neighbors[index]) {
+          if (!nitrogens.includes(other(bond, index))) continue;
+          setOrder(bond, 1);
+          atoms[other(bond, index)].aromatic = false;
+          fixed[other(bond, index)] = 1;
+        }
+        const [first, second] = nitrogens;
+        const attached = (nitrogen, test) => neighbors[nitrogen].filter((bond) => test(other(bond, nitrogen))).length;
+        const hydrogens = (nitrogen) => attached(nitrogen, (neighbor) => atoms[neighbor].element === 'H');
+        const oxide = (nitrogen) => attached(nitrogen, (neighbor) => atoms[neighbor].element === 'O' && neighbors[neighbor].length === 1) > 0;
+        if (oxide(second)) charged = second;
+        else if (oxide(first)) charged = first;
+        else if (hydrogens(first) !== hydrogens(second)) charged = hydrogens(first) > hydrogens(second) ? first : second;
+        else charged = rings(first) > rings(second) ? first : second;
+      } else {
+        let fewest = Infinity;
+        for (const bond of neighbors[index]) {
+          const nitrogen = other(bond, index);
+          setOrder(bond, 1);
+          if (fixed[nitrogen]) continue;
+          const heavy = neighbors[nitrogen].reduce((sum, next) => {
+            const neighbor = other(next, nitrogen);
+            return atoms[neighbor].element === 'H' ? sum : sum + (type(neighbor) === 'c.cat' ? 2 : 1);
+          }, 0);
+          if (heavy < fewest) {
+            charged = nitrogen;
+            fewest = heavy;
+          }
+          atoms[nitrogen].aromatic = false;
+          fixed[nitrogen] = 1;
+        }
+      }
+      if (charged === undefined) return;
+      setOrder(neighbors[index].find((bond) => other(bond, index) === charged), 2);
+      atoms[charged].charge = 1;
+      atom.aromatic = false;
+    }
+  });
 }
 
 function mol2Element(type, name) {

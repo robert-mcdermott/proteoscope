@@ -202,6 +202,8 @@ absolute paths. For example:
 - "Which interface residues of the best model have pLDDT below 70?"
 - "Is the ligand in 1M17 supported by the density? Show me its interaction
   diagram."
+- "Open the Boltz-2 runs in /data/screen/, set aside models whose ligand
+  fails the pose checks, and rank the rest by binder probability."
 
 **What you see.** The agent's tools act on the Proteoscope page in your
 browser. It opens when the agent first needs it, and again if you close it.
@@ -225,6 +227,7 @@ ends, its Proteoscope stops.
 [Selections and Commands](../README.md#selections-and-commands), such as
 `color plddt`, `show sticks within 5 of resn AQ4`, `compound resn AQ4` (what
 a ligand is), `diagram resn AQ4` (its 2D interaction diagram, as an image),
+`posecheck resn AQ4` (PoseBusters' checks of its pose),
 `map load` then `map peaks` (difference-map peaks near the model), or
 `conservation`. The agent can run `help` for the full list, or
 `help <command>` for one command.
@@ -242,7 +245,7 @@ a ligand is), `diagram resn AQ4` (its 2D interaction diagram, as an image),
 | `interface_contacts` | **`chain_a`**, **`chain_b`** | The contacts between two chains, and the interface residues |
 | `superpose` | **`moving`**, `reference`, `method`, `fit` | Superpose a structure, or `all`, by sequence (the default) or by structure alone (`structure`: TM-align, or MM-align for complexes). Returns RMSD, TM-score, lDDT and the number of aligned pairs |
 | `validation_report` | none | The wwPDB validation summary of the active entry, with percentiles, ligand fit and the worst residues |
-| `rank_predictions` | `metric`, `limit`, `level`, `chains` | Rank the open prediction jobs by `ipsae`, `pdockq2`, `pdockq`, `lis`, `iptm`, `ranking`, `ptm`, `plddt` or `crosslinks`. Returns each job's best model, or every model with `level: "models"`. `chains` scores one chain pair |
+| `rank_predictions` | `metric`, `limit`, `level`, `chains` | Rank the open prediction jobs by `ipsae`, `pdockq2`, `pdockq`, `lis`, `iptm`, `ranking`, `ptm`, `plddt`, `crosslinks`, `pose` (the share of pose checks the ligands pass), `affinity` or `binder` (Boltz-2). Returns each job's best model, or every model with `level: "models"`, with its pose checks. `chains` scores one chain pair |
 | `render_image` | `scale`, `transparent` | The current view as a PNG, at 1 to 4 times the view's size |
 | `proteoscope_command` | **`command`** | Any other command |
 
@@ -250,8 +253,10 @@ Required arguments are in bold. Every tool returns a short text answer, and
 structured data for agents that read it.
 
 ipSAE, pDockQ, pDockQ2 and LIS are computed the same way from every
-predictor's output, so they compare jobs from different tools. ipTM, pTM and
-the ranking score are each tool's own.
+predictor's output, so they compare jobs from different tools; a model without
+a PAE (Chai-1) has pDockQ only. ipTM, pTM, the ranking score and Boltz-2's
+affinity are each tool's own. Each model's ligands get PoseBusters' pose
+checks, returned with the ranking.
 
 ## Images
 

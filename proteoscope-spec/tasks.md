@@ -450,3 +450,27 @@ the completed v0.1 application.
 
 - [x] 87. Release 0.8.0: version in `main.go` and `CITATION.cff`, `CHANGELOG.md`; map fit checked unchanged against v0.7.0
   - _Requirements: 45_
+
+- [x] 88. pDockQ without a PAE: interface scores from contacts and pLDDT alone, best interface by pDockQ, pDockQ in the Prediction table, pair matrix and triage when models lack a PAE
+  - _Requirements: 26, 46, 52_
+
+- [x] 89. Chemical perception and distance-geometry bounds ported from RDKit (`perception.js`, `dg-bounds.js`): cleanup, valences, SSSR in RDKit's order and its symmetrization, aromaticity, conjugation, hybridization, UFF types, 1-2 to 1-5 and van der Waals bounds, triangle smoothing; compared with RDKit on 4,027 dictionary components
+  - _Requirements: 53_
+
+- [x] 90. Pose checks (`pose-checks.js`): PoseBusters' checks without the energy ratio, stereochemistry against the dictionary's ideal coordinates, environment classes, RDKit's shape overlap; ligands from residues and docking files; dictionary coordinates and stereo labels in `readChemComp`
+  - _Requirements: 53_
+
+- [x] 91. Pose checks in the page: the ligand card's summary and list with **Show**, `posecheck` command, a Pose column in the Prediction table and triage, a Checks column and CSV fields for docking poses, sessions, the methods paragraph
+  - _Requirements: 53, 54_
+
+- [x] 92. Ligands in triage: pose-check metric, Boltz-2 affinity and binder probability as metrics, columns, CSV fields and records
+  - _Requirements: 54_
+
+- [x] 93. The `posebusters` validation suite: 18 PDB ligands and 127 poses against PoseBusters 0.6.5, its reference script, and the unit tests
+  - _Requirements: 44, 53_
+
+- [x] 94. Documentation: README (Ligands, Docking Poses, Predicted Complexes, triage, commands, code layout), validation README, design, requirements, roadmap (wave 9)
+  - _Requirements: 52, 53, 54_
+
+- [x] 95. Release 0.9.0: version in `main.go` and `CITATION.cff`, `CHANGELOG.md`, a README image of the pose checks; MOL2 reading and ligand chemistry checked against v0.8.0
+  - _Requirements: 45_

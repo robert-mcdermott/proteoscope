@@ -1393,6 +1393,15 @@ button:disabled {
   font-weight: 700;
 }
 
+/* Pose checks keep their color when the column is sorted. */
+.triage-table td.good {
+  color: var(--ok);
+}
+
+.triage-table td.bad {
+  color: var(--danger);
+}
+
 .triage-gallery {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
@@ -2851,6 +2860,97 @@ button:disabled {
   margin-left: 6px;
   padding: 0 6px;
   font-size: 0.64rem;
+}
+
+/* Pose checks on the ligand card */
+.ligand-checks {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.checks-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(248, 245, 238, 0.04);
+  color: var(--text);
+  font-size: 0.74rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.checks-summary:hover {
+  background: rgba(248, 245, 238, 0.08);
+}
+
+.checks-summary > span:first-child {
+  color: var(--text-faint);
+  font-size: 0.62rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.checks-summary strong {
+  flex: 1;
+}
+
+.checks-summary .good,
+.check-list .pass .mark {
+  color: var(--ok);
+}
+
+.checks-summary .bad,
+.check-list .fail .mark {
+  color: var(--danger);
+}
+
+.check-list {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.check-list .check-group {
+  margin-top: 6px;
+  color: var(--text-faint);
+  font-size: 0.6rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.check-list .check {
+  display: grid;
+  grid-template-columns: 1.1em minmax(0, 1fr) auto;
+  gap: 0 6px;
+  align-items: start;
+  font-size: 0.72rem;
+}
+
+.check-list .check b {
+  font-weight: 700;
+}
+
+.check-list .check small {
+  display: block;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
+.check-list .skip .mark,
+.check-list .check-note {
+  color: var(--text-faint);
+}
+
+.check-list .check-note {
+  margin-top: 6px;
+  font-size: 0.68rem;
 }
 
 .dialog.diagram-dialog {

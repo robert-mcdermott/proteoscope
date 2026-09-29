@@ -3,7 +3,8 @@
 Proteoscope's analyses are reimplementations of published methods. This folder
 checks them against the reference implementations those methods come from:
 limma, MSstatsPTM, US-align, Capra and Singh's conservation scorer, EMDB's
-validation pipeline and MolProbity (through the wwPDB validation reports).
+validation pipeline, MolProbity (through the wwPDB validation reports) and
+PoseBusters.
 
 The reference tools are not part of Proteoscope and are not in this
 repository. Only their numbers are: `reference/` holds what each tool
@@ -18,20 +19,20 @@ With Node.js 22 or later:
 node validation/run.mjs
 ```
 
-The first run downloads its public inputs (about 12 MB: 34 PDB entries, a
-region of one EMDB map and one wwPDB validation report) into
-`validation/cache/`, which git ignores. Later runs use the cache. The whole run
-takes about 8 seconds.
+The first run downloads its public inputs (about 21 MB: 51 PDB entries, 18
+chemical components, a region of one EMDB map and one wwPDB validation report)
+into `validation/cache/`, which git ignores. Later runs use the cache. The
+whole run takes about 8 seconds.
 
 | Option | Effect |
 | --- | --- |
-| `limma`, `msstatsptm`, `usalign`, `conservation`, `emdb`, `ramachandran` | Run only these suites |
+| `limma`, `msstatsptm`, `usalign`, `conservation`, `emdb`, `ramachandran`, `posebusters` | Run only these suites |
 | `--offline` | Skip suites whose inputs are not cached |
 | `--verbose` | Print every check, not only failures |
 
 The command exits with status 1 when a check fails. Continuous integration
 runs the three offline suites (`limma`, `msstatsptm`, `conservation`) on every
-pull request and every push to `main`. It runs all six weekly, and on pull requests that touch `web/lib` or
+pull request and every push to `main`. It runs all seven weekly, and on pull requests that touch `web/lib` or
 this folder (`.github/workflows/validation.yml`).
 
 ## What is checked
@@ -44,6 +45,7 @@ this folder (`.github/workflows/validation.yml`).
 | `conservation` | `conservationScores` (`conservation.js`) | `score_conservation.py` (Capra & Singh 2007) | Pfam seeds PF00240 (ubiquitin, 59 sequences) and PF00870 (p53 DNA-binding domain, 38 sequences), each with 7 option sets: Jensen–Shannon divergence and Shannon entropy, windows, weighting, gap penalty and cutoff | Difference below 1e-9; the same columns left unscored | 5e-13 |
 | `emdb` | `mapFit` (`volume.js`) | EMDB validation analysis | Model 8GUB in map EMD-34272 at the recommended contour, 0.136 | Atom inclusion within 0.005; per residue identical or one atom apart | 0.8935 vs 0.896; 1,234 of 1,254 residues identical, 20 one atom apart |
 | `ramachandran` | `classifyRamachandran` (`ramachandran.js`) | The wwPDB report of 1M17 (MolProbity's Top8000 analysis) | Bundled 1M17 | Every class agrees | 308 of 308 |
+| `posebusters` | `checkPose` (`pose-checks.js`, with `perception.js` and `dg-bounds.js`) | PoseBusters 0.6.5 with RDKit 2026.03.6, redock configuration (the dock checks, and stereochemistry against the dictionary's ideal coordinates) | 18 ligands in their PDB entries (kinase inhibitors, a cyclic urea, biotin, benzamidine, a zinc-bound succinate, ATP with manganese, methotrexate, 4-hydroxytamoxifen, oseltamivir, thymidine, progesterone, camphor next to heme, heme, a PROTAC), each as deposited and up to 8 copies broken on purpose: 127 poses | The same verdict on every check, except the differences noted below; bond, angle, clash and contact ratios within 1e-4 (relative); volume overlaps within 0.02 | 2,392 of 2,401 verdicts agree, the other 9 are heme's; ratios within 4.7e-6 (the reference keeps 6 digits); overlaps within 0.003 |
 
 Notes:
 
@@ -60,6 +62,24 @@ Notes:
   ligand). Per residue, Proteoscope's inclusion equals EMDB's for 1,234 of
   1,254 residues, and the other 20 differ by one atom. The volume server
   sends the map as 8-bit values, which moves a few atoms across the contour.
+- **PoseBusters.** The broken copies are the pose moved 1.5 Å into the
+  protein (or 2 Å into a neighboring cofactor), a terminal bond stretched by
+  0.7 Å, an aromatic ring atom pushed 0.8 Å out of its ring, a saturated ring
+  flattened, an acyclic double bond flipped and twisted by 90°, the pose
+  mirrored, compressed to 72% and moved 25 Å away. Proteoscope leaves out the
+  energy ratio, which needs a force field and generated conformers. RDKit
+  rejects heme with its Fe–N bonds (four-valent nitrogens), and PoseBusters
+  then fails every geometry check; Proteoscope checks the porphyrin without
+  its iron and compares the iron with other atoms by covalent radii, which
+  accounts for the 9 differing verdicts. PoseBusters reads a ring's distance
+  from its plane with a sign that depends on its SVD routine (it takes the
+  largest signed distance), so it can miss a single atom pushed out of a
+  ring; Proteoscope takes the largest absolute distance. With the 0.8 Å
+  displacement both flag every puckered ring. Volume overlaps are computed on
+  RDKit's grid (0.5 Å, graded shells) in the ligand's principal-axes frame,
+  whose axis signs follow Proteoscope's eigensolver rather than RDKit's, which
+  moves the grid by a fraction of a spacing. At PDB precision the ratios
+  agree to the reference's 6 digits.
 - **Constant features.** When a feature's values are identical within each
   group, limma's QR decomposition leaves a residual SD of about 1e-15
   (occasionally exactly 0), where Proteoscope computes exactly 0. The results
@@ -81,6 +101,7 @@ they call are shipped with Proteoscope; install them locally.
 | `usalign.json` | `USALIGN=/path/to/USalign [USALIGN_PATCHED=/path/to/patched/USalign] node validation/scripts/usalign-reference.mjs` | US-align built from <https://github.com/pylelab/USalign>. For the patched build, pass `TMave_mat` transposed in the `else` branch that calls `hetero_refined_greedy_search` |
 | `conservation.json` | `python3 validation/scripts/port-score-conservation.py /path/to/conservation_code`, then `SCORE_CONSERVATION=/path/to/conservation_code node validation/scripts/conservation-reference.mjs` | Capra & Singh's `conservation_code` from <https://compbio.cs.princeton.edu/conservation/> (Python 2 code; the first command makes a Python 3 copy that prints 12 decimals) |
 | `emdb-34272.json` | `node validation/scripts/emdb-reference.mjs` | Network access to EMDB's API |
+| `posebusters.json` | `PYTHON=/path/to/python node validation/scripts/posebusters-reference.mjs` | A Python with PoseBusters and RDKit (`pip install posebusters`) |
 
 The simulated data are generated with fixed seeds inside the R scripts and
 stored with the results, so the checks never need R.
@@ -89,9 +110,10 @@ stored with the results, so the checks never need R.
 
 - `data/PF00240.seed.sto` (PF00240.30) and `data/PF00870.seed.sto`
   (PF00870.24) are Pfam seed alignments. Pfam is distributed under CC0.
-- Downloaded at run time: PDB entries from RCSB, a region of EMD-34272 from
-  the PDBe volume server, and the 1M17 validation report from the wwPDB
-  archive. The PDB and EMDB archives are CC0.
+- Downloaded at run time: PDB entries and Chemical Component Dictionary
+  entries from RCSB, a region of EMD-34272 from the PDBe volume server, and
+  the 1M17 validation report from the wwPDB archive. The PDB and EMDB
+  archives are CC0.
 
 ## Checks that are not automated
 
@@ -108,6 +130,7 @@ run once, while each feature was built.
 | Density orientation: 1M17 2Fo−Fc from the PDBe volume server | 2.53σ on average at atom positions, 0.13σ at random points |
 | Differential ubiquitination: DIA-NN report of MZ1 vs DMSO (the MSstatsPTM example), mapped on 5T35 | Without imputation, 11 GlyGly features are tested and 7 are significant. With imputation (features seen at least twice in a group), 38 are tested and 20 are significant, including BRD4 K362, K404, K431 and K445 (log2FC 4.1–6.2, q ≤ 1e-5) |
 | Structure alignment in the page: 1A5R onto 1UBQ | TM-score 0.654 / 0.524, 2.36 Å over 71 pairs, as US-align gives; the sequence-based fit reaches 0.625 |
+| Chemical perception and distance-geometry bounds (`perception.js`, `dg-bounds.js`) against RDKit 2026.03.6 on 4,027 dictionary components (every 12th small-molecule, saccharide or peptide-like entry of the CCD with 2 to 90 heavy atoms of H, B, C, N, O, F, Si, P, S, Cl, Se, Br or I, and 57 common ligands and cofactors), each with its dictionary bonds and charges | The same 10 components rejected; for the other 4,017, identical hydrogen counts, rings, aromaticity, conjugation, hybridization and UFF bond lengths, and the whole bounds matrix, before and after triangle smoothing, within 2e-8 Å (the reference's rounding). Rings come in RDKit's order except in fullerene (C60), where RDKit's unstable sort reorders rings of one size |
 
 Checks from earlier waves are listed in the validation sections of
 [the roadmap](../proteoscope-spec/roadmap.md). Among them:

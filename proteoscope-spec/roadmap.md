@@ -6,11 +6,11 @@ competes in (researched September 2026), what each wave of work delivered
 commands, sessions and scripting; `wave4`: predicted complexes, validation and
 variants; `wave5`: bring your data, find public data; `wave6`: maps, ligand
 chemistry and statistics; `wave7`: agents and batch triage; `wave8`: ligand
-evidence), a review of the bundled
+evidence; `wave9`: prediction checks), a review of the bundled
 examples and of the public databases Proteoscope can use without API keys, and
 a prioritized plan for what comes next. Waves 1 to 6 were released together
-as version 0.6.0, wave 7 as version 0.7.0 and wave 8 as version 0.8.0
-([CHANGELOG.md](../CHANGELOG.md)).
+as version 0.6.0, wave 7 as version 0.7.0, wave 8 as version 0.8.0 and wave 9
+as version 0.9.0 ([CHANGELOG.md](../CHANGELOG.md)).
 
 ## 1. Where v0.4 stood
 
@@ -565,7 +565,7 @@ and reading the output of every widely used structure predictor.
 ### Bundled examples (`examples.go`, `data/examples.json`)
 
 - The 18 legacy PDB files (16 MB) became 27 gzipped mmCIF entries (6.2 MB,
-  anisotropic records removed), following the review in section 11: 108D
+  anisotropic records removed), following the review in section 12: 108D
   dropped, 5DS3 replaced by 7KK4, and the AlphaFold model of p53 with its PAE,
   1HHO, 4AKE, 1AKE, 5T35, 5FQD, 4OO8, 8EF5, 1LP3 and 6VXX added. 1LP3 (AAV2)
   was chosen over 1STM for its relevance to gene therapy.
@@ -1169,7 +1169,144 @@ whether the density supports it, and how it binds, in a form fit for a figure.
 | A docking pose (erlotinib written as SDF) | Described from the model: formula C22H23N3O4 as in the dictionary; the same seven interactions |
 | Map fit after its tiling moved into a shared helper, against v0.7.0 | Identical: 1M17 84.16% of 2,526 atoms above 1σ; 8GUB in EMD-34272 atom inclusion 0.8935 of 10,358 atoms; the same per-residue values |
 
-## 11. The bundled examples
+## 11. Wave 9: prediction checks
+
+Wave 9 closes a gap in how predicted complexes are scored and checks whether
+a co-folded or docked ligand pose is physically possible, and brings both into
+triage.
+
+### pDockQ without a PAE (`interface-scores.js`, `app.js`)
+
+- Chai-1 writes no PAE, and Boltz and Protenix write one only when asked
+  (`--write_full_pae`, `--need_atom_confidence`); their models got no
+  interface scores. pDockQ needs only the interface pLDDT and Cβ contacts, so
+  such models now get it, from one token per polymer residue with the pLDDT
+  of the B-factor column. ipSAE, ipTM from the PAE, pDockQ2 and LIS stay
+  empty.
+- A model's interface is its best chain pair by ipSAE, or by pDockQ without a
+  PAE (`bestInterface`). Triage ranks by pDockQ when no model has a PAE and
+  shows a pDockQ column for those that lack one; the Prediction table and the
+  chain-pair matrix show pDockQ in place of ipSAE and pDockQ2, with a note.
+
+### Chemical perception and distance bounds as RDKit computes them (`perception.js`, `dg-bounds.js`)
+
+- PoseBusters takes its bond, angle and clash limits from RDKit's
+  distance-geometry bounds, and which rings must be flat from RDKit's
+  aromaticity, so both are ported from RDKit 2026.03: the functional-group
+  cleanup of sanitization (charge-separated nitro groups and phosphorus and
+  halogen oxides), implicit hydrogens from RDKit's valence model (charged
+  atoms take the valences of their isoelectronic element), `findSSSR` with its
+  search order and `symmetrizeSSSR` (the order decides some aromaticity: an
+  oxadiazole whose oxygen lies on a macrocycle found first stays
+  non-aromatic), aromaticity under RDKit's default model (electron donor types
+  per atom, Hückel's rule over single rings and fused systems of up to six),
+  conjugation, hybridization, UFF atom types and bond rest lengths, and
+  `GetMoleculeBoundsMatrix` with PoseBusters' settings: 1-2 bounds, 1-3 from
+  ring and hybridization angles, 1-4 from cis and trans torsions (amides and
+  esters held trans), 1-5, scaled van der Waals lower bounds and triangle
+  smoothing. Aromatic bonds without a Kekulé structure (MOL2) are kekulized
+  by backtracking, after the charged groups SYBYL types stand for
+  (carboxylates, sulfonates and phosphates as O.co2, amidinium and
+  guanidinium as C.cat, bonds usually written "ar") are set as RDKit's MOL2
+  reader sets them: the same charges and bond orders as RDKit on 15
+  molecules.
+- RDKit's rewriting of bonds to metals as dative bonds is not ported; the pose
+  checks remove metal atoms first.
+
+### Pose checks (`pose-checks.js`, `app.js`)
+
+- **The checks** are those of PoseBusters 0.6's docking configuration except
+  the energy ratio: RDKit sanitization and one connected molecule; bond
+  lengths and bond angles (1-3 distances) within 25% of the bounds, no
+  non-bonded pair closer than 70% of its lower bound; five- and six-membered
+  aromatic rings (sp2 atoms whose smallest ring has that size) and C=C bonds
+  with their four substituents within 0.25 Å of a plane; isolated
+  non-aromatic six-membered rings (PoseBusters' patterns) at least 0.05 Å out
+  of plane; no atom closer than 0.75 of the sum of van der Waals radii to the
+  protein, organic cofactors or waters, or of covalent radii to inorganic
+  cofactors; a protein atom within 5 Å; at most 7.5% of the ligand's volume
+  inside each group (RDKit's shape grid: 0.5 Å, graded shells, radii × 0.8,
+  × 0.5 for inorganic cofactors and waters). Terminal oxygens and nitrogens
+  of carboxylates, nitro groups and amidines get the widest bounds of their
+  element pair, as in PoseBusters.
+- **Stereochemistry** against the Chemical Component Dictionary's ideal
+  coordinates, as PoseBusters' redock checks compare with a crystal ligand:
+  the signed volume of each R/S center over three named neighbors (a center
+  with two terminal neighbors of one element, like a phosphate's phosphorus,
+  is skipped, as InChI skips it; a flattened center fails), and the cis or
+  trans placement of substituents across E/Z double bonds. The dictionary
+  entry is used only when every atom and bond of the ligand is in it (a SMILES
+  ligand named LIG is not the dictionary's LIG).
+- **Environment classes** as PoseBusters sorts them: inorganic by element (Li,
+  Be, Na, Mg, Cl, K, Ca, Mn, Fe, Co, Ni, Cu, Zn, Br, Rb, Mo, Cd) or component
+  (FES, MOS, PO3, PO4, PPK, SO3, SO4, VO4), waters, protein (polymer
+  records), and organic cofactors (other hetero groups).
+- **Deliberate differences:** a ring's distance from its plane is the largest
+  absolute distance (PoseBusters takes the largest signed one, whose sign
+  depends on its SVD routine); metal atoms of a ligand are left out of the
+  chemistry, geometry and stereo checks and compared with other atoms by
+  covalent radii; atoms covalently bonded to the ligand, and their neighbors,
+  are left out of the contact checks. Without the energy ratio, a passing
+  pose is not called "PB-valid".
+- **Bond orders** come from the dictionary entry the residue matched, the
+  file's own definition, or a docking file (SDF or MOL2); without them (PDBQT,
+  ligands given to a predictor as SMILES, when the output lists no bonds)
+  only the contact checks run.
+- **Where:** the ligand card (a summary line, the list by group, and **Show**,
+  which draws a failing check's atom pairs as measurements and selects the
+  residues they touch); `posecheck [<selection>]`; a **Pose** column in the
+  Prediction table and in triage (`triage by pose`); a **Checks** column and
+  CSV fields for docking poses (after the 0.8.0 columns, which keep their
+  places); and the methods paragraph, which cites PoseBusters, RDKit and UFF.
+
+### Ligands in triage (`triage.js`)
+
+- A model's pose checks, summed over its ligands, are a metric (the share
+  passed), CSV columns (`pose_checks_passed`, `pose_checks_run`,
+  `pose_checks_failed`) and part of the records scripts and agents receive.
+- Boltz-2's predicted affinity (log10 IC50 in µM, ranked lowest first) and
+  binder probability, predicted per job, are metrics, columns, CSV fields and
+  record fields too. Sessions keep a model's pose checks.
+
+### Validation
+
+- **Tests.** 12 new JavaScript tests, 277 in total (77 Go tests, unchanged):
+  perception (hydrogens, aromaticity including uracil's, conjugation,
+  hybridization, the nitro cleanup, kekulizing MOL2-style input, a valence
+  failure); ring symmetrization (cubane, bicyclo[2.2.2]octane, naphthalene);
+  bounds against RDKit (N-methylacetamide's amide bounds, and the summed
+  matrices, aromatic atoms, hydrogens and rings of 14 dictionary ligands);
+  checks of constructed poses (a puckered ring, stretched bonds, a clash and
+  a covalent partner, contacts only without bond orders), stereocenters and a
+  double bond against a reference, erlotinib in 1M17, a glycan's link to its
+  asparagine in 1N8Z, the environment classes, dictionary coordinates and
+  labels; MOL2 charged groups (carboxylate, phosphate, guanidinium, an
+  amidinium in a ring); pDockQ without a PAE against `ipsae.py`; triage
+  metrics, CSV and records; the methods text; command parsing.
+- **The `posebusters` suite** (validation/README.md): 18 ligands in their PDB
+  entries, each as deposited and up to 8 copies broken on purpose (moved into
+  the protein or a cofactor, a bond stretched, a ring puckered or flattened,
+  a double bond flipped or twisted, mirrored, compressed, moved away): 127
+  poses. 2,392 of 2,401 verdicts agree with PoseBusters 0.6.5; the other 9 are
+  heme's, which RDKit rejects with its Fe–N bonds. Bond, angle, clash and
+  contact ratios agree to the reference's 6 digits, volume overlaps within
+  0.003.
+- **Checks on real data:**
+
+| Check | Result |
+| --- | --- |
+| Perception and bounds against RDKit on 4,027 dictionary components | The same 10 rejected; hydrogens, rings, aromaticity, conjugation, hybridization, UFF bond lengths and the whole bounds matrix identical for the other 4,017 (within 2e-8 Å) |
+| Erlotinib in 1M17 | All 19 checks pass; the closest protein atom 2.70 Å away (0.84 of the radii), 0.8% of its volume inside the protein |
+| Heme in 4HHB (chain A) | Bond lengths and angles fail: a propionate C–C bond of 2.32 Å and a carboxylate squeezed to 1.54 Å between its oxygens, in a structure deposited in 1984; **Show** draws them |
+| Sotorasib in 6OIM, bonded to Cys12 | All 19 checks pass, the bonded sulfur and its neighbor left out of the contact checks |
+| N-glycans in 1N8Z (NAG on Asn C165 and Asn C237) | All checks pass; with only the bonded ND2 left out, the asparagine's CG, an angle away (2.3 Å), would fail "Distance to protein" |
+| Benzoate and benzamidinium in SYBYL MOL2 (carboxylate and amidinium bonds written "ar") | All 17 checks pass; before the charged groups were set, the kekulization failed and the geometry checks were skipped |
+| An AlphaFold Server–style folder built from 1M17, a second model with erlotinib moved 1.5 Å into the protein | 19 of 19 and 17 of 19 checks (distance to protein and to waters) in the Pose column; `triage by pose` ranks the intact pose first |
+| Erlotinib as two SDF docking poses in 1M17 (the crystal pose, and one moved 1.6 Å) | 17 of 17 and 15 of 17 checks in the Checks column (distance to protein and to waters; stereochemistry needs a dictionary entry); the crystal erlotinib passes all 17 with either pose loaded |
+| MDM2–p53 (1YCR) opened as a prediction without a PAE | Ranked by pDockQ; the Prediction panel shows pDockQ for chains A–B and the note |
+| MOL2 reading and ligand chemistry against v0.8.0 | 12 MOL2 files without charged groups read identically; in 15 with them only the carboxylate, sulfonate, phosphate, amidinium and guanidinium atoms change. The 27 bundled structures get the same ligand chemistry and bonds, and the same 562 interactions for up to 12 ligands in each |
+
+## 12. The bundled examples
 
 **Done in wave 5** (section 7): the recommendations below were followed, with
 1LP3 as the capsid and 8EF5 as the GPCR complex. The review is kept for the
@@ -1233,7 +1370,7 @@ AlphaFold DB's complex entries (`/api/complex/…`) or a ModelArchive entry with
 PAE (for example `ma-dm-prc-171`, EZH2–PCGF5 from ColabFold) are the
 candidates. Both are better fetched than bundled; see the next section.
 
-## 12. Public databases without API keys
+## 13. Public databases without API keys
 
 Everything Proteoscope fetches goes through its own server, which allows only
 known hosts, caches downloads, and honors `--offline`. Services checked live
@@ -1296,7 +1433,7 @@ Each new source is a small Go route (host allowlist, size limit, cache kind,
 User-Agent) plus a page-side parser. The RCSB, NCBI, STRING and gnomAD limits
 argue for caching and one request at a time.
 
-## 13. Roadmap
+## 14. Roadmap
 
 Priorities are ordered by value to researchers, weighed against effort.
 Wave 6 delivered density maps, ligand chemistry, docking poses, structure-only
@@ -1304,7 +1441,9 @@ alignment, differential statistics, conservation, the methods paragraph,
 continuous integration and the validation suite (section 8). Wave 7
 delivered batch triage, results as data for scripts, opening files by path
 and the MCP server (section 9). Wave 8 delivered the ligand card, 2D
-interaction diagrams and difference-map peaks (section 10).
+interaction diagrams and difference-map peaks (section 10). Wave 9 delivered
+pDockQ without a PAE, PoseBusters' pose checks and ligands in triage (section
+11).
 
 Proteoscope's lead is breadth in one private session: prediction triage,
 experimental validation, density, docking and structural proteomics with
@@ -1330,8 +1469,10 @@ model.
     DB, for remote homologs that sequence search misses.
 - **Maps.** Maps in MolViewSpec exports, and MolViewSpec import; Q-score for
   any model and map.
-- **Ligand follow-ups.** Ligand geometry against the dictionary (bond
-  lengths and angles), 2D diagrams for docking poses side by side, and
+- **Ligand follow-ups.** Bond orders for SMILES ligands of predictions, from
+  the job's input (AlphaFold 3's `data.json`, Boltz's YAML), so they get every
+  pose check; PoseBusters' energy ratio (UFF energy against generated
+  conformers); 2D diagrams for docking poses side by side; and
   stereochemistry (wedges) in the diagram.
 - **Statistics.** More than two groups, paired designs and protein-level
   summarization.
@@ -1401,7 +1542,7 @@ model.
 - **Publication.** A software paper (an application note or JOSS), a Zenodo
   DOI for each release, and short videos of the main workflows.
 
-## 14. Known limitations
+## 15. Known limitations
 
 - **Structure-only superposition** is rigid: in a hinge motion it fits one
   domain, as TM-align does. MM-align switches to US-align's faster, slightly
@@ -1445,6 +1586,16 @@ model.
   overlapping atoms; the diagram says so. Residues are placed from the current
   view, so a dense site (ATP's phosphates) can still have crossing lines;
   rotating and drawing again changes them.
+- **Pose checks** leave out PoseBusters' energy ratio, so a passing pose is
+  not "PB-valid". Ligands without bond orders from a dictionary entry or the
+  file (ligands given to a predictor as SMILES when the output lists no
+  bonds, PDBQT poses) get the contact checks only, and ligands without a
+  dictionary entry no stereo checks. Metal atoms are left out of the geometry
+  checks, and hydrogens of a docking file are dropped (PoseBusters keeps them
+  in its bounds, which can move a heavy-atom bound slightly). Covalently bound ligands are checked as
+  residues; atoms bonded to them are not counted as clashes, but PoseBusters
+  itself was not designed for them. Volume overlap differs from PoseBusters'
+  by up to 0.003 because the grid's axes may point the other way.
 - **Difference-map peaks** need an Fo-Fc map (X-ray entries at the PDBe volume
   server, or an Fo-Fc map file); cryo-EM maps have none. The hints (possible
   water, unmodeled density) come from distances alone, not from peak shape or
@@ -1457,9 +1608,10 @@ model.
 - **Prediction folders.** AlphaFold 3, AlphaFold Server, Boltz-2, ColabFold,
   Protenix and OpenFold3 were checked with real outputs; Chai-1 only with the
   documented layout.
-  - Chai-1 does not write PAE, so its models lack the PAE-based scores.
-  - Boltz writes PAE only with `--write_full_pae`, and Protenix only with
-    `--need_atom_confidence`.
+  - Chai-1 does not write PAE, and Boltz writes it only with
+    `--write_full_pae` and Protenix only with `--need_atom_confidence`;
+    without it a model gets pDockQ but not ipSAE, pDockQ2 or LIS.
+  - Boltz-2's affinity is read per job, as Boltz writes it, not per model.
   - The Zstandard decoder does not verify frame checksums and does not
     support dictionaries (neither AlphaFold 3 nor DIA-NN uses them).
 - **Search reports** keep only the rows of the structure's proteins, matched

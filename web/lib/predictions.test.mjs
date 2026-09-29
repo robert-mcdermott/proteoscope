@@ -20,7 +20,7 @@ import {
   rankModels,
   tokensForPAE,
 } from './predictions.js';
-import { interfaceScores, pDockQ, tmD0 } from './interface-scores.js';
+import { bestInterface, interfaceScores, pDockQ, tmD0 } from './interface-scores.js';
 import { examplePDB } from './test-data.mjs';
 
 const file = (path) => ({ path, name: path.split('/').pop() });
@@ -240,4 +240,16 @@ test('interface scores match ipsae.py on a reference complex', () => {
     close(pair.pdockq2, 0.0254, 4);
     close(pair.lis, 0.4250, 4);
   }
+  // Without a PAE (Chai-1, Boltz without --write_full_pae) only pDockQ is computed: it needs none,
+  // so it equals ipsae.py's value from the same pLDDT and contacts.
+  const withoutPAE = interfaceScores(null, modelTokens(model, { perResidue: true }).map((token, index) => ({ ...token, plddt: tokens[index].plddt })));
+  assert.equal(withoutPAE.pae, false);
+  const [pair] = withoutPAE.pairs;
+  close(pair.pdockq, 0.0623, 4);
+  assert.equal(pair.contacts, interfaceScores({ size: n, matrix }, tokens).pairs[0].contacts);
+  assert.ok([pair.ipsae, pair.iptm, pair.pdockq2, pair.lis].every(Number.isNaN));
+  // The best interface falls back to pDockQ.
+  const pairs = [{ chainA: 'A', chainB: 'B', ipsae: NaN, pdockq: 0.1 }, { chainA: 'A', chainB: 'C', ipsae: NaN, pdockq: 0.3 }];
+  assert.equal(bestInterface(pairs).chainB, 'C');
+  assert.equal(bestInterface([{ ...pairs[0], ipsae: 0.5 }, { ...pairs[1], ipsae: 0.4 }]).chainB, 'B');
 });

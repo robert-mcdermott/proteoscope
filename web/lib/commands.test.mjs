@@ -65,6 +65,7 @@ test('triage, info and interactions', () => {
   assert.deepEqual(fields(parseCommand('triage by pDockQ2 top 10 models pair A B'), 'action', 'metric', 'limit', 'level', 'pair'), { action: 'rank', metric: 'pdockq2', limit: 10, level: 'models', pair: ['A', 'B'] });
   assert.deepEqual(fields(parseCommand('batch lis best jobs'), 'name', 'metric', 'level', 'pair'), { name: 'triage', metric: 'lis', level: 'jobs', pair: null });
   assert.deepEqual(fields(parseCommand('triage show #3'), 'action', 'position'), { action: 'show', position: 3 });
+  assert.deepEqual([parseCommand('triage by pose').metric, parseCommand('triage by affinity').metric, parseCommand('triage by binder').metric], ['pose', 'affinity', 'binder']);
   assert.deepEqual(fields(parseCommand('triage gallery'), 'action', 'count'), { action: 'gallery', count: 12 });
   assert.equal(parseCommand('triage csv').action, 'export');
   assert.equal(parseCommand('triage by auto top 20 jobs best').metric, 'auto');
@@ -82,7 +83,7 @@ function fields(object, ...keys) {
   return Object.fromEntries(keys.map((key) => [key, object[key]]));
 }
 
-test('compound, diagram and map peaks', () => {
+test('compound, diagram, posecheck and map peaks', () => {
   const parse = (text) => parseCommand(text);
   assert.deepEqual([parse('compound').name, parse('compound').selection], ['compound', null]);
   assert.equal(parse('chem resn STI').selection, 'resn STI');
@@ -94,4 +95,7 @@ test('compound, diagram and map peaks', () => {
   assert.throws(() => parse('map peaks 0.2'), /map peaks/);
   // "ligand" stays a selection keyword.
   assert.equal(parse('ligand'), null);
+  assert.deepEqual([parse('posecheck').name, parse('posecheck').selection], ['posecheck', null]);
+  assert.deepEqual([parse('posebusters resn AQ4').name, parse('posebusters resn AQ4').selection], ['posecheck', 'resn AQ4']);
+  assert.equal(parse('checks').name, 'posecheck');
 });

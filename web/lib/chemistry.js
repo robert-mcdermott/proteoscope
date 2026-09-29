@@ -110,7 +110,7 @@ function canonicalName(name) {
 
 // The component's name for an atom: its own name, else the modern spelling of an old one (O1P →
 // OP1, C1* → C1'). Components such as PLP keep names like O1P, so the raw name is tried first.
-function componentName(component, name) {
+export function componentName(component, name) {
   const raw = String(name ?? '').trim().toUpperCase();
   if (component.atoms.has(raw)) return raw;
   const canonical = canonicalName(raw);

@@ -93,6 +93,31 @@ test('MOL2: SYBYL types, aromatic and amide bonds, N.4 charges and DOCK score co
   assert.equal(molecule.residueName, 'LIG');
 });
 
+test('MOL2: charged groups written with aromatic bonds are read as RDKit reads them', () => {
+  const mol2 = (title, atoms, bonds) => parseMolfile([
+    '@<TRIPOS>MOLECULE', title, ` ${atoms.length} ${bonds.length} 0 0 0`, 'SMALL', 'NO_CHARGES', '', '@<TRIPOS>ATOM',
+    ...atoms.map(([name, type], index) => `${index + 1} ${name} ${index * 1.4} 0.0 0.0 ${type} 1 LIG1 0.0`),
+    '@<TRIPOS>BOND', ...bonds.map(([a, b, kind], index) => `${index + 1} ${a} ${b} ${kind}`),
+  ].join('\n'), `${title}.mol2`).molecules[0];
+  // Carboxylate: the first O.co2 carries the charge.
+  const acetate = mol2('acetate', [['C1', 'C.3'], ['C2', 'C.2'], ['O1', 'O.co2'], ['O2', 'O.co2']], [[1, 2, 1], [2, 3, 'ar'], [2, 4, 'ar']]);
+  assert.deepEqual(acetate.atoms.map((atom) => atom.charge), [0, 0, -1, 0]);
+  assert.deepEqual(acetate.bonds.map((bond) => [bond.order, bond.aromatic]), [[1, false], [1, false], [2, false]]);
+  assert.equal(acetate.formula, 'C2H3O2');
+  // Phosphate: the first O.co2 double-bonded, the others charged.
+  const phosphate = mol2('phosphate', [['C1', 'C.3'], ['O1', 'O.3'], ['P1', 'P.3'], ['O2', 'O.co2'], ['O3', 'O.co2'], ['O4', 'O.co2']], [[1, 2, 1], [2, 3, 1], [3, 4, 'ar'], [3, 5, 'ar'], [3, 6, 'ar']]);
+  assert.deepEqual(phosphate.atoms.map((atom) => atom.charge), [0, 0, 0, 0, -1, -1]);
+  assert.deepEqual(phosphate.bonds.map((bond) => bond.order), [1, 1, 2, 1, 1]);
+  // Guanidinium: the nitrogen with the fewest heavy neighbors takes the double bond and charge.
+  const guanidinium = mol2('guanidinium', [['C1', 'C.3'], ['N1', 'N.pl3'], ['C2', 'C.cat'], ['N2', 'N.pl3'], ['N3', 'N.pl3']], [[1, 2, 1], [2, 3, 'ar'], [3, 4, 'ar'], [3, 5, 'ar']]);
+  assert.deepEqual(guanidinium.atoms.map((atom) => atom.charge), [0, 0, 0, 1, 0]);
+  assert.deepEqual(guanidinium.bonds.map((bond) => bond.order), [1, 1, 2, 1]);
+  assert.ok(guanidinium.atoms.every((atom) => !atom.aromatic));
+  // Amidinium in a ring, hydrogens alike: the ring nitrogen.
+  const amidinium = mol2('amidinium', [['C1', 'C.3'], ['C2', 'C.3'], ['C3', 'C.3'], ['N1', 'N.pl3'], ['C4', 'C.cat'], ['N2', 'N.pl3'], ['C5', 'C.3']], [[1, 2, 1], [2, 3, 1], [3, 4, 1], [4, 5, 'ar'], [5, 1, 1], [5, 6, 'ar'], [6, 7, 1]]);
+  assert.deepEqual(amidinium.atoms.map((atom) => atom.charge), [0, 0, 0, 1, 0, 0, 0]);
+});
+
 test('PDBQT: Vina poses with scores, AutoDock types, inferred bonds and polar hydrogens', () => {
   const atom = (serial, name, x, y, z, type) => `ATOM  ${String(serial).padStart(5)} ${name.padEnd(4)} UNL     1    ${x.toFixed(3).padStart(8)}${y.toFixed(3).padStart(8)}${z.toFixed(3).padStart(8)}  0.00  0.00    +0.000 ${type.padEnd(2)}`;
   const pose = (model, shift, score) => [

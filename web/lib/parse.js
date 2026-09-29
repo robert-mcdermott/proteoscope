@@ -966,8 +966,9 @@ export function applyOperationToPoint(operation, atom) {
 
 // Chemical component definitions (_chem_comp_atom, _chem_comp_bond), as in CCD entries and in
 // the mmCIF files RCSB and PDBe distribute: per component, its atoms (element, formal charge when
-// given, aromatic and leaving flags, and the hydrogens bonded to each heavy atom, leaving
-// hydrogens excluded) and its bonds by sorted name pair.
+// given, aromatic and leaving flags, the hydrogens bonded to each heavy atom, leaving hydrogens
+// excluded, the R/S label and, in dictionary entries, the ideal coordinates) and its bonds by
+// sorted name pair (order, aromatic flag, E/Z label).
 export function readChemComp(cif) {
   const components = new Map();
   const component = (id) => {
@@ -986,6 +987,17 @@ export function readChemComp(cif) {
     const charge = atoms.column('charge');
     const aromatic = atoms.column('pdbx_aromatic_flag');
     const leaving = atoms.column('pdbx_leaving_atom_flag');
+    const stereo = atoms.column('pdbx_stereo_config');
+    // Ideal coordinates, else the model ones; entry files list neither.
+    const coordinate = (axis) => {
+      const ideal = atoms.column(`pdbx_model_Cartn_${axis}_ideal`);
+      const modeled = atoms.column(`model_Cartn_${axis}`);
+      return (row) => {
+        const value = cleanCIFValue(ideal(row));
+        return value === '' ? Number(cleanCIFValue(modeled(row)) || NaN) : Number(value);
+      };
+    };
+    const [x, y, z] = ['x', 'y', 'z'].map(coordinate);
     for (let row = 0; row < atoms.rowCount; row += 1) {
       const id = cleanCIFValue(compId(row)).toUpperCase();
       const name = cleanCIFValue(atomId(row)).toUpperCase();
@@ -996,6 +1008,10 @@ export function readChemComp(cif) {
         charge: /^[+-]?\d+$/.test(formal) ? Number(formal) : null,
         aromatic: cleanCIFValue(aromatic(row)).toUpperCase() === 'Y',
         leaving: cleanCIFValue(leaving(row)).toUpperCase() === 'Y',
+        stereo: cleanCIFValue(stereo(row)).toUpperCase(),
+        x: x(row),
+        y: y(row),
+        z: z(row),
         hydrogens: 0,
         allHydrogens: 0,
       });
@@ -1008,6 +1024,7 @@ export function readChemComp(cif) {
     const second = bonds.column('atom_id_2');
     const order = bonds.column('value_order');
     const aromatic = bonds.column('pdbx_aromatic_flag');
+    const stereo = bonds.column('pdbx_stereo_config');
     for (let row = 0; row < bonds.rowCount; row += 1) {
       const id = cleanCIFValue(compId(row)).toUpperCase();
       const a = cleanCIFValue(first(row)).toUpperCase();
@@ -1030,6 +1047,7 @@ export function readChemComp(cif) {
       item.bonds.set(a < b ? `${a}|${b}` : `${b}|${a}`, {
         order: value.startsWith('DOUB') ? 2 : value.startsWith('TRIP') ? 3 : value.startsWith('QUAD') ? 4 : 1,
         aromatic: cleanCIFValue(aromatic(row)).toUpperCase() === 'Y' || value.startsWith('AROM'),
+        stereo: cleanCIFValue(stereo(row)).toUpperCase(),
       });
     }
   }

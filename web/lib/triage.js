@@ -1,9 +1,13 @@
 // Batch triage: ranks the models of many prediction jobs (a design campaign, say) on one table.
 // ipSAE, pDockQ, pDockQ2 and LIS are computed the same way for every predictor, from each
-// model's PAE and coordinates, so they compare jobs from different tools; ipTM, pTM and the
-// ranking score are each tool's own. Sets and models are the records of predictions.js after
-// scoring: { name, root, tool, toolLabel, models: [{ rank, label, scores, metrics, meanPlddt }] }.
-// Nothing here touches the DOM.
+// model's PAE and coordinates, so they compare jobs from different tools (a model without a PAE
+// has pDockQ only); ipTM, pTM and the ranking score are each tool's own. Ligands get PoseBusters'
+// checks (pose-checks.js), and Boltz-2 jobs their predicted affinity. Sets and models are the
+// records of predictions.js after scoring: { name, root, tool, toolLabel, affinityResult,
+// models: [{ rank, label, scores, metrics, meanPlddt, poseChecks }] }. Nothing here touches the
+// DOM.
+
+import { bestInterface } from './interface-scores.js';
 
 export const TRIAGE_METRICS = [
   { id: 'ipsae', label: 'ipSAE', title: 'ipSAE of the interface (Dunbrack 2025), computed from the PAE' },
@@ -15,6 +19,9 @@ export const TRIAGE_METRICS = [
   { id: 'ptm', label: 'pTM', title: 'pTM as the predictor reports it' },
   { id: 'plddt', label: 'pLDDT', title: 'Mean pLDDT of the protein and nucleic-acid residues' },
   { id: 'crosslinks', label: 'XL', title: 'Cross-links satisfied, of those mapped in the Proteomics tab' },
+  { id: 'pose', label: 'Pose', title: 'Share of PoseBusters\' checks the ligands pass (bond lengths and angles, clashes, flat rings, stereochemistry, contacts)' },
+  { id: 'binder', label: 'P(binder)', title: 'Boltz-2\'s probability that the ligand binds (per job)' },
+  { id: 'affinity', label: 'Affinity', title: 'Boltz-2\'s predicted affinity, log10(IC50 / µM), lower is stronger (per job)', lower: true },
 ];
 
 const METRIC_ALIASES = {
@@ -22,7 +29,10 @@ const METRIC_ALIASES = {
   ranking: 'ranking', score: 'ranking', rank: 'ranking', ranking_score: 'ranking',
   plddt: 'plddt', confidence: 'plddt',
   crosslinks: 'crosslinks', xl: 'crosslinks', xlinks: 'crosslinks', links: 'crosslinks',
+  pose: 'pose', poses: 'pose', posebusters: 'pose', checks: 'pose',
+  binder: 'binder', probability: 'binder', affinity: 'affinity', ic50: 'affinity',
 };
+const LOWER_IS_BETTER = new Set(TRIAGE_METRICS.filter((metric) => metric.lower).map((metric) => metric.id));
 
 export function triageMetric(name) {
   return METRIC_ALIASES[String(name ?? '').toLowerCase()] ?? null;
@@ -38,9 +48,22 @@ export function triagePair(model, pair = null) {
     const [a, b] = pair.map(String);
     return pairs.find((item) => (item.chainA === a && item.chainB === b) || (item.chainA === b && item.chainB === a)) ?? null;
   }
-  let best = null;
-  for (const item of pairs) if (!best || finite(item.ipsae) > finite(best.ipsae) || !Number.isFinite(best.ipsae)) best = item;
-  return best;
+  return bestInterface(pairs);
+}
+
+// A model's pose checks over all its ligands: { ligands, passed, checked, failed: [check ids] }.
+export function poseSummary(model) {
+  const list = model?.poseChecks ?? [];
+  if (!list.length) return null;
+  const failed = new Set();
+  let passed = 0;
+  let checked = 0;
+  for (const item of list) {
+    passed += item.passed;
+    checked += item.checked;
+    for (const id of item.failed) failed.add(id);
+  }
+  return { ligands: list.length, passed, checked, failed: [...failed] };
 }
 
 // The chain-pair ipTM the predictor reported for the interface, when it reports one.
@@ -69,6 +92,7 @@ export function triageRows(sets, options = {}) {
     for (const model of set.models) {
       const pair = triagePair(model, options.pair);
       const links = options.crosslinks?.(model) ?? null;
+      const pose = poseSummary(model);
       rows.push({
         setId: set.id,
         modelId: model.id,
@@ -90,6 +114,10 @@ export function triageRows(sets, options = {}) {
         contacts: pair?.contacts ?? null,
         crosslinks: links?.total ? links.satisfied / links.total : NaN,
         crosslinkCounts: links?.total ? { satisfied: links.satisfied, total: links.total } : null,
+        pose: pose?.checked ? pose.passed / pose.checked : NaN,
+        poseChecks: pose,
+        affinity: finite(set.affinityResult?.value),
+        binder: finite(set.affinityResult?.probability),
         problem: model.problem ?? null,
       });
     }
@@ -97,19 +125,23 @@ export function triageRows(sets, options = {}) {
   return rows;
 }
 
-// The metric to rank by when none is chosen: ipSAE when any model has an interface, else pLDDT.
+// The metric to rank by when none is chosen: ipSAE when any model has an interface with a PAE,
+// else pDockQ, else pLDDT.
 export function defaultTriageMetric(rows) {
-  return rows.some((row) => Number.isFinite(row.ipsae)) ? 'ipsae' : 'plddt';
+  if (rows.some((row) => Number.isFinite(row.ipsae))) return 'ipsae';
+  return rows.some((row) => Number.isFinite(row.pdockq)) ? 'pdockq' : 'plddt';
 }
 
-// Sorts rows by a metric, highest first; rows without a value go last, in the tools' own order.
+// Sorts rows by a metric, best first (highest, or lowest for affinity); rows without a value go
+// last, in the tools' own order.
 export function sortTriageRows(rows, metric) {
+  const sign = LOWER_IS_BETTER.has(metric) ? -1 : 1;
   return rows.slice().sort((a, b) => {
     const left = a[metric];
     const right = b[metric];
     const leftOk = Number.isFinite(left);
     const rightOk = Number.isFinite(right);
-    if (leftOk && rightOk && left !== right) return right - left;
+    if (leftOk && rightOk && left !== right) return sign * (right - left);
     if (leftOk !== rightOk) return leftOk ? -1 : 1;
     return a.job.localeCompare(b.job, undefined, { numeric: true }) || a.rank - b.rank;
   });
@@ -135,16 +167,18 @@ const csvNumber = (value) => (Number.isFinite(value) ? Number(value.toFixed(4)) 
 
 // Every model and every interface of the sets, for a spreadsheet.
 export function triageCSVRows(sets, options = {}) {
-  const header = ['tool', 'job', 'rank', 'model', 'ranking_score', 'ptm', 'iptm', 'mean_plddt', 'chain_a', 'chain_b', 'chain_pair_iptm', 'ipsae', 'ipsae_a_to_b', 'ipsae_b_to_a', 'iptm_from_pae', 'pdockq', 'pdockq2', 'lis', 'contacts', 'xl_satisfied', 'xl_total'];
+  const header = ['tool', 'job', 'rank', 'model', 'ranking_score', 'ptm', 'iptm', 'mean_plddt', 'chain_a', 'chain_b', 'chain_pair_iptm', 'ipsae', 'ipsae_a_to_b', 'ipsae_b_to_a', 'iptm_from_pae', 'pdockq', 'pdockq2', 'lis', 'contacts', 'xl_satisfied', 'xl_total', 'pose_checks_passed', 'pose_checks_run', 'pose_checks_failed', 'affinity_log10_ic50_um', 'binder_probability'];
   const rows = [header];
   const label = jobLabels(sets);
   for (const set of sets) {
     for (const model of set.models) {
       const links = options.crosslinks?.(model) ?? null;
+      const pose = poseSummary(model);
       const base = [set.toolLabel ?? set.tool, label(set), model.rank, model.label, csvNumber(model.scores?.rankingScore), csvNumber(model.scores?.ptm), csvNumber(model.scores?.iptm), csvNumber(model.meanPlddt)];
+      const tail = [pose?.passed ?? '', pose?.checked ?? '', pose?.failed.join(';') ?? '', csvNumber(set.affinityResult?.value), csvNumber(set.affinityResult?.probability)];
       const pairs = model.metrics?.pairs.length ? model.metrics.pairs : [null];
       for (const pair of pairs) {
-        rows.push([...base, pair?.chainA ?? '', pair?.chainB ?? '', csvNumber(reportedPairIptm(model, pair)), csvNumber(pair?.ipsae), csvNumber(pair?.ipsaeAB), csvNumber(pair?.ipsaeBA), csvNumber(pair?.iptm), csvNumber(pair?.pdockq), csvNumber(pair?.pdockq2), csvNumber(pair?.lis), pair?.contacts ?? '', links?.satisfied ?? '', links?.total ?? '']);
+        rows.push([...base, pair?.chainA ?? '', pair?.chainB ?? '', csvNumber(reportedPairIptm(model, pair)), csvNumber(pair?.ipsae), csvNumber(pair?.ipsaeAB), csvNumber(pair?.ipsaeBA), csvNumber(pair?.iptm), csvNumber(pair?.pdockq), csvNumber(pair?.pdockq2), csvNumber(pair?.lis), pair?.contacts ?? '', links?.satisfied ?? '', links?.total ?? '', ...tail]);
       }
     }
   }
@@ -171,6 +205,9 @@ export function triageRecords(rows) {
     meanPlddt: value(row.plddt),
     contacts: row.contacts,
     crosslinks: row.crosslinkCounts,
+    poseChecks: row.poseChecks,
+    affinity: value(row.affinity),
+    binderProbability: value(row.binder),
     problem: row.problem,
   }));
 }
