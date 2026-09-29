@@ -77,6 +77,7 @@ graph LR
     Surface[surface-worker.js<br/>surface.js + electrostatics.js<br/>tmalign.js]
     Chem[chemistry.js]
     Molfile[molfile.js]
+    Poses[pose-checks.js<br/>perception.js + dg-bounds.js]
     Maps[volume-worker.js<br/>volume.js]
     Stats[stats.js]
     Conserve[conservation.js]
@@ -120,6 +121,7 @@ graph LR
     App -. lazy .-> XL
     App -. lazy .-> HDX
     App -. lazy .-> Molfile
+    App --> Poses
     App -. worker .-> Maps
     App -. lazy .-> Stats
     App -. lazy .-> Conserve
@@ -508,6 +510,22 @@ ambient occlusion or outlines.
   labels, then relaxed with springs and repulsion. The SVG is built as text
   with escaped content; the page shows it in a dialog and renders PNG through
   an image and a canvas.
+- **Pose checks** (`pose-checks.js`). The ligand is built from the residue's
+  heavy atoms with the bonds of the definition it matched (dictionary, file,
+  or docking file; aromatic bonds without a Kekulé structure kekulized), and
+  metal atoms removed. `perception.js` perceives it as RDKit's sanitization
+  does (cleanup, valences, `findSSSR` in RDKit's order and its
+  symmetrization, aromaticity, conjugation, hybridization) and `dg-bounds.js`
+  builds RDKit's distance-geometry bounds from UFF parameters; both are
+  compared with RDKit on thousands of dictionary components. The checks then
+  follow PoseBusters: bounds with its tolerances, SMARTS patterns for flat
+  and puckered systems written as ring and bond tests, contacts against the
+  model's other atoms sorted into PoseBusters' classes (found through a
+  coarse grid), and volume overlap on RDKit's shape grid. The page caches
+  each residue's result until the model's chemistry changes; docking poses
+  are checked from their molecules against the receptor, so the scene holds
+  one pose at a time; prediction scoring checks every model's ligands after
+  fetching the dictionary entries they need.
 
 ## Selections, Commands and Sessions
 
@@ -567,15 +585,19 @@ ambient occlusion or outlines.
 - **Scoring.** For each model, the app parses the structure, tokenizes it the
   AlphaFold 3 way (standard residues; heavy atoms of ligands and modified
   residues) to match the PAE rows, and computes interface scores
-  (`interface-scores.js`). It keeps only small results: scores, chain order,
-  Cα positions for cross-links, and interface token lists. PAE and contact
+  (`interface-scores.js`). A model without a PAE is tokenized one token per
+  polymer residue and gets pDockQ alone. Its ligands get pose checks. It
+  keeps only small results: scores, chain order, Cα positions for
+  cross-links, interface token lists and pose-check counts. PAE and contact
   matrices are read again when a model is opened.
 - **Entries.** Opened models are ordinary entries tagged with their set and
   model, so superposition, sessions and every panel work unchanged.
 - **Batch triage** (`triage.js`). Several sets opened together are all
-  scored; rows (one per model) carry the tool's scores and those of each
-  model's best interface by ipSAE or a named chain pair, and are ranked by
-  one metric, per job (its best model) or per model. Alignments are read when
+  scored; rows (one per model) carry the tool's scores, those of each
+  model's best interface by ipSAE (by pDockQ without a PAE) or a named chain
+  pair, the pose checks of its ligands and the job's Boltz-2 affinity, and are
+  ranked by one metric (affinity lowest first), per job (its best model) or
+  per model. Alignments are read when
   a model opens. Showing a row opens its model, hides the other prediction
   models and releases the oldest beyond six; the gallery opens the best
   models, superposes the new ones on the first, renders each framed on its
@@ -676,7 +698,7 @@ The canvas fills the window, and panels float over it.
 
 ## Known Limitations
 
-See `roadmap.md` §13. In particular:
+See `roadmap.md` §15. In particular:
 
 - Structure-only superposition is rigid.
 - Electrostatics are qualitative (formal charges, ε = 4r).
@@ -688,6 +710,9 @@ See `roadmap.md` §13. In particular:
 - Rotamer outliers and clashscore come only from validation reports.
 - Chai-1 prediction folders were checked only against the documented
   layout; the other predictors against real outputs.
+- Pose checks leave out PoseBusters' energy ratio; ligands without bond
+  orders get the contact checks only, and ligands without a dictionary entry
+  no stereo checks.
 - Search reports, cross-link and HDX importers cover the formats listed in
   the README; others (Scout, mzIdentML cross-links, nested Parquet) are not
   read yet.

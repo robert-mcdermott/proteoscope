@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+- Pose checks: the ligand card runs PoseBusters' checks on the ligand as
+  modeled: bond lengths and angles, clashes inside the ligand, flat aromatic
+  rings and double bonds, puckered saturated rings, stereocenters and double
+  bonds against the Chemical Component Dictionary, and distances to and
+  overlap with the protein, cofactors, ions and waters. **Show** marks a
+  failing check's atoms in the scene; `posecheck` returns the checks to
+  scripts and agents. Bond and angle limits come from a port of RDKit's
+  distance-geometry bounds, and a new validation suite checks the verdicts
+  against PoseBusters on 127 poses. The energy ratio is left out.
+- Predictions: each model's ligands are checked too, with a Pose column in the
+  Prediction table and the triage table (`triage by pose`); Boltz-2's
+  predicted affinity and binder probability join the triage table, its CSV
+  and the results scripts get. Docking poses get a Checks column.
+- Models without a PAE (Chai-1, and Boltz or Protenix run without their PAE
+  options) now get pDockQ, which needs no PAE, and campaigns of them are
+  ranked by it.
+- MOL2 files: carboxylates, sulfonates, phosphates, amidinium and guanidinium
+  groups, whose bonds SYBYL-style files write as aromatic, get the charges and
+  bond orders RDKit gives them.
+
 ## 0.8.0 (2026-09-24)
 
 - A ligand card: select or focus a ligand to see its common name, formula,

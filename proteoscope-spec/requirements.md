@@ -628,3 +628,34 @@ selection, distance measurement, and PNG export.
 2. THE System SHALL go to a peak when it is chosen, and show the peaks near a ligand on its card
 3. WHEN no difference map is available, THE System SHALL say why
 
+
+### Requirement 52: Interface Scores Without a PAE
+
+**User Story:** As a researcher comparing predictors, I want models from tools that write no PAE to get an interface score, so that I can rank them with the others.
+
+#### Acceptance Criteria
+
+1. WHEN a prediction model has no PAE (Chai-1, and Boltz or Protenix run without their PAE options), THE System SHALL compute pDockQ for each chain pair from the pLDDT and Cβ contacts, and leave the PAE-based scores empty
+2. THE System SHALL summarize such a model by its best chain pair by pDockQ, show pDockQ in place of ipSAE in its tables, and rank a campaign by pDockQ when no model has a PAE
+3. THE pDockQ of a model without a PAE SHALL equal `ipsae.py`'s for the same pLDDT and coordinates
+
+### Requirement 53: Ligand Pose Checks
+
+**User Story:** As a medicinal chemist screening co-folded and docked complexes, I want to know whether each ligand pose is physically possible, so that I can set aside poses with broken geometry or atoms inside the protein.
+
+#### Acceptance Criteria
+
+1. WHEN a ligand is shown on the card or named in the `posecheck` command, THE System SHALL run PoseBusters' checks on it (chemistry, bond lengths and angles, internal clashes, flat rings and double bonds, puckered saturated rings, and distances to and overlap with the protein, cofactors, ions and waters), and compare its stereocenters and double bonds with the dictionary definition when there is one
+2. THE System SHALL take bond and angle limits from RDKit's distance-geometry bounds and give PoseBusters' verdicts, and SHALL state where it differs (no energy ratio, unsigned ring planarity, metal atoms, covalent partners)
+3. WHEN a ligand's bond orders are unknown, THE System SHALL run the contact checks only and say so
+4. WHEN a check fails, THE System SHALL show the atoms involved in the scene
+5. THE System SHALL show how many checks each prediction model's ligands and each docking pose pass, and export them with the other scores
+
+### Requirement 54: Ligands in Triage
+
+**User Story:** As a researcher running a co-folding screen, I want pose checks and predicted affinities on the triage table, so that I can rank ligands and drop implausible poses in one place.
+
+#### Acceptance Criteria
+
+1. THE triage table SHALL rank by the share of pose checks a model's ligands pass, and by Boltz-2's predicted affinity (lowest first) and binder probability
+2. THE triage CSV and the records returned to scripts SHALL include each model's pose checks and each Boltz-2 job's affinity and binder probability

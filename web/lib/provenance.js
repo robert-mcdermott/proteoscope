@@ -49,6 +49,9 @@ export const REFERENCES = {
   emdb: { authors: 'wwPDB Consortium', year: 2024, title: 'EMDB—the Electron Microscopy Data Bank', journal: 'Nucleic Acids Res', volume: '52', pages: 'D456–D465', doi: '10.1093/nar/gkad1019' },
   mrc2014: { authors: 'Cheng A, et al.', year: 2015, title: 'MRC2014: extensions to the MRC format header for electron cryo-microscopy and tomography', journal: 'J Struct Biol', volume: '192', pages: '146–150', doi: '10.1016/j.jsb.2015.04.002' },
   surfacenets: { authors: 'Gibson SFF', year: 1998, title: 'Constrained elastic surface nets: generating smooth surfaces from binary segmented data', journal: 'Lecture Notes in Computer Science (MICCAI 1998)', volume: '1496', pages: '888–898', doi: '10.1007/BFb0056277' },
+  posebusters: { authors: 'Buttenschoen M, Morris GM, Deane CM', year: 2024, title: 'PoseBusters: AI-based docking methods fail to generate physically valid poses or generalise to novel sequences', journal: 'Chem Sci', volume: '15', pages: '3130–3139', doi: '10.1039/D3SC04185A' },
+  rdkit: { authors: 'Landrum G, et al.', year: 2026, title: 'RDKit: open-source cheminformatics (release 2026.03)', journal: 'Software', url: 'https://www.rdkit.org', type: 'software' },
+  uff: { authors: 'Rappé AK, Casewit CJ, Colwell KS, Goddard WA III, Skiff WM', year: 1992, title: 'UFF, a full periodic table force field for molecular mechanics and molecular dynamics simulations', journal: 'J Am Chem Soc', volume: '114', pages: '10024–10035', doi: '10.1021/ja00051a040' },
   ifp: { authors: 'Marcou G, Rognan D', year: 2007, title: 'Optimizing fragment and scaffold docking by use of molecular interaction fingerprints', journal: 'J Chem Inf Model', volume: '47', pages: '195–207', doi: '10.1021/ci600342e' },
 };
 
@@ -100,6 +103,11 @@ export function methodsText(context) {
   }
   if (uses('prediction').length) {
     sentences.push(`Predicted interfaces were scored with ipSAE ${cite('ipsae')}, ipTM recomputed from the predicted aligned error, pDockQ ${cite('pdockq')}, pDockQ2 ${cite('pdockq2')} and LIS ${cite('lis')}, with the definitions of ipsae.py (version 4).`);
+    if (uses('prediction').some((entry) => entry.uses.pdockqOnly)) sentences.push('Models for which the predictor wrote no predicted aligned error were scored by pDockQ alone, which needs none.');
+  }
+  if (uses('poseChecks').length) {
+    const stereo = uses('poseChecks').some((entry) => entry.uses.poseChecks.stereo);
+    sentences.push(`Ligand poses were checked as in PoseBusters ${cite('posebusters')} (version 0.6, its docking checks without the energy ratio): bond lengths, bond angles and internal clashes against RDKit's distance-geometry bounds ${cite('rdkit')} from UFF parameters ${cite('uff')}, the planarity of aromatic rings and double bonds, and the distances to and volume overlap with the protein, cofactors, ions and waters${stereo ? `; stereocenters and double bonds were compared with the Chemical Component Dictionary ${cite('ccd')}` : ''}.`);
   }
   if (uses('domains').length) sentences.push(`Rigid domains were clustered from the predicted aligned error as in ChimeraX ${cite('chimerax')}.`);
   if (uses('validation').length) sentences.push(`Validation data were taken from the wwPDB validation reports ${cite('validation')}; Ramachandran classes follow the MolProbity Top8000 contours ${cite('molprobity')}.`);

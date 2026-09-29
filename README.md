@@ -46,6 +46,10 @@ Highlights:
   - A ligand card: common name, formula, weight, SMILES, InChIKey and links
     to PubChem, ChEMBL and DrugBank, with the difference-map peaks near it.
   - 2D interaction diagrams in the style of LigPlot+, as SVG or PNG.
+  - Pose checks: PoseBusters' checks of a ligand pose (bond lengths and
+    angles, clashes, flat rings, stereocenters, contacts with the protein),
+    for co-folded, docked and deposited ligands, matching PoseBusters'
+    verdicts on the validation suite's poses.
   - Bond orders, aromaticity and charges from the Chemical Component
     Dictionary, used to draw ligands and to type their interactions.
   - Docking poses from AutoDock Vina, smina, GNINA, Glide, GOLD, DOCK, rDock
@@ -77,12 +81,15 @@ Highlights:
     (.zip), Boltz, Chai-1, ColabFold, Protenix and OpenFold3 outputs, folders
     included, and rank their models.
   - Chain-pair ipTM plus interface scores computed from the PAE: ipSAE,
-    pDockQ, pDockQ2 and LIS, reproducing Dunbrack's `ipsae.py`.
+    pDockQ, pDockQ2 and LIS, reproducing Dunbrack's `ipsae.py`; models
+    without a PAE (Chai-1) get pDockQ, which needs none.
+  - Pose checks of co-folded ligands, and Boltz-2's predicted affinity.
   - Contact probabilities, per-atom ligand pLDDT and MSA depth.
   - How many of your cross-links each model satisfies.
   - Batch triage: open a folder of many jobs, such as a design campaign, and
-    rank every model of every job on one table by ipSAE, pDockQ2, LIS, ipTM
-    or pLDDT, with a gallery of the best and CSV export.
+    rank every model of every job on one table by ipSAE, pDockQ2, LIS, ipTM,
+    pLDDT, ligand pose checks or Boltz-2 affinity, with a gallery of the best
+    and CSV export.
 - **Validation.**
   - The wwPDB validation report on the structure: outliers per residue,
     clashes drawn in 3D, and fit to density (RSRZ, or Q-score for cryo-EM)
@@ -139,7 +146,7 @@ Highlights:
   numbered references with DOIs, also as BibTeX.
 - **Validated.** A validation suite checks the analyses against their
   reference tools (limma, MSstatsPTM, US-align, Capra and Singh's scorer,
-  EMDB and MolProbity) and runs in continuous integration; see
+  EMDB, MolProbity and PoseBusters) and runs in continuous integration; see
   [validation/](validation/README.md).
 - **Private.** Local files are parsed in the browser; `--offline` disables
   all network access.
@@ -504,9 +511,42 @@ rebuilding geometry; clipped atoms are capped.
   would overlap (heme) are drawn from their own 3D shape. Some bridged or
   caged ligands cannot be drawn flat without overlapping atoms; the diagram
   says so.
+- **Pose checks.** The card also runs the checks of PoseBusters (Buttenschoen
+  et al. 2024) on the ligand as modeled. Co-folding models and docking
+  programs can return ligands with stretched bonds, puckered rings, flipped
+  stereocenters or atoms inside the protein; deposited ligands usually pass.
+  The checks:
+  - *chemistry*: RDKit accepts the molecule, and it is one piece;
+  - *geometry*: bond lengths and angles within 25% of RDKit's
+    distance-geometry bounds, no clash inside the ligand, aromatic rings and
+    C=C bonds flat (within 0.25 Å), and saturated six-membered rings
+    puckered;
+  - *stereochemistry*: stereocenters and E/Z double bonds as in the Chemical
+    Component Dictionary's ideal coordinates;
+  - *contacts*: no atom closer to the protein, cofactors, ions or waters than
+    0.75 of the sum of their radii, a protein atom within 5 Å, and at most
+    7.5% of the ligand's volume inside them.
+
+  The summary line says how many pass; click it for the list, and **Show** on
+  a failing check draws the atoms involved as measurements and selects the
+  residues they touch. Bond and angle limits come from a port of RDKit's
+  distance-geometry bounds that matches RDKit on 4,017 dictionary
+  components, and the verdicts match PoseBusters 0.6 on the validation
+  suite's 127 poses except for heme's (see
+  [validation/](validation/README.md)). Where Proteoscope differs from
+  PoseBusters: its energy ratio (UFF energy against generated conformers) is
+  left out, so a pose that passes is not called "PB-valid"; a ring's distance
+  from its plane is read without a sign; metal atoms of a ligand (heme's
+  iron) are left out of the chemistry and geometry checks, which RDKit cannot
+  run on them; and atoms covalently bonded to the ligand (a glycan's
+  asparagine, a covalent inhibitor's cysteine), and their neighbors, do not
+  count as clashes. A ligand whose bond orders neither the dictionary nor the
+  file gives (a ligand given to a predictor as SMILES, when the output lists
+  no bonds) gets the contact checks only.
 - **Commands.** `compound [<selection>]` shows the card and returns its
   facts to scripts; `diagram [<selection>] [names]` opens the diagram, and
-  returns it to scripts as SVG and PNG (to an AI agent, as an image).
+  returns it to scripts as SVG and PNG (to an AI agent, as an image);
+  `posecheck [<selection>]` lists the pose checks and returns them.
 
 ## Docking Poses
 
@@ -526,6 +566,10 @@ and its molecules become poses in the receptor.
   receptor residues around it, as a pose × residue table, to find poses that
   keep the interactions you trust (a hinge hydrogen bond, a salt bridge).
   **Export CSV** saves the scores and fingerprints.
+- **Pose checks.** The **Checks** column counts the pose checks each pose
+  passes against the receptor (see [Ligands](#ligands)); PDBQT files carry
+  no bond orders, so their poses get the contact checks only. The CSV lists
+  the checks each pose fails.
 - A pose never bonds to a crystal ligand in the same place, so poses can be
   compared with the deposited ligand. Sessions keep the poses.
 
@@ -594,7 +638,8 @@ ball-stick, spheres, cartoon, surface, water, hydrogens, labels, everything),
 `assembly` (build a biological assembly, or `au`), `interface A B` (contacts
 between two chains), `interactions` (the interactions of residues or a
 ligand), `info` (describe the active structure), `compound` (the ligand
-card), `diagram` (a 2D interaction diagram), `superpose`, `alphafold`,
+card), `diagram` (a 2D interaction diagram), `posecheck` (PoseBusters'
+checks of a ligand pose), `superpose`, `alphafold`,
 `overlay`, `ranking`, `triage` (rank many prediction jobs),
 `domains`, `msa`, `validate` (with `clashes`, `fit`, `refresh` or `off`),
 `missense`, `exposure` (pPSE and disorder), `evidence` (public peptides and
@@ -696,8 +741,10 @@ the AlphaFold Server `.zip`, or name the folder on the command line
 AlphaFold 3 runs saved with `--compress_large_output_files` (`.zst` models
 and confidences) open as they are. Samples from several seeds form one ranked
 set. Other files in a prediction folder (logs, settings, templates, inputs)
-are left alone. Chai-1 does not write PAE to disk, so its models get the
-scores Chai reports but not the PAE-based ones.
+are left alone. Chai-1 does not write PAE to disk, nor do Boltz without
+`--write_full_pae` and Protenix without `--need_atom_confidence`; their
+models get the scores the tool reports and pDockQ, which needs no PAE, but
+not ipSAE, pDockQ2 or LIS.
 
 **Ranking.** The **Prediction** group (Structure tab) lists the models by the
 tool's own ranking score. Click a model to show it in place of the current one;
@@ -721,6 +768,9 @@ pLDDT and coordinates with the definitions of Dunbrack's `ipsae.py`:
 - **LIS** (Kim et al. 2024): the mean of (12 − PAE)/12 over inter-chain pairs
   with PAE below 12 Å.
 
+A model without a PAE gets pDockQ alone, from the pLDDT the tool writes in
+the B-factor column; the tables show it in place of ipSAE.
+
 These scores reproduce `ipsae.py` (version 4) to its printed precision on the
 AlphaFold 3 (Aurora A–TPX2) and AlphaFold 2 multimer (RAF1–KSR1–MEK1) examples
 of the IPSAE repository and on a Boltz-2 prediction, and a unit test pins them
@@ -738,7 +788,15 @@ differs in the fourth decimal.)
 - *Cross-links* mapped in the Proteomics tab add a column with how many links
   each model satisfies.
 
-Sessions keep the model, its PAE, contact probabilities and scores.
+**Ligands.** AlphaFold 3, Boltz, Chai-1, Protenix and OpenFold3 predict
+protein–ligand complexes. Each model's ligands get the pose checks of the
+ligand card (see [Ligands](#ligands)), counted in a **Pose** column of the
+Prediction table and the triage table; the card lists them for the ligand you
+select. Boltz-2's predicted affinity (log10 IC50 in µM, lower binds tighter)
+and binder probability, predicted per job, join the triage table.
+
+Sessions keep the model, its PAE, contact probabilities, scores and pose
+checks.
 
 ### Batch triage
 
@@ -753,13 +811,18 @@ table**):
 
 - **One row per job** (its best model under the chosen score) or per model,
   ranked by ipSAE, pDockQ2, pDockQ, LIS, ipTM, pTM, the tool's own score,
-  mean pLDDT, or the share of your cross-links each model satisfies. Click a
-  column header to rank by it.
-- **The interface** is each model's best chain pair by ipSAE, or the chains
-  you name (for example `A B`, the target and the binder).
-- ipSAE, pDockQ, pDockQ2 and LIS are computed from each model's PAE and
-  coordinates the same way for every predictor, so they compare jobs from
-  different tools; ipTM, pTM and the score are each tool's own.
+  mean pLDDT, the share of your cross-links each model satisfies, the share
+  of pose checks its ligands pass, or Boltz-2's affinity or binder
+  probability. Click a column header to rank by it.
+- **The interface** is each model's best chain pair by ipSAE (by pDockQ for
+  models without a PAE), or the chains you name (for example `A B`, the
+  target and the binder).
+- ipSAE, pDockQ, pDockQ2 and LIS are computed from each model's PAE, pLDDT
+  and coordinates the same way for every predictor, so they compare jobs from
+  different tools; a model without a PAE has pDockQ only. ipTM, pTM, the
+  score and Boltz-2's affinity are each tool's own.
+- **Pose** counts the pose checks each model's ligands pass, to set aside
+  models whose ligand sits in the protein or has broken geometry.
 - **Click a row** to show that model; **Gallery** renders the 12 best,
   each superposed on the first so they share a view; **Export CSV** saves
   every model and interface of every job.
@@ -768,7 +831,8 @@ table**):
   fast.
 
 From the command line: `triage` (rank, for example `triage by pdockq2 top 10
-pair A B`), `triage show 3`, `triage gallery 12` and `triage export`.
+pair A B`, or `triage by pose`), `triage show 3`, `triage gallery 12` and
+`triage export`.
 
 ## Validation
 
@@ -1385,8 +1449,8 @@ node validation/run.mjs
 ```
 
 The last command compares Proteoscope's analyses with numbers from their
-reference tools (limma, MSstatsPTM, US-align, Capra and Singh's scorer, EMDB
-and MolProbity); see [validation/README.md](validation/README.md). GitHub
+reference tools (limma, MSstatsPTM, US-align, Capra and Singh's scorer, EMDB,
+MolProbity and PoseBusters); see [validation/README.md](validation/README.md). GitHub
 Actions run gofmt, `go vet`, the Go tests with the race detector, the
 JavaScript tests, the offline validation suites and the cross-compilation on
 every pull request and every push to `main`, and the whole validation suite
@@ -1427,6 +1491,7 @@ weekly.
 | `web/lib/interactions.js` | Non-covalent interaction detection |
 | `web/lib/chemistry.js`, `web/lib/molfile.js` | Ligand chemistry from the CCD (bond orders, aromaticity, charges, hydrogens); SDF, MOL2 and PDBQT docking poses |
 | `web/lib/depict.js`, `web/lib/ligand-diagram.js` | 2D layout of small molecules; ligand interaction diagrams as SVG |
+| `web/lib/perception.js`, `web/lib/dg-bounds.js`, `web/lib/pose-checks.js` | Chemical perception and distance-geometry bounds as RDKit computes them; PoseBusters' pose checks |
 | `web/lib/volume.js`, `web/lib/volume-worker.js` | CCP4/MRC and volume-server maps, isosurfaces, map fit, difference-map peaks |
 | `web/lib/tmalign.js` | TM-align and MM-align, ported from US-align |
 | `web/lib/stats.js` | Moderated t-test, normalization, imputation, q-values, PTM adjustment |

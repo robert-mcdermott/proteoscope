@@ -37,7 +37,7 @@ export const COMMANDS = [
   { name: 'interactions', aliases: ['plip'], syntax: 'interactions <selection>', summary: 'Focus residues or a ligand and list their interactions' },
   { name: 'overlay', aliases: [], syntax: 'overlay [on|off]', summary: 'Overlay all models of an ensemble' },
   { name: 'ranking', aliases: ['models', 'predictions'], syntax: 'ranking [<rank>]', summary: 'List the models of an opened prediction, or show the one at a rank' },
-  { name: 'triage', aliases: ['batch', 'campaign'], syntax: 'triage [by <metric>] [top <n>] [jobs|models] [pair <chain> <chain>|best] · triage show <n> · triage gallery [<n>] · triage export', summary: 'Rank every opened prediction job by ipSAE, pDockQ2, LIS, ipTM, pLDDT or another score; show a job, render a gallery of the best, or export the table' },
+  { name: 'triage', aliases: ['batch', 'campaign'], syntax: 'triage [by <metric>] [top <n>] [jobs|models] [pair <chain> <chain>|best] · triage show <n> · triage gallery [<n>] · triage export', summary: 'Rank every opened prediction job by ipSAE, pDockQ, pDockQ2, LIS, ipTM, pLDDT, ligand pose checks, Boltz-2 affinity or another score; show a job, render a gallery of the best, or export the table' },
   { name: 'domains', aliases: ['paedomains'], syntax: 'domains', summary: 'Find rigid domains in the PAE matrix and color by them' },
   { name: 'msa', aliases: [], syntax: 'msa', summary: 'Color by MSA depth (AlphaFold DB models, prediction folders, dropped .a3m files)' },
   { name: 'validate', aliases: ['validation', 'report'], syntax: 'validate [clashes|fit|refresh|off]', summary: 'Load the wwPDB validation report and color outliers, show clashes or density fit' },
@@ -45,6 +45,7 @@ export const COMMANDS = [
   { name: 'map', aliases: ['density', 'volume'], syntax: 'map [load|refresh|fit|off] · map peaks [<σ>] · map level <σ> [2fofc|fofc|em] · map style mesh|surface · map region focus|view|all · map radius <Å> · map zone <Å>|off', summary: 'Load the X-ray or cryo-EM map of a PDB entry, contour it, fit the model to it, or list the peaks of the difference map' },
   { name: 'compound', aliases: ['chem', 'component', 'ccd'], syntax: 'compound [<selection>]', summary: 'Show the ligand card: names, formula, weight, SMILES, InChIKey and links to PubChem, ChEMBL and DrugBank' },
   { name: 'diagram', aliases: ['ligplot', 'poseview'], syntax: 'diagram [<selection>] [names]', summary: 'Draw a 2D diagram of a ligand and its interactions, for figures (SVG or PNG); names adds atom names' },
+  { name: 'posecheck', aliases: ['posebusters', 'checks', 'pb'], syntax: 'posecheck [<selection>]', summary: 'Check a ligand pose as PoseBusters does: bond lengths and angles, clashes, flat rings, stereocenters and contacts with the protein' },
   { name: 'pose', aliases: ['poses', 'docking'], syntax: 'pose [<n>|next|previous|fingerprints|off]', summary: 'Show a docking pose (opened from SDF, MOL2 or PDBQT), compute interaction fingerprints, or remove the poses' },
   { name: 'missense', aliases: ['alphamissense', 'am'], syntax: 'missense [<UniProt accession>]', summary: 'Color by AlphaMissense pathogenicity (human proteins)' },
   { name: 'refresh', aliases: ['reload'], syntax: 'refresh', summary: 'Download the active structure again, bypassing the cache' },
@@ -240,6 +241,7 @@ export function parseCommand(text, options = {}) {
       throw new CommandError(`Usage: ${command.syntax}`);
     }
     case 'compound':
+    case 'posecheck':
       return { ...parsed, selection: rest || null };
     case 'diagram': {
       const names = words.length > 0 && /^(names|atoms|labels)$/i.test(words[words.length - 1]);

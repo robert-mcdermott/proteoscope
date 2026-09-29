@@ -125,6 +125,7 @@
                 <button type="button" data-pair-metric="iptm" class="is-active" title="ipTM for each chain pair, as reported by the predictor">ipTM</button>
                 <button type="button" data-pair-metric="ipsae" title="ipSAE (Dunbrack 2025): interface pTM restricted to confidently aligned residue pairs">ipSAE</button>
                 <button type="button" data-pair-metric="pdockq2" title="pDockQ2 (Zhu et al. 2023): interface pLDDT and PAE">pDockQ2</button>
+                <button type="button" data-pair-metric="pdockq" title="pDockQ (Bryant et al. 2022): interface pLDDT and contacts; the only interface score for models without a PAE" hidden>pDockQ</button>
               </div>
               <div id="prediction-pairs" class="prediction-pairs"></div>
               <div id="prediction-detail" class="result-box"></div>
@@ -699,6 +700,10 @@
           <h2 id="ligand-name"></h2>
           <dl id="ligand-details" class="detail-grid"></dl>
           <div id="ligand-links" class="ligand-links"></div>
+          <div id="ligand-checks" class="ligand-checks" hidden>
+            <button id="ligand-checks-toggle" type="button" class="checks-summary" aria-expanded="false" aria-controls="ligand-check-list"></button>
+            <ul id="ligand-check-list" class="check-list" hidden></ul>
+          </div>
           <p id="ligand-status" class="hint" hidden></p>
         </section>
 
@@ -831,7 +836,7 @@
           <div class="triage-table-wrap"><table class="prediction-table triage-table"><thead id="triage-head"></thead><tbody id="triage-body"></tbody></table></div>
           <p id="triage-more" class="hint"></p>
           <div id="triage-gallery-grid" class="triage-gallery" hidden></div>
-          <p class="hint">ipSAE, pDockQ, pDockQ2 and LIS are computed from each model's PAE and coordinates the same way for every predictor, so they compare jobs from different tools. ipTM, pTM and the score are each tool's own. Click a row to show that model.</p>
+          <p class="hint">ipSAE, pDockQ, pDockQ2 and LIS are computed from each model's PAE, pLDDT and coordinates the same way for every predictor, so they compare jobs from different tools; models without a PAE get pDockQ only. ipTM, pTM, the score and Boltz-2's affinity are each tool's own. Pose counts PoseBusters' checks the ligands pass. Click a row to show that model.</p>
           <menu>
             <button value="close" type="submit">Close</button>
             <button id="triage-dialog-export" type="button">Export CSV</button>

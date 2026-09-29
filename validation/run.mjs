@@ -3,9 +3,9 @@
 //
 //   node validation/run.mjs [suite …] [--offline] [--verbose]
 //
-// Suites: limma, msstatsptm, usalign, conservation, emdb, ramachandran (all by default). Inputs
-// that are not in the repository (PDB entries, a region of an EMDB map, a wwPDB validation report)
-// are downloaded once into validation/cache/; with --offline, suites whose inputs are not cached
+// Suites: limma, msstatsptm, usalign, conservation, emdb, ramachandran, posebusters (all by
+// default). Inputs that are not in the repository (PDB entries, chemical components, a region of
+// an EMDB map, a wwPDB validation report) are downloaded once into validation/cache/; with --offline, suites whose inputs are not cached
 // are skipped. The reference tools are not needed: validation/scripts/ holds the scripts that
 // wrote the reference files. Exits with status 1 when a check fails.
 import { readFileSync } from 'node:fs';
@@ -19,7 +19,8 @@ import { deriveStructure } from '../web/lib/structure.js';
 import { exampleText } from '../web/lib/test-data.mjs';
 import { mmAlign, tmAlign } from '../web/lib/tmalign.js';
 import { mapFit, parseVolumeServerData } from '../web/lib/volume.js';
-import { caseChains, download, MissingInput, pairsFromRows, pdbFile, readReference, ROOT } from './common.mjs';
+import { checkPose, contactClass } from '../web/lib/pose-checks.js';
+import { caseChains, componentDefinition, componentFile, download, MissingInput, pairsFromRows, pdbFile, poseComplex, readReference, ROOT } from './common.mjs';
 
 const args = process.argv.slice(2);
 const offline = args.includes('--offline');
@@ -260,9 +261,103 @@ async function ramachandran() {
   }];
 }
 
+// PoseBusters' checks on crystal poses and copies broken on purpose.
+const POSEBUSTERS_NAMES = {
+  sanitization: 'sanitization',
+  connected: 'all_atoms_connected',
+  'bond-lengths': 'bond_lengths',
+  'bond-angles': 'bond_angles',
+  'internal-clash': 'internal_steric_clash',
+  'aromatic-flatness': 'aromatic_ring_flatness',
+  'ring-nonflatness': 'non-aromatic_ring_non-flatness',
+  'double-bond-flatness': 'double_bond_flatness',
+  chirality: 'tetrahedral_chirality',
+  'double-bond-stereo': 'double_bond_stereochemistry',
+  'protein-distance': 'minimum_distance_to_protein',
+  'protein-near': 'protein-ligand_maximum_distance',
+  'organic-distance': 'minimum_distance_to_organic_cofactors',
+  'inorganic-distance': 'minimum_distance_to_inorganic_cofactors',
+  'water-distance': 'minimum_distance_to_waters',
+  'protein-overlap': 'volume_overlap_with_protein',
+  'organic-overlap': 'volume_overlap_with_organic_cofactors',
+  'inorganic-overlap': 'volume_overlap_with_inorganic_cofactors',
+  'water-overlap': 'volume_overlap_with_waters',
+};
+const POSEBUSTERS_VALUES = [
+  ['bond-lengths', 'shortest', 'shortest_bond_relative_length'],
+  ['bond-lengths', 'longest', 'longest_bond_relative_length'],
+  ['bond-angles', 'value', 'most_extreme_relative_angle'],
+  ['internal-clash', 'value', 'shortest_noncovalent_relative_distance'],
+  ['protein-distance', 'value', 'most_extreme_relative_distance_protein'],
+  ['organic-distance', 'value', 'most_extreme_relative_distance_organic_cofactors'],
+  ['inorganic-distance', 'value', 'most_extreme_relative_distance_inorganic_cofactors'],
+  ['water-distance', 'value', 'most_extreme_relative_distance_waters'],
+  ['protein-near', 'value', 'smallest_distance_protein'],
+];
+const OVERLAPS = [['protein-overlap', 'volume_overlap_protein'], ['organic-overlap', 'volume_overlap_organic_cofactors'], ['inorganic-overlap', 'volume_overlap_inorganic_cofactors'], ['water-overlap', 'volume_overlap_waters']];
+
+async function posebusters() {
+  const reference = readReference('posebusters.json');
+  const checks = [];
+  for (const item of reference.cases) {
+    const complex = poseComplex(await pdbFile(item.pdb, { offline }), item.code);
+    const component = await componentDefinition(await componentFile(item.code, { offline }));
+    const environment = complex.environment.map((atom) => ({ ...atom, contact: contactClass(atom) }));
+    const bonds = [];
+    for (let index = 0; index < item.bonds.length; index += 3) bonds.push({ a: item.bonds[index], b: item.bonds[index + 1], order: item.bonds[index + 2] });
+    const metal = item.elements.some((element) => ['FE', 'ZN', 'MG', 'CU', 'CO', 'NI', 'MN'].includes(element));
+    let verdicts = 0;
+    let worstValue = 0;
+    let worstOverlap = 0;
+    const disagreements = [];
+    const expected = [];
+    for (const pose of item.poses) {
+      const atoms = item.atoms.map((name, index) => ({ name, element: item.elements[index], charge: item.charges[index], x: pose.coordinates[index * 3], y: pose.coordinates[index * 3 + 1], z: pose.coordinates[index * 3 + 2] }));
+      const result = checkPose({ atoms, bonds }, environment, { reference: component });
+      const theirs = Object.fromEntries(reference.fields.map((field, index) => [field, pose.posebusters[index]]));
+      const byId = new Map(result.checks.map((check) => [check.id, check]));
+      for (const [id, name] of Object.entries(POSEBUSTERS_NAMES)) {
+        const ours = byId.get(id).passed;
+        const verdict = theirs[name];
+        if (typeof verdict !== 'boolean') continue;
+        verdicts += 1;
+        if ((ours ?? false) === verdict) continue;
+        const label = `${pose.name}: ${id} ${ours} vs ${verdict}`;
+        // PoseBusters reads a ring's distance from its plane with a sign: it misses a single atom
+        // pushed out of the ring when the plane's normal points the other way.
+        if (id === 'aromatic-flatness' && !ours && verdict && (theirs.aromatic_ring_maximum_distance_from_plane ?? 0) <= 0.25) expected.push(`${label} (signed distance)`);
+        // RDKit rejects ligands bonded to a metal, and PoseBusters then fails every geometry
+        // check; Proteoscope checks the organic part and measures the metal by covalent radii.
+        else if (metal && theirs.sanitization === false) expected.push(`${label} (metal)`);
+        else if (id.endsWith('-overlap') && Math.abs((byId.get(id).value ?? 0) - 0.075) < 0.01) expected.push(`${label} (at the limit)`);
+        else disagreements.push(label);
+      }
+      if (!(metal && theirs.sanitization === false)) {
+        for (const [id, field, name] of POSEBUSTERS_VALUES) {
+          const ours = byId.get(id)[field];
+          const expectedValue = theirs[name];
+          if (expectedValue === null || expectedValue === undefined || !Number.isFinite(ours)) continue;
+          worstValue = Math.max(worstValue, Math.abs(ours - expectedValue) / Math.max(Math.abs(expectedValue), 1e-3));
+        }
+      }
+      for (const [id, name] of OVERLAPS) {
+        const expectedValue = theirs[name];
+        if (expectedValue === null || expectedValue === undefined) continue;
+        worstOverlap = Math.max(worstOverlap, Math.abs(byId.get(id).value - expectedValue));
+      }
+    }
+    checks.push({
+      name: `${item.pdb} ${item.code} (${item.description}), ${item.poses.length} poses`,
+      ok: disagreements.length === 0 && worstValue < 1e-4 && worstOverlap < 0.02,
+      detail: `${verdicts - disagreements.length - expected.length} of ${verdicts} verdicts agree${expected.length ? `, ${expected.length} differ as documented (${expected.join('; ')})` : ''}${disagreements.length ? `; DISAGREE: ${disagreements.join('; ')}` : ''}; largest relative difference in bond, angle, clash and contact ratios ${exp(worstValue)}; volume overlap within ${worstOverlap.toFixed(4)}`,
+    });
+  }
+  return checks;
+}
+
 /* ---------- Runner ---------- */
 
-const SUITES = { limma, msstatsptm, usalign, conservation, emdb, ramachandran };
+const SUITES = { limma, msstatsptm, usalign, conservation, emdb, ramachandran, posebusters };
 const requested = args.filter((arg) => !arg.startsWith('--'));
 const unknown = requested.filter((name) => !SUITES[name]);
 if (unknown.length) {

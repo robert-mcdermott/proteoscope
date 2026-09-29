@@ -1,5 +1,5 @@
 // Shared by run.mjs and the scripts that write the reference files: paths, the download cache,
-// the structure-alignment cases and US-align's reading of PDB files.
+// the structure-alignment cases and US-align's reading of PDB files, and the ligand-pose cases.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -191,4 +191,100 @@ export function pairsFromRows(mobileRow, referenceRow) {
     if (b !== '-') j += 1;
   }
   return pairs;
+}
+
+/* ---------- Ligand poses (PoseBusters) ---------- */
+
+// Complexes with one ligand of interest each: PDB entry, ligand component, description. They
+// cover fused heteroaromatics, sulfonamides, amidines, carboxylates and phosphates (whose terminal
+// oxygens get symmetrized bounds), saturated and bridged rings, stereocenters, an E/Z double bond,
+// metal ions and a heme cofactor next to the ligand, and a ligand that carries a metal itself.
+export const POSE_CASES = [
+  ['1M17', 'AQ4', 'erlotinib in EGFR'],
+  ['2HYY', 'STI', 'imatinib in ABL1'],
+  ['3OG7', '032', 'vemurafenib in BRAF'],
+  ['2GQG', '1N1', 'dasatinib in ABL1'],
+  ['1STC', 'STU', 'staurosporine in PKA'],
+  ['1HVR', 'XK2', 'cyclic urea in HIV protease'],
+  ['1STP', 'BTN', 'biotin in streptavidin'],
+  ['3PTB', 'BEN', 'benzamidine in trypsin'],
+  ['1CBX', 'BZS', 'benzylsuccinate in carboxypeptidase A (zinc)'],
+  ['1ATP', 'ATP', 'ATP in PKA (manganese)'],
+  ['4DFR', 'MTX', 'methotrexate in DHFR'],
+  ['3ERT', 'OHT', '4-hydroxytamoxifen in the estrogen receptor'],
+  ['2HU4', 'G39', 'oseltamivir in neuraminidase'],
+  ['1KIM', 'THM', 'thymidine in HSV thymidine kinase'],
+  ['1A28', 'STR', 'progesterone in the progesterone receptor'],
+  ['2CPP', 'CAM', 'camphor in P450cam (next to heme)'],
+  ['4HHB', 'HEM', 'heme in hemoglobin'],
+  ['5T35', '759', 'MZ1 in VHL–BRD4'],
+];
+
+export async function componentFile(id, options) {
+  return (await download(`ccd/${id}.cif`, `https://files.rcsb.org/ligands/view/${id}.cif`, options)).toString('utf8');
+}
+
+// PDB records as PoseBusters' inputs see them: the first model, alternate locations blank or A,
+// no hydrogens. The first residue named `code` is the ligand; every other atom is its environment,
+// with the record type (hetero), residue name and element PoseBusters sorts atoms by.
+export function poseComplex(text, code) {
+  const ligand = [];
+  const environment = [];
+  const lines = [];
+  let ligandResidue = null;
+  for (const line of text.split(/\r?\n/)) {
+    if (line.startsWith('ENDMDL')) break;
+    const record = line.slice(0, 6);
+    if (record !== 'ATOM  ' && record !== 'HETATM') continue;
+    const altLoc = line[16];
+    if (altLoc !== ' ' && altLoc !== 'A') continue;
+    const name = line.slice(12, 16).trim();
+    const element = (line.slice(76, 78).trim() || name.replace(/[^A-Za-z]/g, '').slice(0, 1)).toUpperCase();
+    if (element === 'H' || element === 'D') continue;
+    const resName = line.slice(17, 20).trim();
+    const residue = line.slice(21, 27);
+    const atom = { name, element, x: Number(line.slice(30, 38)), y: Number(line.slice(38, 46)), z: Number(line.slice(46, 54)) };
+    if (record === 'HETATM' && resName === code && (ligandResidue === null || ligandResidue === residue)) {
+      ligandResidue = residue;
+      ligand.push(atom);
+      continue;
+    }
+    environment.push({ ...atom, resName, hetero: record === 'HETATM', water: resName === 'HOH', key: environment.length, label: `${resName}${line.slice(22, 26).trim()}:${line[21]} ${name}` });
+    lines.push(line);
+  }
+  if (!ligand.length) throw new Error(`No ${code} residue`);
+  return { ligand, environment, lines, residue: ligandResidue };
+}
+
+// A Chemical Component Dictionary entry: atoms by name (element, charge, ideal coordinates, R/S
+// label) and bonds (order, E/Z label).
+export async function componentDefinition(text) {
+  const { parseCIFDocument, cifTable } = await import('../web/lib/parse.js');
+  const cif = parseCIFDocument(text);
+  const clean = (value) => (value === '?' || value === '.' ? '' : String(value ?? ''));
+  const atoms = new Map();
+  const table = cifTable(cif, 'chem_comp_atom');
+  const column = (name) => table.column(name);
+  const [id, type, charge, stereo, x, y, z] = ['atom_id', 'type_symbol', 'charge', 'pdbx_stereo_config', 'pdbx_model_Cartn_x_ideal', 'pdbx_model_Cartn_y_ideal', 'pdbx_model_Cartn_z_ideal'].map(column);
+  for (let row = 0; row < table.rowCount; row += 1) {
+    atoms.set(clean(id(row)).toUpperCase(), { element: clean(type(row)).toUpperCase(), charge: Number(clean(charge(row))) || 0, stereo: clean(stereo(row)).toUpperCase(), x: Number(clean(x(row))), y: Number(clean(y(row))), z: Number(clean(z(row))) });
+  }
+  const bonds = [];
+  const bondTable = cifTable(cif, 'chem_comp_bond');
+  const [a, b, order, bondStereo] = ['atom_id_1', 'atom_id_2', 'value_order', 'pdbx_stereo_config'].map((name) => bondTable.column(name));
+  for (let row = 0; row < bondTable.rowCount; row += 1) {
+    const text = clean(order(row)).toUpperCase();
+    bonds.push({ a: clean(a(row)).toUpperCase(), b: clean(b(row)).toUpperCase(), order: text.startsWith('DOUB') ? 2 : text.startsWith('TRIP') ? 3 : text.startsWith('AROM') ? 1.5 : 1, stereo: clean(bondStereo(row)).toUpperCase() });
+  }
+  return { atoms, bonds };
+}
+
+// The ligand's heavy atoms with the dictionary's charges and the bonds among them.
+export function ligandTopology(ligand, component) {
+  const index = new Map(ligand.map((atom, position) => [atom.name.toUpperCase(), position]));
+  const atoms = ligand.map((atom) => ({ ...atom, charge: component.atoms.get(atom.name.toUpperCase())?.charge ?? 0 }));
+  const bonds = component.bonds
+    .filter((bond) => index.has(bond.a) && index.has(bond.b))
+    .map((bond) => ({ a: index.get(bond.a), b: index.get(bond.b), order: bond.order }));
+  return { atoms, bonds };
 }

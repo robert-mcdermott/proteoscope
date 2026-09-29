@@ -15,7 +15,8 @@
 //     both directions.
 //
 // Only polymer residues take part; ligand atoms and the extra atom tokens of modified residues
-// are masked out.
+// are masked out. Without a PAE (Chai-1, and Boltz or Protenix runs without their PAE options)
+// only pDockQ, which needs none, is computed; the other scores are NaN.
 
 export const DEFAULT_PAE_CUTOFF = 10;
 export const CONTACT_DISTANCE = 8;
@@ -32,12 +33,13 @@ function ptmTerm(pae, d0) {
 }
 
 // tokens: [{ chain, plddt (0–100), position: [x, y, z] (Cβ, Cα for Gly, C3' for nucleotides),
-// polymer, nucleic }] in PAE order; pae: { size, matrix }. Returns { chains, pairs }, where pairs
-// lists every ordered-independent chain pair with its scores and interface residues.
+// polymer, nucleic }] in PAE order; pae: { size, matrix }, or null. Returns { chains, pairs, pae },
+// where pairs lists every ordered-independent chain pair with its scores and interface residues
+// and pae says whether the PAE-based scores were computed.
 export function interfaceScores(pae, tokens, options = {}) {
   const cutoff = options.paeCutoff ?? DEFAULT_PAE_CUTOFF;
   const contactDistance = options.contactDistance ?? CONTACT_DISTANCE;
-  const n = pae.size;
+  const n = pae ? pae.size : tokens.length;
   if (tokens.length !== n) throw new Error(`The PAE matrix has ${n} rows but the model has ${tokens.length} tokens.`);
   const chains = [];
   const members = new Map();
@@ -56,8 +58,9 @@ export function interfaceScores(pae, tokens, options = {}) {
       const A = members.get(chains[a]);
       const B = members.get(chains[b]);
       const pairNucleic = nucleic(chains[a]) || nucleic(chains[b]);
-      const ab = directional(pae.matrix, n, A, B, cutoff, pairNucleic);
-      const ba = directional(pae.matrix, n, B, A, cutoff, pairNucleic);
+      const none = { ipsae: NaN, iptm: NaN, lis: NaN };
+      const ab = pae ? directional(pae.matrix, n, A, B, cutoff, pairNucleic) : none;
+      const ba = pae ? directional(pae.matrix, n, B, A, cutoff, pairNucleic) : none;
       const contacts = interfaceContacts(tokens, A, B, contactDistance);
       pairs.push({
         chainA: chains[a],
@@ -70,13 +73,23 @@ export function interfaceScores(pae, tokens, options = {}) {
         iptmBA: ba.iptm,
         lis: (ab.lis + ba.lis) / 2,
         pdockq: pDockQ(tokens, contacts),
-        pdockq2: Math.max(pDockQ2(pae.matrix, n, tokens, contacts, false), pDockQ2(pae.matrix, n, tokens, contacts, true)),
+        pdockq2: pae ? Math.max(pDockQ2(pae.matrix, n, tokens, contacts, false), pDockQ2(pae.matrix, n, tokens, contacts, true)) : NaN,
         contacts: contacts.pairs.length,
         interface: [...contacts.residuesA, ...contacts.residuesB],
       });
     }
   }
-  return { chains, pairs };
+  return { chains, pairs, pae: Boolean(pae) };
+}
+
+// The interface a model is summarized by: its best chain pair by ipSAE, or by pDockQ when the
+// model has no PAE. The first of equal pairs wins.
+export function bestInterface(pairs = []) {
+  const scored = pairs.filter((pair) => Number.isFinite(pair.ipsae));
+  const key = scored.length ? 'ipsae' : 'pdockq';
+  let best = null;
+  for (const pair of scored.length ? scored : pairs) if (!best || pair[key] > best[key]) best = pair;
+  return best;
 }
 
 function directional(matrix, n, A, B, cutoff, nucleic) {

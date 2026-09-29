@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { defaultTriageMetric, rankTriage, triageCSVRows, triageMetric, triagePair, triageRecords, triageRows } from './triage.js';
+import { defaultTriageMetric, poseSummary, rankTriage, triageCSVRows, triageMetric, triagePair, triageRecords, triageRows } from './triage.js';
 
 const pair = (chainA, chainB, ipsae, extra = {}) => ({ chainA, chainB, ipsae, ipsaeAB: ipsae, ipsaeBA: ipsae - 0.01, iptm: ipsae + 0.1, pdockq: ipsae / 2, pdockq2: ipsae / 3, lis: ipsae / 4, contacts: 40, ...extra });
 const model = (id, rank, rankingScore, pairs, extra = {}) => ({ id, rank, label: `sample ${rank - 1}`, scores: { rankingScore, iptm: rankingScore - 0.05, ptm: 0.8, chainIds: ['A', 'B', 'C'], chainPairIptm: [[0.9, 0.61, 0.2], [0.61, 0.9, 0.3], [0.2, 0.3, 0.9]] }, metrics: { pairs }, meanPlddt: 80 + rank, ...extra });
@@ -66,11 +66,45 @@ test('jobs with the same name are told apart by their folder, in the table and t
 
 test('records for scripts use null for missing values; the CSV has one row per model and interface', () => {
   const records = triageRecords(rankTriage(triageRows(sets), { metric: 'ipsae' }));
-  assert.deepEqual(records[0], { position: 1, job: 'binder_2', tool: 'AlphaFold 3', model: 'sample 0', rank: 1, chains: ['A', 'C'], ipsae: 0.8, pdockq: 0.4, pdockq2: 0.2667, lis: 0.2, iptm: 0.2, ptm: 0.8, rankingScore: 0.7, meanPlddt: 81, contacts: 40, crosslinks: null, problem: null });
+  assert.deepEqual(records[0], { position: 1, job: 'binder_2', tool: 'AlphaFold 3', model: 'sample 0', rank: 1, chains: ['A', 'C'], ipsae: 0.8, pdockq: 0.4, pdockq2: 0.2667, lis: 0.2, iptm: 0.2, ptm: 0.8, rankingScore: 0.7, meanPlddt: 81, contacts: 40, crosslinks: null, poseChecks: null, affinity: null, binderProbability: null, problem: null });
   assert.equal(records[2].ipsae, null);
   assert.match(records[2].problem, /does not match/);
   const csv = triageCSVRows(sets);
   assert.equal(csv[0][1], 'job');
   assert.equal(csv.length, 1 + 2 + 2 + 1, 'header, two AF3 models of binder_1, two interfaces of binder_2, the ColabFold model');
   assert.deepEqual(csv[3].slice(0, 12), ['AlphaFold 3', 'binder_2', 1, 'sample 0', 0.7, 0.8, 0.65, 81, 'A', 'B', 0.61, 0.55]);
+});
+
+test('models without a PAE rank by pDockQ; the best interface falls back to pDockQ', () => {
+  const noPae = (chainA, chainB, pdockq) => ({ chainA, chainB, ipsae: NaN, ipsaeAB: NaN, ipsaeBA: NaN, iptm: NaN, pdockq, pdockq2: NaN, lis: NaN, contacts: 12 });
+  const chai = [
+    { id: 'c1', name: 'chai_1', tool: 'chai', toolLabel: 'Chai-1', models: [model('k1', 1, 0.6, [noPae('A', 'B', 0.2), noPae('A', 'C', 0.45)])] },
+    { id: 'c2', name: 'chai_2', tool: 'chai', toolLabel: 'Chai-1', models: [model('k2', 1, 0.7, [noPae('A', 'B', 0.3)])] },
+  ];
+  assert.deepEqual([triagePair(chai[0].models[0]).chainA, triagePair(chai[0].models[0]).chainB], ['A', 'C']);
+  const rows = triageRows(chai);
+  assert.equal(defaultTriageMetric(rows), 'pdockq');
+  assert.deepEqual(rankTriage(rows).map((row) => [row.job, row.pdockq]), [['chai_1', 0.45], ['chai_2', 0.3]]);
+  // Mixed with PAE-scored jobs, ipSAE stays the default and the Chai-1 jobs go last.
+  assert.equal(defaultTriageMetric(triageRows([...sets, ...chai])), 'ipsae');
+});
+
+test('pose checks sum over a model\'s ligands; Boltz-2 affinity ranks lowest first', () => {
+  const checked = (passed, checked, failed) => ({ ligand: 'LIG', passed, checked, failed });
+  const boltz = [
+    { id: 'b1', name: 'lig_1', tool: 'boltz', toolLabel: 'Boltz', affinityResult: { value: -0.5, probability: 0.9 }, models: [model('z1', 1, 0.8, [], { poseChecks: [checked(17, 18, ['protein-distance']), checked(12, 12, [])] })] },
+    { id: 'b2', name: 'lig_2', tool: 'boltz', toolLabel: 'Boltz', affinityResult: { value: 1.2, probability: 0.4 }, models: [model('z2', 1, 0.9, [], { poseChecks: [checked(18, 18, [])] })] },
+  ];
+  assert.deepEqual(poseSummary(boltz[0].models[0]), { ligands: 2, passed: 29, checked: 30, failed: ['protein-distance'] });
+  assert.equal(poseSummary({}), null);
+  const rows = triageRows(boltz);
+  assert.deepEqual(rankTriage(rows, { metric: 'affinity' }).map((row) => row.job), ['lig_1', 'lig_2']);
+  assert.deepEqual(rankTriage(rows, { metric: 'binder' }).map((row) => row.job), ['lig_1', 'lig_2']);
+  assert.deepEqual(rankTriage(rows, { metric: 'pose' }).map((row) => row.job), ['lig_2', 'lig_1']);
+  assert.equal(triageMetric('posebusters'), 'pose');
+  const csv = triageCSVRows(boltz);
+  const column = (name) => csv[0].indexOf(name);
+  assert.deepEqual([csv[1][column('pose_checks_passed')], csv[1][column('pose_checks_run')], csv[1][column('pose_checks_failed')], csv[1][column('affinity_log10_ic50_um')], csv[1][column('binder_probability')]], [29, 30, 'protein-distance', -0.5, 0.9]);
+  const [record] = triageRecords(rankTriage(rows, { metric: 'affinity' }));
+  assert.deepEqual([record.affinity, record.binderProbability, record.poseChecks.failed], [-0.5, 0.9, ['protein-distance']]);
 });

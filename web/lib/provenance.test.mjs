@@ -50,6 +50,17 @@ test('the methods paragraph states only what ran', () => {
   const threshold = methodsText(entry({ hdx: { test: 'threshold' } })).text;
   assert.match(threshold, /fixed threshold, without replicate statistics/);
   assert.doesNotMatch(threshold, /hybrid/);
+  // Pose checks cite PoseBusters, RDKit and UFF, and the dictionary when stereocenters were
+  // compared with it; models without a PAE get pDockQ alone.
+  const poses = methodsText(entry({ prediction: true, pdockqOnly: true, poseChecks: { stereo: true } }));
+  assert.match(poses.text, /Ligand poses were checked as in PoseBusters \[\d+\]/);
+  assert.match(poses.text, /stereocenters and double bonds were compared with the Chemical Component Dictionary/);
+  assert.match(poses.text, /scored by pDockQ alone, which needs none/);
+  assert.ok(['posebusters', 'rdkit', 'uff', 'ccd'].every((key) => poses.references.includes(key)));
+  const docked = methodsText(entry({ poseChecks: { stereo: false } }));
+  assert.doesNotMatch(docked.text, /stereocenters/);
+  assert.ok(!docked.references.includes('ccd'));
+  assert.doesNotMatch(methodsText(entry({ prediction: true })).text, /PoseBusters|pDockQ alone/);
 });
 
 test('references format as text and BibTeX', () => {

@@ -29,13 +29,15 @@ import { paeDomains } from './lib/pae-domains.js';
 import { RAMA_CATEGORIES, RAMA_FAVORED, classifyRamachandran, loadTop8000, ramaDensity } from './lib/ramachandran.js';
 import { combineDepth, depthSummary, msaDepth } from './lib/msa.js';
 import { readNpz, readNpy, squareMatrix } from './lib/npy.js';
-import { interfaceScores } from './lib/interface-scores.js';
-import { TRIAGE_METRICS, defaultTriageMetric, rankTriage, triageCSVRows, triageRecords, triageRows } from './lib/triage.js';
+import { bestInterface, interfaceScores } from './lib/interface-scores.js';
+import { TRIAGE_METRICS, defaultTriageMetric, poseSummary, rankTriage, triageCSVRows, triageRecords, triageRows } from './lib/triage.js';
+import { POSE_CHECKS, checkPose, componentReference, modelEnvironment, moleculePose, residuePose } from './lib/pose-checks.js';
 import {
   detectPredictionSets,
   flatSquare,
   insidePredictionFolder,
   MISSING_PAE,
+  modelTokens,
   parseAF3Confidences,
   parseAF3Summary,
   parseBoltzAffinity,
@@ -335,6 +337,9 @@ const els = {
   ligandDetails: document.querySelector('#ligand-details'),
   ligandLinks: document.querySelector('#ligand-links'),
   ligandStatus: document.querySelector('#ligand-status'),
+  ligandChecks: document.querySelector('#ligand-checks'),
+  ligandChecksToggle: document.querySelector('#ligand-checks-toggle'),
+  ligandCheckList: document.querySelector('#ligand-check-list'),
   ligandDiagramButton: document.querySelector('#ligand-diagram-button'),
   diagramDialog: document.querySelector('#diagram-dialog'),
   diagramTitle: document.querySelector('#diagram-title'),
@@ -474,6 +479,16 @@ const state = {
   triage: { metric: null, level: 'jobs', pair: null, filter: '', gallery: [] },
   // Chemical component facts by CCD code, for the ligand card: { status, info, promise }.
   compounds: new Map(),
+  // Chemical Component Dictionary entries by code, each fetched once (a promise of the component
+  // or null), and those that have arrived.
+  dictionary: new Map(),
+  dictionaryReady: new Map(),
+  // PoseBusters' checks of ligands, by residue, until the model's chemistry changes; and whether
+  // the ligand card lists them.
+  poseChecks: new WeakMap(),
+  poseChecksOpen: false,
+  // The residue the ligand card shows.
+  cardKey: null,
   diagram: null,
   crosslinkRequest: null,
   pairMetric: 'iptm',
@@ -1713,19 +1728,10 @@ async function completeChemistry(entry) {
   if (!missing.size) return;
   const batch = [...missing].slice(0, MAX_COMPONENT_REQUESTS);
   for (const id of batch) structure.componentsRequested.add(id);
-  const fetched = await Promise.all(batch.map(async (id) => {
-    try {
-      const response = await fetch(`/api/fetch/ccd/${encodeURIComponent(id)}`);
-      if (!response.ok) return null;
-      return readChemComp(parseCIFDocument(await response.text())).get(id) ?? null;
-    } catch {
-      return null;
-    }
-  }));
+  const fetched = await Promise.all(batch.map((id) => dictionaryComponent(id)));
   let added = 0;
   for (const component of fetched) {
     if (!component) continue;
-    component.source = 'ccd';
     structure.components.set(component.id, component);
     added += 1;
   }
@@ -1734,12 +1740,45 @@ async function completeChemistry(entry) {
     for (const model of new Set([...structure.baseModels, ...structure.models])) applyChemistry(model, structure);
     markSceneDirty();
     if (entry === state.active && state.focus) computeFocusInteractions([...state.focus.residues]);
+    if (entry === state.active) renderLigandCard();
   }
   // Structures with more ligand types than one batch get the rest next.
   if (missing.size > batch.length) await completeChemistry(entry);
 }
 
 const MAX_COMPONENT_REQUESTS = 40;
+
+// A Chemical Component Dictionary entry through the server, which caches it: fetched once per
+// code. A failed lookup (offline, a network or server error) counts as missing for a minute, then
+// is tried again; a code the dictionary does not have stays missing.
+function dictionaryComponent(id) {
+  const code = String(id).toUpperCase();
+  let promise = state.dictionary.get(code);
+  if (!promise) {
+    promise = (async () => {
+      let component = null;
+      let failed = true;
+      try {
+        const response = await fetch(`/api/fetch/ccd/${encodeURIComponent(code)}`);
+        if (response.ok) component = readChemComp(parseCIFDocument(await response.text())).get(code) ?? null;
+        failed = !response.ok && response.status !== 404;
+      } catch {
+        // Unreachable, or not a dictionary file.
+      }
+      if (component) component.source = 'ccd';
+      if (failed) {
+        setTimeout(() => {
+          state.dictionary.delete(code);
+          state.dictionaryReady.delete(code);
+        }, COMPOUND_RETRY);
+      }
+      state.dictionaryReady.set(code, component);
+      return component;
+    })();
+    state.dictionary.set(code, promise);
+  }
+  return promise;
+}
 
 /* ---------- Ligand card and 2D diagram ---------- */
 
@@ -1756,10 +1795,12 @@ const COMPOUND_LINKS = [
 // The order a diagram's residue labels take their color from, strongest interaction first.
 const DIAGRAM_PRECEDENCE = ['salt-bridge', 'metal-coordination', 'hydrogen-bond', 'halogen-bond', 'pi-stacking', 'cation-pi', 'water-bridge', 'hydrophobic'];
 
+// The focused or selected ligand; the card stays on the one it shows while that stays selected
+// (Show on a pose check selects the partner residues too).
 function ligandCardResidue() {
   if (!state.structure) return null;
   const model = activeModel();
-  const keys = state.focus?.residues.size === 1 ? [...state.focus.residues] : state.selection.size === 1 ? [...state.selection] : [];
+  const keys = state.focus?.residues.size === 1 ? [...state.focus.residues] : state.selection.size === 1 ? [...state.selection] : state.selection.has(state.cardKey) ? [state.cardKey] : [];
   const residue = keys.length ? model.residueMap.get(keys[0]) : null;
   return residue && (residue.kind === 'ligand' || residue.kind === 'ion') ? residue : null;
 }
@@ -1883,6 +1924,7 @@ function compoundCard(residue, entry = state.active) {
 
 function renderLigandCard() {
   const residue = ligandCardResidue();
+  state.cardKey = residue?.key ?? null;
   els.ligandCard.hidden = !residue;
   if (!residue) return;
   const entry = state.active;
@@ -1920,6 +1962,12 @@ function renderLigandCard() {
   els.ligandStatus.hidden = !status;
   els.ligandStatus.textContent = status;
   els.ligandDiagramButton.disabled = card.heavyAtoms.modeled < 2;
+  try {
+    renderPoseChecks(entry, residue);
+  } catch (error) {
+    console.error(error);
+    els.ligandChecks.hidden = true;
+  }
 }
 
 // "compound [<selection>]": the card of a ligand, and its facts for scripts.
@@ -2101,6 +2149,185 @@ function bindLigandEvents() {
   els.diagramSaveSVG.addEventListener('click', () => saveDiagram('svg'));
   els.diagramSavePNG.addEventListener('click', () => saveDiagram('png'));
   els.densityPeaks.addEventListener('click', () => guardedLoad(() => findDifferencePeaks(state.active)));
+  els.ligandChecksToggle.addEventListener('click', () => {
+    state.poseChecksOpen = !state.poseChecksOpen;
+    renderLigandCard();
+  });
+  els.ligandCheckList.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-show-check]');
+    const residue = ligandCardResidue();
+    if (button && residue) showPoseCheck(state.active, residue, button.dataset.showCheck);
+  });
+}
+
+/* ---------- Ligand pose checks ---------- */
+
+// PoseBusters' checks of a ligand as the model has it (pose-checks.js): chemistry, bond lengths
+// and angles, clashes, flat rings, stereocenters and contacts with the rest of the model. They are
+// kept per residue until the model's chemistry changes. The stereo checks compare with the
+// dictionary's ideal coordinates, which PDB entry files leave out; those come from the dictionary
+// entry, fetched on demand.
+function ligandPoseChecks(entry, residue) {
+  const model = activeModelOf(entry);
+  const component = entry.structure.components?.get(String(residue.resName).toUpperCase()) ?? null;
+  const code = compoundCode(residue, entry);
+  // The dictionary entry: undefined while it is looked up, then the entry or null.
+  const dictionary = code ? state.dictionaryReady.get(code) : null;
+  const key = `${model.chemistryVersion ?? 0}|${dictionary === undefined ? 'pending' : dictionary ? 'dictionary' : 'none'}`;
+  const cached = state.poseChecks.get(residue);
+  if (cached?.key === key) return cached.result;
+  // A docking pose is not checked against the crystal ligand it was placed over, and the scene's
+  // other residues not against the pose.
+  const docking = dockingOf(entry);
+  const poseKey = docking ? poseResidueKey(docking) : null;
+  const skip = !docking ? null : residue.key === poseKey ? dockedOverLigands(entry, docking) : new Set([poseKey]);
+  const pose = residuePose(model, residue, component, { skip });
+  const reference = pose.typed ? pose.reference ?? (dictionary ? componentReference(dictionary, pose.ligand) : null) : null;
+  const result = {
+    ...checkPose(pose.ligand, pose.environment, { bondedKeys: pose.bondedKeys, reference }),
+    typed: pose.typed,
+    stereo: Boolean(reference),
+    atomIds: pose.ligand.atoms.map((atom) => atom.id),
+    stereoPending: pose.typed && !reference && dictionary === undefined,
+  };
+  state.poseChecks.set(residue, { key, result });
+  return result;
+}
+
+// Listed or returned by the command, the checks count as used for the methods text, with the
+// stereo comparison when a dictionary definition was there to compare with.
+function notePoseChecks(entry, result) {
+  entry.poseChecked = true;
+  if (result.stereo) entry.poseStereo = true;
+}
+
+function poseChecksWorthShowing(residue) {
+  return residue?.kind === 'ligand' && residue.atoms.filter((atom) => !atom.isHydrogen).length >= 2;
+}
+
+function poseCheckSummary(result) {
+  const failed = result.checks.filter((check) => check.passed === false);
+  return failed.length ? `${failed.length} of ${result.checked} checks fail: ${failed.map((check) => check.label).join(', ')}` : `All ${result.checked} checks pass`;
+}
+
+function renderPoseChecks(entry, residue) {
+  els.ligandChecks.hidden = !poseChecksWorthShowing(residue);
+  if (els.ligandChecks.hidden) return;
+  const result = ligandPoseChecks(entry, residue);
+  // Drawn again once the dictionary lookup ends, which gives these checks a new key.
+  if (result.stereoPending && !result.waiting) {
+    result.waiting = true;
+    dictionaryComponent(compoundCode(residue, entry)).then(() => {
+      if (ligandCardResidue() === residue) renderLigandCard();
+    });
+  }
+  const failed = result.checks.filter((check) => check.passed === false).length;
+  els.ligandChecksToggle.setAttribute('aria-expanded', String(state.poseChecksOpen));
+  els.ligandChecksToggle.innerHTML = `<span>Pose checks</span><strong class="${failed ? 'bad' : 'good'}">${failed ? `${failed} of ${result.checked} fail` : `all ${result.checked} pass`}</strong><span class="chevron">${state.poseChecksOpen ? '▾' : '▸'}</span>`;
+  els.ligandChecksToggle.title = `${poseCheckSummary(result)}. PoseBusters' checks, without its energy ratio; click for the list.`;
+  els.ligandCheckList.hidden = !state.poseChecksOpen;
+  if (!state.poseChecksOpen) return;
+  notePoseChecks(entry, result);
+  const groups = { chemistry: 'Chemistry', geometry: 'Geometry', stereo: 'Stereochemistry', contacts: 'Contacts' };
+  const items = [];
+  for (const [group, title] of Object.entries(groups)) {
+    const checks = result.checks.filter((check) => check.group === group);
+    items.push(`<li class="check-group">${escapeHTML(title)}</li>`);
+    for (const check of checks) {
+      const status = check.passed === true ? 'pass' : check.passed === false ? 'fail' : 'skip';
+      const mark = { pass: '✓', fail: '✗', skip: '–' }[status];
+      const showable = check.passed === false && (check.links?.length || check.pairs?.length || check.atoms?.length);
+      items.push(`<li class="check ${status}" title="${escapeHTML(check.title)}"><span class="mark" aria-label="${status}">${mark}</span><div><b>${escapeHTML(check.label)}</b><small>${escapeHTML(check.detail || (status === 'skip' ? 'Not checked.' : ''))}</small></div>${showable ? `<button type="button" class="link" data-show-check="${escapeHTML(check.id)}">Show</button>` : ''}</li>`);
+    }
+  }
+  const notes = [];
+  if (!result.typed) notes.push('Only the contact checks ran: this ligand has no dictionary entry and its file gives no bond orders.');
+  else if (!result.stereo) notes.push(result.stereoPending ? 'Stereocenters are compared once the dictionary entry arrives.' : 'No dictionary coordinates to compare stereocenters with.');
+  els.ligandCheckList.innerHTML = `${items.join('')}${notes.map((note) => `<li class="check-note">${escapeHTML(note)}</li>`).join('')}`;
+}
+
+// Marks a failing check in the scene: the atoms involved as distance measurements (up to four
+// pairs), and the partner residues selected with the ligand.
+function showPoseCheck(entry, residue, id) {
+  const result = ligandPoseChecks(entry, residue);
+  const check = result.checks.find((item) => item.id === id);
+  if (!check) return;
+  const model = activeModelOf(entry);
+  const atomOf = (index) => model.atoms[result.atomIds[index]];
+  const pairs = [
+    ...(check.links ?? []).map(([a, b]) => [atomOf(a), atomOf(b)]),
+    ...(check.pairs ?? []).map(([a, key]) => [atomOf(a), model.atoms[key]]),
+  ].filter(([a, b]) => a && b).slice(0, 4);
+  for (const [a, b] of pairs) {
+    const atoms = [{ entry, model, atom: a }, { entry, model, atom: b }];
+    state.measurements.push({ type: 'distance', atoms, value: measureValue('distance', [a, b]) });
+  }
+  if (pairs.length) renderMeasurements();
+  const keys = new Set([residue.key]);
+  for (const [, key] of check.pairs ?? []) {
+    const other = model.residues[model.atomResidue[key]];
+    if (other) keys.add(other.key);
+  }
+  selectResidues([...keys], { frame: true });
+  markSceneDirty();
+  showToast(`${check.label}: ${check.detail}`);
+}
+
+// "posecheck [<selection>]": the checks of a ligand, for the card and for scripts.
+async function poseCheckCommand(selection) {
+  const residue = resolveLigand(selection);
+  const entry = state.active;
+  if (!poseChecksWorthShowing(residue)) throw new CommandError(`${residueLabel(residue)} is a single atom; there is no pose to check.`);
+  const code = compoundCode(residue, entry);
+  if (code && ligandPoseChecks(entry, residue).stereoPending) await dictionaryComponent(code);
+  if (!state.selection.has(residue.key) || state.selection.size !== 1) {
+    state.selection = new Set([residue.key]);
+    onSelectionChanged();
+  }
+  state.poseChecksOpen = true;
+  renderLigandCard();
+  const result = ligandPoseChecks(entry, residue);
+  notePoseChecks(entry, result);
+  return {
+    message: `${shortResidueLabel(residue)}: ${poseCheckSummary(result)}.`,
+    data: {
+      ligand: code || residue.resName,
+      residue: shortResidueLabel(residue),
+      passed: result.passed,
+      checked: result.checked,
+      failed: result.failed,
+      bondOrders: result.typed,
+      stereoReference: result.stereo,
+      checks: result.checks.map((check) => ({ id: check.id, label: check.label, group: check.group, passed: check.passed, value: Number.isFinite(check.value) ? Number(check.value.toFixed(4)) : null, detail: check.detail })),
+    },
+  };
+}
+
+// Pose checks of every ligand of a prediction model, for triage: components the file does not
+// define come from the dictionary first, so the checks know the bond orders.
+async function checkPredictionLigands(structure, parsed, model) {
+  const ligands = parsed.residues.filter(poseChecksWorthShowing);
+  if (!ligands.length) return;
+  structure.components ??= new Map();
+  const wanted = [...new Set(ligands.map((residue) => String(residue.resName).toUpperCase()))].filter((id) => !structure.components.has(id) && /^[A-Z0-9]{1,5}$/.test(id));
+  for (const component of await Promise.all(wanted.slice(0, MAX_COMPONENT_REQUESTS).map((id) => dictionaryComponent(id)))) {
+    if (component) structure.components.set(component.id, component);
+  }
+  applyChemistry(parsed, structure);
+  const checks = [];
+  for (const residue of ligands) {
+    const code = String(residue.resName).toUpperCase();
+    const pose = residuePose(parsed, residue, structure.components.get(code) ?? null);
+    // Files that define their components leave out the ideal coordinates the stereo checks need.
+    let reference = pose.reference;
+    if (pose.typed && !reference && /^[A-Z0-9]{1,5}$/.test(code)) {
+      const dictionary = await dictionaryComponent(code);
+      if (dictionary) reference = componentReference(dictionary, pose.ligand);
+    }
+    const result = checkPose(pose.ligand, pose.environment, { bondedKeys: pose.bondedKeys, reference });
+    checks.push({ ligand: shortResidueLabel(residue), code: residue.resName, passed: result.passed, checked: result.checked, failed: result.failed, bondOrders: pose.typed, stereo: Boolean(reference) });
+  }
+  model.poseChecks = checks;
 }
 
 /* ---------- Difference-map peaks ---------- */
@@ -2604,13 +2831,13 @@ function renderDocking() {
   const titles = new Set(docking.molecules.map((molecule) => molecule.title));
   const showTitles = titles.size > 1;
   const rmsd = docking.molecules.length > 1 && Number.isFinite(poseRMSD(docking, Math.min(1, docking.molecules.length - 1)));
-  const header = `<tr><th>#</th>${showTitles ? '<th>Pose</th>' : ''}${columns.map((column) => `<th class="sortable${docking.sort === column.key ? ' is-sorted' : ''}" data-sort="${escapeHTML(column.key)}" title="${escapeHTML(column.key)} (${column.lower ? 'lower' : 'higher'} is better). Click to sort.">${escapeHTML(shortScoreName(column.key))}</th>`).join('')}${rmsd ? '<th title="Heavy-atom RMSD to pose 1 (Å), without superposition">RMSD</th>' : ''}${docking.fingerprints ? '<th>Interactions</th>' : ''}</tr>`;
+  const header = `<tr><th>#</th>${showTitles ? '<th>Pose</th>' : ''}${columns.map((column) => `<th class="sortable${docking.sort === column.key ? ' is-sorted' : ''}" data-sort="${escapeHTML(column.key)}" title="${escapeHTML(column.key)} (${column.lower ? 'lower' : 'higher'} is better). Click to sort.">${escapeHTML(shortScoreName(column.key))}</th>`).join('')}${rmsd ? '<th title="Heavy-atom RMSD to pose 1 (Å), without superposition">RMSD</th>' : ''}<th title="PoseBusters' checks the pose passes (bond lengths and angles, clashes, flat rings, contacts with the receptor)">Checks</th>${docking.fingerprints ? '<th>Interactions</th>' : ''}</tr>`;
   const shown = order.slice(0, 200);
   const rows = shown.map((index) => {
     const molecule = docking.molecules[index];
     const values = columns.map((column) => `<td>${scoreText(Number(molecule.properties.get(column.key)))}</td>`).join('');
     const fingerprint = docking.fingerprints?.[index];
-    return `<tr class="${index === docking.index ? 'is-active' : ''}" data-pose="${index}" title="${escapeHTML(`${molecule.title} · ${molecule.formula}`)}"><td>${index + 1}</td>${showTitles ? `<td>${escapeHTML(molecule.title)}</td>` : ''}${values}${rmsd ? `<td>${scoreText(poseRMSD(docking, index), 1)}</td>` : ''}${docking.fingerprints ? `<td>${escapeHTML(fingerprint ? interactionSummary(fingerprint.counts) : '–')}</td>` : ''}</tr>`;
+    return `<tr class="${index === docking.index ? 'is-active' : ''}" data-pose="${index}" title="${escapeHTML(`${molecule.title} · ${molecule.formula}`)}"><td>${index + 1}</td>${showTitles ? `<td>${escapeHTML(molecule.title)}</td>` : ''}${values}${rmsd ? `<td>${scoreText(poseRMSD(docking, index), 1)}</td>` : ''}${poseCell(dockingPoseChecks(entry, docking, index))}${docking.fingerprints ? `<td>${escapeHTML(fingerprint ? interactionSummary(fingerprint.counts) : '–')}</td>` : ''}</tr>`;
   }).join('');
   els.dockingPoses.innerHTML = `<table class="prediction-table"><thead>${header}</thead><tbody>${rows}</tbody></table>${order.length > shown.length ? `<p class="hint">Showing ${shown.length} of ${order.length} poses.</p>` : ''}`;
   for (const row of els.dockingPoses.querySelectorAll('[data-pose]')) {
@@ -2625,6 +2852,50 @@ function renderDocking() {
   }
   renderPoseDetail(entry, docking);
   renderFingerprint(entry, docking, order);
+}
+
+// PoseBusters' checks of a docking pose against the receptor, from the pose's own molecule (the
+// scene holds one pose at a time); kept per pose until the receptor moves.
+function dockingPoseChecks(entry, docking, index) {
+  if (docking.checksTransform !== entry.transform) {
+    docking.checks = [];
+    docking.environment = null;
+    docking.checksTransform = entry.transform;
+  }
+  docking.checks ??= [];
+  if (docking.checks[index]) return docking.checks[index];
+  const poseKey = poseResidueKey(docking);
+  if (!docking.environment) {
+    const skip = dockedOverLigands(entry, docking);
+    docking.environment = modelEnvironment(activeModelOf(entry), (residue) => residue.key === poseKey || skip.has(residue.key));
+  }
+  try {
+    const result = checkPose(moleculePose(docking.molecules[index], posePlacement(entry)), docking.environment);
+    docking.checks[index] = { passed: result.passed, checked: result.checked, failed: result.failed };
+  } catch (error) {
+    console.error(error);
+    docking.checks[index] = { passed: 0, checked: 0, failed: [] };
+  }
+  return docking.checks[index];
+}
+
+function posePlacement(entry) {
+  return entry.transform ? (x, y, z) => transformPoint(entry.transform, x, y, z) : undefined;
+}
+
+// Crystal ligands the poses were docked over (as for the fingerprints), kept until the receptor
+// moves.
+function dockedOverLigands(entry, docking) {
+  if (docking.dockedOver && docking.dockedOverTransform === entry.transform) return docking.dockedOver;
+  const model = activeModelOf(entry);
+  const place = posePlacement(entry) ?? ((x, y, z) => [x, y, z]);
+  const poses = docking.molecules.slice(0, MAX_FINGERPRINT_POSES).map((molecule) => molecule.atoms.filter((atom) => String(atom.element).toUpperCase() !== 'H').map((atom) => {
+    const [x, y, z] = place(atom.x, atom.y, atom.z);
+    return { x, y, z };
+  }));
+  docking.dockedOver = overlappedLigands(model, docking.receptorAtoms?.[0] ?? model.atoms.length, poses);
+  docking.dockedOverTransform = entry.transform;
+  return docking.dockedOver;
 }
 
 function shortScoreName(key) {
@@ -2677,16 +2948,19 @@ function renderFingerprint(entry, docking, order) {
 function exportDockingCSV() {
   const docking = dockingOf();
   if (!docking) return;
-  const header = ['pose', 'title', 'file', 'formula', ...docking.columns.map((column) => column.key), 'rmsd_to_pose_1', 'hydrogen_bonds', 'salt_bridges', 'pi_interactions', 'halogen_bonds', 'metal', 'hydrophobic', 'residues'];
+  const header = ['pose', 'title', 'file', 'formula', ...docking.columns.map((column) => column.key), 'rmsd_to_pose_1', 'pose_checks_passed', 'pose_checks_run', 'pose_checks_failed', 'hydrogen_bonds', 'salt_bridges', 'pi_interactions', 'halogen_bonds', 'metal', 'hydrophobic', 'residues'];
   const rows = [header];
+  const entry = state.active;
   docking.molecules.forEach((molecule, index) => {
     const result = docking.fingerprints?.[index];
     const counts = result?.counts ?? {};
     const rmsd = poseRMSD(docking, index);
+    const checks = dockingPoseChecks(entry, docking, index);
     rows.push([
       index + 1, molecule.title, molecule.file ?? '', molecule.formula,
       ...docking.columns.map((column) => molecule.properties.get(column.key) ?? ''),
       Number.isFinite(rmsd) ? rmsd.toFixed(3) : '',
+      checks.passed, checks.checked, checks.failed.join(';'),
       ...(result ? [counts['hydrogen-bond'] ?? 0, counts['salt-bridge'] ?? 0, (counts['pi-stacking'] ?? 0) + (counts['cation-pi'] ?? 0), counts['halogen-bond'] ?? 0, counts['metal-coordination'] ?? 0, counts.hydrophobic ?? 0] : ['', '', '', '', '', '']),
       result ? [...result.residues].map(([key, types]) => `${key}(${[...types].join('+')})`).join(' ') : '',
     ]);
@@ -4069,6 +4343,8 @@ async function executeCommand(parsed, options) {
       return compoundCommand(parsed.selection);
     case 'diagram':
       return diagramCommand(parsed, options);
+    case 'posecheck':
+      return poseCheckCommand(parsed.selection);
     case 'domains':
       return findPAEDomains();
     case 'msa': {
@@ -5238,6 +5514,7 @@ function methodsContext() {
       const model = activeModelOf(entry);
       const comparison = entry.comparison;
       const density = entry.density;
+      const predicted = predictionModelOf(entry);
       return {
         name: entry.name,
         code: source === 'afdb' ? (label.match(/AF-[A-Z0-9]+-F\d+/)?.[0] ?? meta.code ?? entry.name) : meta.code || entry.name,
@@ -5256,6 +5533,8 @@ function methodsContext() {
           electrostatics: entry.surface.kind !== 'off' && entry.surface.color === 'electrostatic',
           superposition: comparison ? { method: comparison.recipe?.correspondence ?? 'sequence', complex: (comparison.chainPairs?.length ?? 0) > 1 } : null,
           prediction: Boolean(entry.prediction),
+          pdockqOnly: Boolean(predicted?.metrics?.pairs.length && !predicted.metrics.pae),
+          poseChecks: entry.poseChecked || entry.docking?.checks?.length || predicted?.poseChecks?.length ? { stereo: Boolean(entry.poseStereo || predicted?.poseChecks?.some((item) => item.stereo)) } : null,
           domains: Boolean(entry.domains),
           validation: Boolean(entry.validation),
           missense: Boolean(entry.missense),
@@ -5472,6 +5751,7 @@ function predictionSessionFields(entry) {
       metrics: model.metrics ?? null,
       tokenKeys: model.tokenKeys ?? null,
       calpha: model.calpha ? [...model.calpha] : null,
+      poseChecks: model.poseChecks ?? null,
     },
   };
 }
@@ -5479,6 +5759,8 @@ function predictionSessionFields(entry) {
 function restorePrediction(entry, saved) {
   if (!saved?.model) return;
   const model = { ...saved.model, files: {}, entryId: entry.id, calpha: saved.model.calpha ? new Map(saved.model.calpha) : null, meanPlddt: saved.model.meanPlddt ?? NaN };
+  // Older sessions kept metrics only for models scored with a PAE.
+  if (model.metrics && model.metrics.pae === undefined) model.metrics.pae = true;
   const set = { id: `prediction-${state.nextPredictionId++}`, tool: saved.tool, toolLabel: saved.toolLabel, name: saved.name, models: [model], files: [], affinityResult: saved.affinity, restored: true };
   state.predictionSets.push(set);
   entry.prediction = { setId: set.id, modelId: model.id };
@@ -7555,14 +7837,30 @@ async function scorePredictionModel(set, model) {
   }
   const plddts = parsed.residues.filter((residue) => residue.kind === 'protein' || residue.kind === 'nucleic').map((residue) => residue.confidence).filter(Number.isFinite);
   model.meanPlddt = plddts.length ? plddts.reduce((sum, value) => sum + value, 0) / plddts.length : NaN;
+  // The pose checks are extra: should they fail, the interface scores still count.
+  try {
+    await checkPredictionLigands(structure, parsed, model);
+  } catch (error) {
+    console.error(error);
+  }
   const { pae, tokenPlddt } = await readPredictionPAE(set, model);
-  if (!pae) return;
+  const scale = parsed.bFactorRange.max <= 1 ? 100 : 1;
+  if (!pae) {
+    // pDockQ needs no PAE, only pLDDT and Cβ contacts: one token per polymer residue, with the
+    // pLDDT these tools write in the B-factor column.
+    const tokens = modelTokens(parsed, { perResidue: true });
+    tokens.forEach((token) => {
+      token.plddt = (token.plddtAtom?.bFactor ?? 0) * scale;
+    });
+    model.metrics = interfaceScores(null, tokens);
+    model.tokenKeys = tokens.map((token) => token.residue.key);
+    return;
+  }
   const tokens = tokensForPAE(parsed, pae.size);
   if (!tokens) {
     model.problem = `The PAE matrix (${pae.size} tokens) does not match the structure.`;
     return;
   }
-  const scale = parsed.bFactorRange.max <= 1 ? 100 : 1;
   tokens.forEach((token, index) => {
     token.plddt = Number.isFinite(tokenPlddt?.[index]) ? tokenPlddt[index] : (token.plddtAtom?.bFactor ?? 0) * scale;
   });
@@ -7726,11 +8024,24 @@ function predictionModelOf(entry = state.active) {
 }
 
 function bestPair(model) {
-  return model?.metrics?.pairs.slice().sort((a, b) => b.ipsae - a.ipsae)[0] ?? null;
+  return bestInterface(model?.metrics?.pairs);
 }
 
 function scoreText(value, digits = 2) {
   return Number.isFinite(value) ? value.toFixed(digits) : '–';
+}
+
+const POSE_CHECK_NAMES = new Map(POSE_CHECKS.map((check) => [check.id, check.label]));
+
+function poseCheckLabels(ids) {
+  return ids.map((id) => POSE_CHECK_NAMES.get(id) ?? id).join(', ');
+}
+
+// A table cell with a model's pose checks: passed of those run, red when any fails.
+function poseCell(pose, className = '') {
+  if (!pose?.checked) return `<td class="${className}">–</td>`;
+  const status = pose.failed.length ? 'bad' : 'good';
+  return `<td class="${`${className} ${status}`.trim()}" title="${escapeHTML(pose.failed.length ? `Fails: ${poseCheckLabels(pose.failed)}` : 'Every check passes')}">${pose.passed}/${pose.checked}</td>`;
 }
 
 function renderPrediction() {
@@ -7741,26 +8052,39 @@ function renderPrediction() {
   if (!set) return;
   const active = predictionModelOf(entry);
   const complex = set.models.some((model) => model.metrics?.pairs.length || model.scores?.chainPairIptm?.length > 1);
+  // Without a PAE for any model, the interfaces are summarized by pDockQ.
+  const paeScored = set.models.some((model) => model.metrics?.pae);
+  const interfaceMetric = paeScored ? 'ipsae' : 'pdockq';
+  const ligands = set.models.some((model) => model.poseChecks?.length);
   const links = state.crosslinkRequest;
   els.predictionCount.textContent = String(set.models.length);
   els.predictionTitle.textContent = `${set.toolLabel} · ${set.name} · ranked by ${rankingScoreLabel(set)}${set.affinityResult && Number.isFinite(set.affinityResult.value) ? ` · predicted affinity ${set.affinityResult.value.toFixed(2)} log10(IC50 / µM), binder probability ${scoreText(set.affinityResult.probability)}` : ''}`;
-  const header = `<tr><th>#</th><th>Model</th><th title="${escapeHTML(rankingScoreLabel(set))}">Score</th>${complex ? `<th title="Interface pTM">ipTM</th><th title="Best chain-pair ipSAE (PAE cutoff ${set.tool === 'colabfold' ? 15 : 10} Å)">ipSAE</th>` : '<th>pLDDT</th>'}${links ? '<th title="Cross-links within the distance limit">XL</th>' : ''}</tr>`;
+  const header = `<tr><th>#</th><th>Model</th><th title="${escapeHTML(rankingScoreLabel(set))}">Score</th>${complex ? `<th title="Interface pTM">ipTM</th>${paeScored ? `<th title="Best chain-pair ipSAE (PAE cutoff ${set.tool === 'colabfold' ? 15 : 10} Å)">ipSAE</th>` : '<th title="Best chain-pair pDockQ (Bryant et al. 2022); the predictor wrote no PAE, so ipSAE, pDockQ2 and LIS cannot be computed">pDockQ</th>'}` : '<th>pLDDT</th>'}${ligands ? '<th title="PoseBusters\' checks the ligands pass">Pose</th>' : ''}${links ? '<th title="Cross-links within the distance limit">XL</th>' : ''}</tr>`;
   const rows = set.models.map((model) => {
     const pair = bestPair(model);
+    const pose = poseSummary(model);
     const xl = links ? crosslinkSatisfaction(model, links) : null;
     const flags = [model.scores?.hasClash ? 'clash' : '', model.problem ? 'problem' : ''].filter(Boolean);
     return `<tr class="${model === active ? 'is-active' : ''}" data-model="${escapeHTML(model.id)}" title="${escapeHTML([model.problem, model.scores?.hasClash ? 'The predictor flagged steric clashes.' : ''].filter(Boolean).join(' ') || 'Show this model')}">
       <td>${model.rank}</td><td>${escapeHTML(model.label)}${flags.length ? ` <span class="warn">⚠</span>` : ''}${model.entryId ? ' <span class="loaded" title="Open in the scene">●</span>' : ''}</td><td>${scoreText(model.scores?.rankingScore)}</td>
-      ${complex ? `<td>${scoreText(model.scores?.iptm)}</td><td>${scoreText(pair?.ipsae)}</td>` : `<td>${scoreText(model.meanPlddt, 1)}</td>`}
+      ${complex ? `<td>${scoreText(model.scores?.iptm)}</td><td>${scoreText(pair?.[interfaceMetric])}</td>` : `<td>${scoreText(model.meanPlddt, 1)}</td>`}
+      ${ligands ? poseCell(pose) : ''}
       ${xl ? `<td class="${xl.satisfied === xl.total ? 'good' : xl.satisfied / Math.max(1, xl.total) < 0.8 ? 'bad' : ''}">${xl.satisfied}/${xl.total}</td>` : links ? '<td>–</td>' : ''}</tr>`;
   }).join('');
   els.predictionModels.innerHTML = `<table class="prediction-table"><thead>${header}</thead><tbody>${rows}</tbody></table>`;
   for (const row of els.predictionModels.querySelectorAll('[data-model]')) {
     row.addEventListener('click', () => guardedLoad(() => loadPredictionModel(set, set.models.find((model) => model.id === row.dataset.model))));
   }
+  // Scores that need a PAE give way to pDockQ for sets without one.
+  const needsPAE = new Set(['ipsae', 'pdockq2']);
+  if (!paeScored && needsPAE.has(state.pairMetric)) state.pairMetric = 'pdockq';
+  if (paeScored && state.pairMetric === 'pdockq') state.pairMetric = 'ipsae';
   renderPredictionPairs(set, active);
   renderPredictionDetail(set, active);
-  for (const button of document.querySelectorAll('[data-pair-metric]')) button.classList.toggle('is-active', button.dataset.pairMetric === state.pairMetric);
+  for (const button of document.querySelectorAll('[data-pair-metric]')) {
+    button.hidden = paeScored ? button.dataset.pairMetric === 'pdockq' : needsPAE.has(button.dataset.pairMetric);
+    button.classList.toggle('is-active', button.dataset.pairMetric === state.pairMetric);
+  }
   document.querySelector('[data-pair-metric]').parentElement.hidden = !complex;
 }
 
@@ -7815,11 +8139,18 @@ function renderPredictionDetail(set, model) {
     scores.hasClash ? '<span class="warn">clashes flagged</span>' : '',
     Number.isFinite(scores.extra?.ligandIptm) && scores.extra.ligandIptm > 0 ? `ligand ipTM ${scoreText(scores.extra.ligandIptm)}` : '',
   ].filter(Boolean);
-  const pairs = (model.metrics?.pairs ?? []).slice().sort((a, b) => b.ipsae - a.ipsae);
+  const withPAE = Boolean(model.metrics?.pae);
+  const key = withPAE ? 'ipsae' : 'pdockq';
+  const pairs = (model.metrics?.pairs ?? []).slice().sort((a, b) => b[key] - a[key]);
   const links = state.crosslinkRequest ? crosslinkSatisfaction(model, state.crosslinkRequest) : null;
   const msa = state.active?.msa?.summary;
+  const interfaceTable = withPAE
+    ? `<table class="interface-table"><thead><tr><th>Chains</th><th title="max(A→B, B→A); PAE cutoff ${model.paeCutoff ?? 10} Å">ipSAE</th><th title="pDockQ2 (Zhu et al. 2023)">pDockQ2</th><th title="Local interaction score (Kim et al. 2024)">LIS</th><th title="Residue pairs with Cβ within 8 Å">Contacts</th></tr></thead><tbody>${pairs.slice(0, 12).map((pair) => `<tr data-pair="${escapeHTML(pair.chainA)}|${escapeHTML(pair.chainB)}" title="A→B ${scoreText(pair.ipsaeAB)} · B→A ${scoreText(pair.ipsaeBA)} · ipTM from PAE ${scoreText(pair.iptm)} · pDockQ ${scoreText(pair.pdockq)}. Click to select the interface."><td>${escapeHTML(pair.chainA)}–${escapeHTML(pair.chainB)}</td><td>${scoreText(pair.ipsae)}</td><td>${scoreText(pair.pdockq2)}</td><td>${scoreText(pair.lis)}</td><td>${pair.contacts}</td></tr>`).join('')}</tbody></table>`
+    : `<table class="interface-table"><thead><tr><th>Chains</th><th title="pDockQ (Bryant et al. 2022), from the pLDDT of the interface and its contacts">pDockQ</th><th title="Residue pairs with Cβ within 8 Å">Contacts</th></tr></thead><tbody>${pairs.slice(0, 12).map((pair) => `<tr data-pair="${escapeHTML(pair.chainA)}|${escapeHTML(pair.chainB)}" title="Click to select the interface."><td>${escapeHTML(pair.chainA)}–${escapeHTML(pair.chainB)}</td><td>${scoreText(pair.pdockq)}</td><td>${pair.contacts}</td></tr>`).join('')}</tbody></table><p class="hint">No PAE was written for this model, so ipSAE, pDockQ2 and LIS cannot be computed; pDockQ needs none.</p>`;
+  const poses = (model.poseChecks ?? []).map((item) => `${escapeHTML(item.ligand)}: ${item.failed.length ? `<span class="bad">${item.checked - item.passed} of ${item.checked} checks fail</span> (${escapeHTML(poseCheckLabels(item.failed))})` : `<span class="good">all ${item.checked} checks pass</span>`}${item.bondOrders ? '' : ' <span class="hint">(contacts only: no bond orders)</span>'}`);
   els.predictionDetail.innerHTML = `<div><strong>${escapeHTML(model.label)}</strong> · rank ${model.rank}${facts.length ? ` · ${facts.join(' · ')}` : ''}</div>
-    ${pairs.length ? `<table class="interface-table"><thead><tr><th>Chains</th><th title="max(A→B, B→A); PAE cutoff ${model.paeCutoff ?? 10} Å">ipSAE</th><th title="pDockQ2 (Zhu et al. 2023)">pDockQ2</th><th title="Local interaction score (Kim et al. 2024)">LIS</th><th title="Residue pairs with Cβ within 8 Å">Contacts</th></tr></thead><tbody>${pairs.slice(0, 12).map((pair) => `<tr data-pair="${escapeHTML(pair.chainA)}|${escapeHTML(pair.chainB)}" title="A→B ${scoreText(pair.ipsaeAB)} · B→A ${scoreText(pair.ipsaeBA)} · ipTM from PAE ${scoreText(pair.iptm)} · pDockQ ${scoreText(pair.pdockq)}. Click to select the interface."><td>${escapeHTML(pair.chainA)}–${escapeHTML(pair.chainB)}</td><td>${scoreText(pair.ipsae)}</td><td>${scoreText(pair.pdockq2)}</td><td>${scoreText(pair.lis)}</td><td>${pair.contacts}</td></tr>`).join('')}</tbody></table>` : ''}
+    ${pairs.length ? interfaceTable : ''}
+    ${poses.length ? `<div title="PoseBusters' checks of the ligand poses; select a ligand for the list">Ligand pose: ${poses.join(' · ')}</div>` : ''}
     ${links ? `<div>Cross-links: <strong class="${links.satisfied === links.total ? 'good' : ''}">${links.satisfied} of ${links.total}</strong> within ${links.maxDistance} Å Cα–Cα${links.missing ? ` · ${links.missing} not in the model` : ''}</div>` : '<div class="hint">Map cross-links in the Proteomics tab to see how many each model satisfies.</div>'}
     ${msa ? `<div>MSA depth: median ${formatNumber(msa.median)} sequences${msa.shallow ? ` · <span class="warn">${msa.shallow} residues below ${msa.threshold}</span>` : ''} · <button type="button" class="link" data-color-msa>color by depth</button></div>` : ''}
     ${model.problem ? `<div class="warn">${escapeHTML(model.problem)}</div>` : ''}`;
@@ -7906,6 +8237,7 @@ function rankingCommand(rank) {
         meanPlddt: Number.isFinite(model.meanPlddt) ? model.meanPlddt : null,
         interfaces: (model.metrics?.pairs ?? []).map((pair) => ({ chains: [pair.chainA, pair.chainB], ipsae: pair.ipsae, pdockq: pair.pdockq, pdockq2: pair.pdockq2, lis: pair.lis, contacts: pair.contacts })),
         crosslinks: state.crosslinkRequest ? crosslinkSatisfaction(model, state.crosslinkRequest) : null,
+        poseChecks: model.poseChecks ?? null,
       })),
     };
   }
@@ -8034,7 +8366,7 @@ function renderTriage() {
   els.triageCount.textContent = String(sets.length);
   els.triageSummary.textContent = `${sets.length} jobs · ${formatNumber(total)} models · each job by its best model under ${triageMetricLabel(metric)}${state.triage.pair ? ` · chains ${state.triage.pair.join('–')}` : ''}`;
   const shown = rows.slice(0, 8);
-  els.triageTop.innerHTML = `<table class="prediction-table"><thead><tr><th>#</th><th>Job</th><th>${escapeHTML(triageMetricLabel(metric))}</th></tr></thead><tbody>${shown.map((row) => `<tr class="${isActiveTriageRow(row) ? 'is-active' : ''}" tabindex="0" data-position="${row.position}" title="${escapeHTML(`${row.job} · ${row.tool} · ${row.model}`)}"><td>${row.position}</td><td>${escapeHTML(row.job)}</td><td>${triageScore(row[metric], metric === 'plddt' ? 1 : 2)}</td></tr>`).join('')}</tbody></table>${rows.length > shown.length ? `<p class="hint">…and ${rows.length - shown.length} more in the table.</p>` : ''}`;
+  els.triageTop.innerHTML = `<table class="prediction-table"><thead><tr><th>#</th><th>Job</th><th>${escapeHTML(triageMetricLabel(metric))}</th></tr></thead><tbody>${shown.map((row) => `<tr class="${isActiveTriageRow(row) ? 'is-active' : ''}" tabindex="0" data-position="${row.position}" title="${escapeHTML(`${row.job} · ${row.tool} · ${row.model}`)}"><td>${row.position}</td><td>${escapeHTML(row.job)}</td>${metric === 'pose' ? poseCell(row.poseChecks) : `<td>${triageScore(row[metric], metric === 'plddt' ? 1 : 2)}</td>`}</tr>`).join('')}</tbody></table>${rows.length > shown.length ? `<p class="hint">…and ${rows.length - shown.length} more in the table.</p>` : ''}`;
   for (const tr of els.triageTop.querySelectorAll('[data-position]')) {
     onActivate(tr, () => guardedLoad(() => showTriageRow(rows[Number(tr.dataset.position) - 1])));
   }
@@ -8055,14 +8387,22 @@ function renderTriageTable() {
   if (document.activeElement !== els.triageFilter) els.triageFilter.value = settings.filter;
   const links = Boolean(state.crosslinkRequest);
   els.triageDialogSummary.textContent = `${state.predictionSets.length} jobs and ${formatNumber(total)} models, ranked by ${triageMetricLabel(metric)}${settings.pair ? ` of chains ${settings.pair.join('–')}` : ' of each model’s best interface'}.`;
-  const columns = [...TRIAGE_COLUMNS, ...(links ? [['crosslinks', 'XL', 0]] : [])];
+  const poses = rows.some((row) => row.poseChecks);
+  const affinity = rows.some((row) => Number.isFinite(row.affinity) || Number.isFinite(row.binder));
+  // Models without a PAE have pDockQ as their only interface score.
+  const pdockqOnly = rows.some((row) => Number.isFinite(row.pdockq) && !Number.isFinite(row.ipsae));
+  const columns = [...(pdockqOnly ? [['pdockq', 'pDockQ', 2]] : []), ...TRIAGE_COLUMNS, ...(links ? [['crosslinks', 'XL', 0]] : []), ...(poses ? [['pose', 'Pose', 0]] : []), ...(affinity ? [['affinity', 'Affinity', 2], ['binder', 'P(binder)', 2]] : [])];
   // The metric ranked by is always a column (pDockQ and pTM are not shown otherwise).
   if (!columns.some(([id]) => id === metric)) columns.unshift([metric, triageMetricLabel(metric), 2]);
-  els.triageHead.innerHTML = `<tr><th>#</th><th>Job</th><th>Tool</th><th>Model</th><th>Chains</th>${columns.map(([id, label]) => `<th data-metric="${id}" class="num${id === metric ? ' is-sorted' : ''}" tabindex="0" aria-sort="${id === metric ? 'descending' : 'none'}" title="${escapeHTML(TRIAGE_METRICS.find((item) => item.id === id)?.title ?? '')}; click to rank by it">${escapeHTML(label)}${id === metric ? ' ▾' : ''}</th>`).join('')}</tr>`;
+  els.triageHead.innerHTML = `<tr><th>#</th><th>Job</th><th>Tool</th><th>Model</th><th>Chains</th>${columns.map(([id, label]) => `<th data-metric="${id}" class="num${id === metric ? ' is-sorted' : ''}" tabindex="0" aria-sort="${id === metric ? (TRIAGE_METRICS.find((item) => item.id === id)?.lower ? 'ascending' : 'descending') : 'none'}" title="${escapeHTML(TRIAGE_METRICS.find((item) => item.id === id)?.title ?? '')}; click to rank by it">${escapeHTML(label)}${id === metric ? ' ▾' : ''}</th>`).join('')}</tr>`;
   const limit = 500;
   els.triageBody.innerHTML = rows.slice(0, limit).map((row) => `<tr class="${isActiveTriageRow(row) ? 'is-active' : ''}" tabindex="0" data-position="${row.position}" title="${escapeHTML(row.problem ?? 'Show this model')}">
     <td>${row.position}</td><td class="job">${escapeHTML(row.job)}${row.problem ? ' <span class="warn" role="img" aria-label="Problem">⚠</span>' : ''}</td><td>${escapeHTML(row.tool)}</td><td>${escapeHTML(row.model)}${row.models > 1 ? ` <span class="hint">#${row.rank}/${row.models}</span>` : ''}</td><td>${row.chains ? escapeHTML(row.chains.join('–')) : '–'}</td>
-    ${columns.map(([id, , digits]) => `<td class="num${id === metric ? ' is-sorted' : ''}">${id === 'crosslinks' ? (row.crosslinkCounts ? `${row.crosslinkCounts.satisfied}/${row.crosslinkCounts.total}` : '–') : triageScore(row[id], digits)}</td>`).join('')}</tr>`).join('');
+    ${columns.map(([id, , digits]) => {
+      const className = `num${id === metric ? ' is-sorted' : ''}`;
+      if (id === 'pose') return poseCell(row.poseChecks, className);
+      return `<td class="${className}">${id === 'crosslinks' ? (row.crosslinkCounts ? `${row.crosslinkCounts.satisfied}/${row.crosslinkCounts.total}` : '–') : triageScore(row[id], digits)}</td>`;
+    }).join('')}</tr>`).join('');
   els.triageMore.textContent = rows.length > limit ? `Showing ${limit} of ${formatNumber(rows.length)} rows; export the CSV for all of them.` : rows.length ? '' : 'No job matches the filter.';
   for (const th of els.triageHead.querySelectorAll('[data-metric]')) {
     onActivate(th, () => {
