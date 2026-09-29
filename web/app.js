@@ -2948,7 +2948,8 @@ function renderFingerprint(entry, docking, order) {
 function exportDockingCSV() {
   const docking = dockingOf();
   if (!docking) return;
-  const header = ['pose', 'title', 'file', 'formula', ...docking.columns.map((column) => column.key), 'rmsd_to_pose_1', 'pose_checks_passed', 'pose_checks_run', 'pose_checks_failed', 'hydrogen_bonds', 'salt_bridges', 'pi_interactions', 'halogen_bonds', 'metal', 'hydrophobic', 'residues'];
+  // Columns added in later versions go last, so a file keeps its earlier layout.
+  const header = ['pose', 'title', 'file', 'formula', ...docking.columns.map((column) => column.key), 'rmsd_to_pose_1', 'hydrogen_bonds', 'salt_bridges', 'pi_interactions', 'halogen_bonds', 'metal', 'hydrophobic', 'residues', 'pose_checks_passed', 'pose_checks_run', 'pose_checks_failed'];
   const rows = [header];
   const entry = state.active;
   docking.molecules.forEach((molecule, index) => {
@@ -2960,9 +2961,9 @@ function exportDockingCSV() {
       index + 1, molecule.title, molecule.file ?? '', molecule.formula,
       ...docking.columns.map((column) => molecule.properties.get(column.key) ?? ''),
       Number.isFinite(rmsd) ? rmsd.toFixed(3) : '',
-      checks.passed, checks.checked, checks.failed.join(';'),
       ...(result ? [counts['hydrogen-bond'] ?? 0, counts['salt-bridge'] ?? 0, (counts['pi-stacking'] ?? 0) + (counts['cation-pi'] ?? 0), counts['halogen-bond'] ?? 0, counts['metal-coordination'] ?? 0, counts.hydrophobic ?? 0] : ['', '', '', '', '', '']),
       result ? [...result.residues].map(([key, types]) => `${key}(${[...types].join('+')})`).join(' ') : '',
+      checks.passed, checks.checked, checks.failed.join(';'),
     ]);
   });
   downloadText(`${docking.name.replace(/\.[^.]+$/, '')}_poses.csv`, csvText(rows), 'text/csv');

@@ -9,8 +9,8 @@ chemistry and statistics; `wave7`: agents and batch triage; `wave8`: ligand
 evidence; `wave9`: prediction checks), a review of the bundled
 examples and of the public databases Proteoscope can use without API keys, and
 a prioritized plan for what comes next. Waves 1 to 6 were released together
-as version 0.6.0, wave 7 as version 0.7.0 and wave 8 as version 0.8.0
-([CHANGELOG.md](../CHANGELOG.md)).
+as version 0.6.0, wave 7 as version 0.7.0, wave 8 as version 0.8.0 and wave 9
+as version 0.9.0 ([CHANGELOG.md](../CHANGELOG.md)).
 
 ## 1. Where v0.4 stood
 
@@ -1256,8 +1256,8 @@ triage.
   which draws a failing check's atom pairs as measurements and selects the
   residues they touch); `posecheck [<selection>]`; a **Pose** column in the
   Prediction table and in triage (`triage by pose`); a **Checks** column and
-  CSV fields for docking poses; and the methods paragraph, which cites
-  PoseBusters, RDKit and UFF.
+  CSV fields for docking poses (after the 0.8.0 columns, which keep their
+  places); and the methods paragraph, which cites PoseBusters, RDKit and UFF.
 
 ### Ligands in triage (`triage.js`)
 
@@ -1304,6 +1304,7 @@ triage.
 | An AlphaFold Server–style folder built from 1M17, a second model with erlotinib moved 1.5 Å into the protein | 19 of 19 and 17 of 19 checks (distance to protein and to waters) in the Pose column; `triage by pose` ranks the intact pose first |
 | Erlotinib as two SDF docking poses in 1M17 (the crystal pose, and one moved 1.6 Å) | 17 of 17 and 15 of 17 checks in the Checks column (distance to protein and to waters; stereochemistry needs a dictionary entry); the crystal erlotinib passes all 17 with either pose loaded |
 | MDM2–p53 (1YCR) opened as a prediction without a PAE | Ranked by pDockQ; the Prediction panel shows pDockQ for chains A–B and the note |
+| MOL2 reading and ligand chemistry against v0.8.0 | 12 MOL2 files without charged groups read identically; in 15 with them only the carboxylate, sulfonate, phosphate, amidinium and guanidinium atoms change. The 27 bundled structures get the same ligand chemistry and bonds, and the same 562 interactions for up to 12 ligands in each |
 
 ## 12. The bundled examples
 

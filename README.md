@@ -479,6 +479,8 @@ rebuilding geometry; clipped atoms are capped.
 
 ![A 2D diagram of imatinib in ABL (2HYY): the ligand drawn flat, with the salt bridge to Asp381, hydrogen bonds to Thr315, Met318, Glu286 and Ile360 with their distances, π-stacking with Tyr253 and hydrophobic contacts](docs/images/ligand-diagram.jpg)
 
+![The heme of deoxyhemoglobin's first α chain (4HHB, deposited in 1984) failing 2 of PoseBusters' 19 checks: three propionate bonds out of bounds, drawn by Show at 2.32, 2.09 and 0.87 Å, and a carboxylate whose oxygens are 1.54 Å apart](docs/images/pose-checks.jpg)
+
 - **The ligand card.** Select or focus a ligand and the **Ligand** card (right
   panel) shows what it is, from the wwPDB Chemical Component Dictionary
   through RCSB (downloaded once and cached):

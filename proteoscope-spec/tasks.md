@@ -471,3 +471,6 @@ the completed v0.1 application.
 
 - [x] 94. Documentation: README (Ligands, Docking Poses, Predicted Complexes, triage, commands, code layout), validation README, design, requirements, roadmap (wave 9)
   - _Requirements: 52, 53, 54_
+
+- [x] 95. Release 0.9.0: version in `main.go` and `CITATION.cff`, `CHANGELOG.md`, a README image of the pose checks; MOL2 reading and ligand chemistry checked against v0.8.0
+  - _Requirements: 45_

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 (2026-09-29)
 
 - Pose checks: the ligand card runs PoseBusters' checks on the ligand as
   modeled: bond lengths and angles, clashes inside the ligand, flat aromatic
@@ -14,7 +14,8 @@
 - Predictions: each model's ligands are checked too, with a Pose column in the
   Prediction table and the triage table (`triage by pose`); Boltz-2's
   predicted affinity and binder probability join the triage table, its CSV
-  and the results scripts get. Docking poses get a Checks column.
+  and the results scripts get. Docking poses get a Checks column, and their
+  CSV three pose-check columns after the existing ones.
 - Models without a PAE (Chai-1, and Boltz or Protenix run without their PAE
   options) now get pDockQ, which needs no PAE, and campaigns of them are
   ranked by it.
