@@ -1318,6 +1318,11 @@ model.
 - **Triage without a window.** The same ranking from the command line
   (`proteoscope triage campaign/ --csv ranking.csv`), for clusters and
   pipelines, with the gallery as image files.
+- **pDockQ without a PAE.** pDockQ needs only the interface pLDDT and Cβ
+  contacts, so models from predictors that write no PAE (Chai-1, and Boltz or
+  Protenix runs without their PAE options) can still get one interface score
+  that compares across tools; ipSAE, pDockQ2 and LIS stay blank for them.
+  Today such models get no interface scores at all.
 - **MCP follow-ups.** The Streamable HTTP transport next to stdio, and the
   session and the methods paragraph as MCP resources.
 - **Predicted complexes to fetch.** AlphaFold DB complexes and ModelArchive
@@ -1457,7 +1462,8 @@ model.
 - **Prediction folders.** AlphaFold 3, AlphaFold Server, Boltz-2, ColabFold,
   Protenix and OpenFold3 were checked with real outputs; Chai-1 only with the
   documented layout.
-  - Chai-1 does not write PAE, so its models lack the PAE-based scores.
+  - Chai-1 does not write PAE, so its models have no interface scores
+    (pDockQ, which needs none, is planned; see section 13).
   - Boltz writes PAE only with `--write_full_pae`, and Protenix only with
     `--need_atom_confidence`.
   - The Zstandard decoder does not verify frame checksums and does not
