@@ -85,7 +85,7 @@
 
       <h2 id="requirements">Requirements</h2>
       <ul>
-        <li><strong>Proteoscope 0.7.0 or later</strong> (0.8.0 for the ligand commands). <code>proteoscope --version</code> prints yours; to upgrade, <a href="../install.html">install the latest release</a>.</li>
+        <li><strong>Proteoscope 0.7.0 or later</strong> (0.8.0 for the ligand commands, 0.9.0 for pose checks). <code>proteoscope --version</code> prints yours; to upgrade, <a href="../install.html">install the latest release</a>.</li>
         <li><strong>A browser.</strong> Chrome, Edge or Brave works best, because they have WebGPU. Proteoscope opens in your default browser; others work too, more slowly (see <a href="troubleshooting.html#canvas-preview">the Canvas preview</a>).</li>
         <li><strong>The full path to the program.</strong> Agents start Proteoscope themselves, often without your shell's <code>PATH</code>, so give them the full path. Print it with <code>command -v proteoscope</code> (macOS and Linux) or <code>(Get-Command proteoscope).Source</code> (PowerShell).</li>
       </ul>
@@ -183,13 +183,14 @@ args = ["mcp"]</code></pre></div>
         <li>“Open the prediction folders in /data/campaign/, rank them by ipSAE for chains A and B, and show me a gallery of the best five.”</li>
         <li>“Which interface residues of the best model have pLDDT below 70?”</li>
         <li>“Is the ligand in 1M17 supported by the density? Show me its interaction diagram.”</li>
+        <li>“Rank these Boltz-2 jobs by predicted affinity, and tell me which models put the ligand in a physically plausible pose.”</li>
       </ul>
       <ul>
         <li><strong>What you see.</strong> The agent's tools act on the Proteoscope page in your browser. It opens when the agent first needs it, and again if you close it. Structures load, selections highlight, the camera moves and the triage table updates. Each call's result appears as a message at the top of the page. A triage gallery briefly shows each model in turn, then the scene goes back to how it was.</li>
         <li><strong>Taking over.</strong> You can use the page while the agent works. Its commands act on whatever structure is active, so if you change the active structure, the agent's next command acts on your choice.</li>
         <li><strong>One page.</strong> Commands go to the Proteoscope tab opened most recently. If you open a second tab, that tab takes over.</li>
         <li><strong>Several agents.</strong> Each agent session starts its own Proteoscope, with its own page. If the port is busy, a nearby free port is used. When the session ends, its Proteoscope stops.</li>
-        <li><strong>Beyond the tools.</strong> <code>proteoscope_command</code> runs any command from <a href="commands.html">Selections and commands</a>, such as <code>color plddt</code>, <code>show sticks within 5 of resn AQ4</code>, <code>compound resn AQ4</code> (what a ligand is), <code>diagram resn AQ4</code> (its 2D interaction diagram, as an image), <code>map load</code> then <code>map peaks</code> (difference-map peaks near the model), or <code>conservation</code>. The agent can run <code>help</code> for the full list, or <code>help &lt;command&gt;</code> for one command.</li>
+        <li><strong>Beyond the tools.</strong> <code>proteoscope_command</code> runs any command from <a href="commands.html">Selections and commands</a>, such as <code>color plddt</code>, <code>show sticks within 5 of resn AQ4</code>, <code>compound resn AQ4</code> (what a ligand is), <code>diagram resn AQ4</code> (its 2D interaction diagram, as an image), <code>posecheck resn AQ4</code> (PoseBusters' checks of its pose), <code>map load</code> then <code>map peaks</code> (difference-map peaks near the model), or <code>conservation</code>. The agent can run <code>help</code> for the full list, or <code>help &lt;command&gt;</code> for one command.</li>
       </ul>
 
       <h2 id="tools">Tools</h2>
@@ -207,7 +208,7 @@ args = ["mcp"]</code></pre></div>
             <tr><td><code>interface_contacts</code></td><td><strong><code>chain_a</code></strong>, <strong><code>chain_b</code></strong></td><td>The contacts between two chains, and the interface residues</td></tr>
             <tr><td><code>superpose</code></td><td><strong><code>moving</code></strong>, <code>reference</code>, <code>method</code>, <code>fit</code></td><td>Superpose a structure, or <code>all</code>, by sequence (the default) or by structure alone (<code>structure</code>: TM-align, or MM-align for complexes). Returns RMSD, TM-score, lDDT and the number of aligned pairs</td></tr>
             <tr><td><code>validation_report</code></td><td>none</td><td>The wwPDB validation summary of the active entry, with percentiles, ligand fit and the worst residues</td></tr>
-            <tr><td><code>rank_predictions</code></td><td><code>metric</code>, <code>limit</code>, <code>level</code>, <code>chains</code></td><td>Rank the open prediction jobs by <code>ipsae</code>, <code>pdockq2</code>, <code>pdockq</code>, <code>lis</code>, <code>iptm</code>, <code>ranking</code>, <code>ptm</code>, <code>plddt</code> or <code>crosslinks</code>. Returns each job's best model, or every model with <code>level: "models"</code>. <code>chains</code> scores one chain pair</td></tr>
+            <tr><td><code>rank_predictions</code></td><td><code>metric</code>, <code>limit</code>, <code>level</code>, <code>chains</code></td><td>Rank the open prediction jobs by <code>ipsae</code>, <code>pdockq2</code>, <code>pdockq</code>, <code>lis</code>, <code>iptm</code>, <code>ranking</code>, <code>ptm</code>, <code>plddt</code>, <code>crosslinks</code>, <code>pose</code>, <code>affinity</code> or <code>binder</code>. Returns each job's best model, or every model with <code>level: "models"</code>. <code>chains</code> scores one chain pair</td></tr>
             <tr><td><code>render_image</code></td><td><code>scale</code>, <code>transparent</code></td><td>The current view as a PNG, at 1 to 4 times the view's size</td></tr>
             <tr><td><code>proteoscope_command</code></td><td><strong><code>command</code></strong></td><td>Any other command</td></tr>
           </tbody>

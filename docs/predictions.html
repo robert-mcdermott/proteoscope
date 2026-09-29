@@ -194,6 +194,8 @@
         </table>
       </div>
       <p>The matrix under the score table shows ipTM for every chain pair, with chain pTM on the diagonal. Switch it to ipSAE or pDockQ2, and click a cell to select that interface.</p>
+      <p><strong>Without a PAE.</strong> Chai-1, and Boltz or Protenix run without their PAE options, write no PAE, so ipSAE, pDockQ2 and LIS cannot be computed. pDockQ needs only pLDDT and contacts: those models are scored and ranked by it.</p>
+      <p><strong>Ligands.</strong> Each model's ligands get PoseBusters' checks (see <a href="ligands.html#pose-checks">Pose checks</a>), shown in a Pose column and in the model's details.</p>
 
       <h3 id="ipsae-check">Checked against ipsae.py</h3>
       <p>These scores reproduce <code>ipsae.py</code> (version 4) to its printed precision on the AlphaFold 3 (Aurora A–TPX2) and AlphaFold 2 multimer (RAF1–KSR1–MEK1) examples of the IPSAE repository, and on a Boltz-2 prediction. A unit test pins them to <code>ipsae.py</code> output at both PAE cutoffs. The example outputs in that repository predate version 4 and count PAE = 12 Å in LIS, so their LIS differs in the fourth decimal.</p>
@@ -202,7 +204,7 @@
       <p>A design campaign or a screen of interaction partners produces many jobs, more than anyone opens one by one. Drop or choose several prediction folders at once, or a folder that holds them, or name it on the command line. Proteoscope scores every model of every job, opens the best, and shows the <strong>Triage</strong> table (Structure tab, <strong>Open table</strong>).</p>
       <div class="code"><pre><code><span class="prompt">$ </span>proteoscope campaign/</code></pre></div>
       <ul>
-        <li><strong>One row per job</strong> (its best model under the chosen score) or one per model, ranked by ipSAE, pDockQ2, pDockQ, LIS, ipTM, pTM, the tool's own score, mean pLDDT, or the share of your cross-links each model satisfies. Click a column header to rank by it.</li>
+        <li><strong>One row per job</strong> (its best model under the chosen score) or one per model, ranked by ipSAE, pDockQ2, pDockQ, LIS, ipTM, pTM, the tool's own score, mean pLDDT, the share of your cross-links each model satisfies, the share of pose checks its ligands pass, or Boltz-2's predicted affinity (lowest first) and binder probability. Click a column header to rank by it. A campaign without PAEs is ranked by pDockQ.</li>
         <li><strong>The interface</strong> is each model's best chain pair by ipSAE, or the chains you name (for example <code>A&nbsp;B</code>, the target and the binder).</li>
         <li><strong>Across tools.</strong> ipSAE, pDockQ, pDockQ2 and LIS are computed from each model's PAE and coordinates the same way for every predictor, so they compare jobs from different tools. ipTM, pTM and the score are each tool's own.</li>
         <li><strong>Click a row</strong> (or press Enter on it) to show that model. <strong>Gallery</strong> renders the 12 best, each superposed on the first so they share a view. <strong>Export CSV</strong> saves every model and interface of every job.</li>
@@ -212,7 +214,7 @@
         <div class="shot"><img src="../assets/img/prediction-triage.webp" width="1600" height="1000" loading="lazy" alt="The Prediction triage table ranking Aurora A with TPX2 from AlphaFold Server and RAF1–KSR1–MEK1 from ColabFold by ipSAE, with pDockQ2, LIS, ipTM and pLDDT, and a gallery of the two models" /></div>
         <figcaption>Two jobs from two tools on one table: Aurora A–TPX2 from AlphaFold Server (ipSAE 0.87) and RAF1–KSR1–MEK1 from ColabFold (0.60 on its best interface, A–C), with the gallery below.</figcaption>
       </figure>
-      <p>From the command line: <code>triage</code> ranks the jobs (for example <code>triage by pdockq2 top 10 pair A B</code>), <code>triage show 3</code> shows a row, <code>triage gallery 12</code> renders the gallery and <code>triage export</code> saves the CSV. The table ranks the jobs of the current scene: opening a structure in place of the scene clears it, and adding jobs extends it. An AI agent can do all of this too; see <a href="agents.html">AI agents (MCP)</a>.</p>
+      <p>From the command line: <code>triage</code> ranks the jobs (for example <code>triage by pdockq2 top 10 pair A B</code>), <code>triage show 3</code> shows a row, <code>triage gallery 12</code> renders the gallery and <code>triage export</code> saves the CSV (<code>triage by pose</code> and <code>triage by affinity</code> rank by the ligands). The table ranks the jobs of the current scene: opening a structure in place of the scene clears it, and adding jobs extends it. An AI agent can do all of this too; see <a href="agents.html">AI agents (MCP)</a>.</p>
 
       <h2 id="more-confidence">More confidence data</h2>
       <ul>

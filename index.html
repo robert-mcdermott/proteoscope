@@ -48,7 +48,7 @@
   <main id="main">
     <section class="hero">
       <div class="container hero-grid">
-        <a class="eyebrow" href="https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.8.0"><span class="pill">v0.8.0</span> Ligand cards, 2D interaction diagrams and difference-map peaks</a>
+        <a class="eyebrow" href="https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.9.0"><span class="pill">v0.9.0</span> Ligand pose checks, pDockQ without a PAE and affinity triage</a>
         <h1>Explore, check and explain <span class="accent">protein structures</span></h1>
         <p class="lede">Proteoscope is a 3D viewer and analysis workbench for protein and nucleic-acid structures, predicted complexes, density maps and structural proteomics data. It runs on your own computer as one self-contained program, installed with a single command and needing nothing else: no packages, no account. Your files never leave your machine.</p>
         <figure class="hero-shot">
@@ -172,9 +172,27 @@
 
         <article class="feature reverse">
           <div class="feature-text">
+            <span class="kicker">Pose checks</span>
+            <h3>Catch ligand poses that cannot be right</h3>
+            <p>Co-folding models and docking programs can return ligands with stretched bonds, puckered rings, flipped stereocenters or atoms inside the protein. Proteoscope runs the checks of PoseBusters on any ligand, predicted, docked or deposited, and shows you where a check fails.</p>
+            <ul class="checklist">
+              <li>Bond lengths and angles against RDKit's distance-geometry bounds</li>
+              <li>Flat rings, stereocenters, clashes and overlap with the protein</li>
+              <li>A Pose column for every prediction model and docking pose</li>
+            </ul>
+            <a class="more-link" href="docs/ligands.html#pose-checks">Pose checks</a>
+          </div>
+          <figure>
+            <div class="shot"><img src="assets/img/pose-checks.webp" width="1600" height="1000" loading="lazy" alt="The heme of deoxyhemoglobin (4HHB) with its pose checks listed: bond lengths and angles fail, and three out-of-bounds propionate bonds are drawn at 2.32, 2.09 and 0.87 Å" /></div>
+            <figcaption>Heme in hemoglobin (4HHB, deposited in 1984) fails 2 of 19 checks: <strong>Show</strong> draws its out-of-bounds propionate bonds.</figcaption>
+          </figure>
+        </article>
+
+        <article class="feature">
+          <div class="feature-text">
             <span class="kicker">Predicted complexes</span>
             <h3>Decide which predicted interfaces to believe</h3>
-            <p>Drop an output folder from AlphaFold 3, AlphaFold Server, Boltz, Chai-1, ColabFold, Protenix or OpenFold3. Proteoscope ranks the models by the tool's own score and scores every chain pair from its PAE: ipTM, ipSAE, pDockQ, pDockQ2 and LIS, reproducing Dunbrack's <code>ipsae.py</code>.</p>
+            <p>Drop an output folder from AlphaFold 3, AlphaFold Server, Boltz, Chai-1, ColabFold, Protenix or OpenFold3. Proteoscope ranks the models by the tool's own score and scores every chain pair from its PAE: ipTM, ipSAE, pDockQ, pDockQ2 and LIS, reproducing Dunbrack's <code>ipsae.py</code>. Models without a PAE, such as Chai-1's, still get pDockQ.</p>
             <ul class="checklist">
               <li>A PAE plot linked to the 3D view, and rigid domains clustered from it</li>
               <li>pLDDT, contact probabilities and MSA depth</li>
@@ -188,11 +206,11 @@
           </figure>
         </article>
 
-        <article class="feature">
+        <article class="feature reverse">
           <div class="feature-text">
             <span class="kicker">Batch triage</span>
             <h3>Rank a whole prediction campaign</h3>
-            <p>Open a design campaign or a screen of partners at once: hundreds of jobs from any mix of predictors. Every model is scored and ranked on one table by ipSAE, pDockQ2, LIS, ipTM, pLDDT or your cross-links, for each model's best interface or the chains you name.</p>
+            <p>Open a design campaign or a screen of partners at once: hundreds of jobs from any mix of predictors. Every model is scored and ranked on one table by ipSAE, pDockQ2, LIS, ipTM, pLDDT, your cross-links, the ligand pose checks or Boltz-2's predicted affinity, for each model's best interface or the chains you name.</p>
             <ul class="checklist">
               <li>Scores computed alike for every tool, so jobs compare across tools</li>
               <li>A gallery of the best models, superposed and framed alike</li>
@@ -206,7 +224,7 @@
           </figure>
         </article>
 
-        <article class="feature reverse">
+        <article class="feature">
           <div class="feature-text">
             <span class="kicker">AI agents</span>
             <h3>Let an agent do the legwork while you watch</h3>
@@ -234,7 +252,7 @@
           </figure>
         </article>
 
-        <article class="feature">
+        <article class="feature reverse">
           <div class="feature-text">
             <span class="kicker">Validation and density</span>
             <h3>Check the model against the data</h3>
@@ -253,7 +271,7 @@
           </figure>
         </article>
 
-        <article class="feature reverse">
+        <article class="feature">
           <div class="feature-text">
             <span class="kicker">Comparison</span>
             <h3>Compare structures, conformations and predictions</h3>
@@ -271,7 +289,7 @@
           </figure>
         </article>
 
-        <article class="feature">
+        <article class="feature reverse">
           <div class="feature-text">
             <span class="kicker">Docking</span>
             <h3>Triage docking poses</h3>
@@ -280,6 +298,7 @@
               <li>Scores read from each tool's own output</li>
               <li>Heavy-atom RMSD of every pose to pose 1</li>
               <li>A pose × residue fingerprint map, exported as CSV</li>
+              <li>PoseBusters' checks of every pose</li>
             </ul>
             <a class="more-link" href="docs/ligands.html">Ligands and docking</a>
           </div>
@@ -289,7 +308,7 @@
           </figure>
         </article>
 
-        <article class="feature reverse">
+        <article class="feature">
           <div class="feature-text">
             <span class="kicker">Proteomics</span>
             <h3>Put your mass spectrometry results on the structure</h3>
@@ -307,7 +326,7 @@
           </figure>
         </article>
 
-        <article class="feature">
+        <article class="feature reverse">
           <div class="feature-text">
             <span class="kicker">Evolution and variants</span>
             <h3>See what evolution conserves, and which variants matter</h3>
@@ -325,7 +344,7 @@
           </figure>
         </article>
 
-        <article class="feature reverse">
+        <article class="feature">
           <div class="feature-text">
             <span class="kicker">Reproducible</span>
             <h3>Figures, sessions and methods you can publish</h3>

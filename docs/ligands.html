@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Ligands and docking · Proteoscope</title>
-  <meta name="description" content="Bond orders and charges from the Chemical Component Dictionary, PLIP-style interactions in the binding site, and docking poses with their scores and interaction fingerprints." />
+  <meta name="description" content="Bond orders and charges from the Chemical Component Dictionary, PLIP-style interactions in the binding site, PoseBusters' pose checks, and docking poses with their scores and interaction fingerprints." />
   <meta name="theme-color" content="#050708" />
   <link rel="icon" href="../assets/img/logo.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="../assets/css/site.css" />
@@ -158,6 +158,30 @@
       </ul>
       <p>The layout draws rings as regular polygons, fused rings edge to edge and chains as zigzags, and puts metals at the center of the atoms they bind, so heme's iron sits in its porphyrin. Flat molecules whose layout would overlap are drawn from their own 3D shape. Some bridged or caged ligands, such as camphor, cannot be drawn flat without overlapping atoms; the diagram says so.</p>
 
+      <h2 id="pose-checks">Pose checks</h2>
+      <p>Co-folding models and docking programs can return ligands with stretched bonds, puckered rings, flipped stereocenters or atoms inside the protein; deposited ligands usually pass. The ligand card runs the checks of PoseBusters (Buttenschoen et al. 2024) on the ligand as modeled:</p>
+      <figure>
+        <div class="shot"><img src="../assets/img/pose-checks.webp" width="1600" height="1000" loading="lazy" alt="The heme of deoxyhemoglobin (4HHB) with its pose checks listed: bond lengths and angles fail, and three out-of-bounds propionate bonds are drawn at 2.32, 2.09 and 0.87 Å" /></div>
+        <figcaption>The heme of 4HHB's first α chain, deposited in 1984, fails 2 of 19 checks: <strong>Show</strong> draws three propionate bonds out of bounds (2.32, 2.09 and 0.87 Å); a carboxylate's oxygens are also 1.54 Å apart.</figcaption>
+      </figure>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Group</th><th>Checks</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Chemistry</strong></td><td>RDKit accepts the molecule (no atom over its allowed valence), and it is one piece.</td></tr>
+            <tr><td><strong>Geometry</strong></td><td>Bond lengths and angles within 25% of RDKit's distance-geometry bounds; no clash inside the ligand; five- and six-membered aromatic rings and C=C bonds flat within 0.25 Å; saturated six-membered rings puckered.</td></tr>
+            <tr><td><strong>Stereochemistry</strong></td><td>Stereocenters and E/Z double bonds as in the Chemical Component Dictionary's ideal coordinates.</td></tr>
+            <tr><td><strong>Contacts</strong></td><td>No atom closer to the protein, cofactors, ions or waters than 0.75 of the sum of their radii; a protein atom within 5 Å; at most 7.5% of the ligand's volume inside them.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul>
+        <li><strong>On the card</strong>, the summary says how many checks pass; click it for the list. <strong>Show</strong> on a failing check draws the atoms involved as measurements and selects the residues they touch.</li>
+        <li><strong>Everywhere else:</strong> prediction models get a Pose column (see <a href="predictions.html#triage">Batch triage</a>), and docking poses a Checks column. <code>posecheck [&lt;selection&gt;]</code> returns every check to scripts and agents.</li>
+        <li><strong>Bond orders</strong> come from the dictionary, the file's own definition, or an SDF or MOL2 file. Without them (PDBQT, or a ligand given to a predictor as SMILES when the output lists no bonds), only the contact checks run.</li>
+      </ul>
+      <p>The bond and angle limits come from a port of RDKit's code that matches RDKit on 4,017 dictionary components, and the verdicts match PoseBusters 0.6.5 on 127 test poses except for heme's. Where Proteoscope differs from PoseBusters: its energy ratio is left out, so a passing pose is not called “PB-valid”; metal atoms of a ligand (heme's iron) are left out of the chemistry and geometry checks, which RDKit cannot run on them; and atoms covalently bonded to the ligand (a glycan's asparagine, a covalent inhibitor's cysteine), and their neighbors, do not count as clashes.</p>
+
       <h2 id="docking">Opening docking poses</h2>
       <p>Open or drop an SDF or molfile (V2000 or V3000), MOL2 or PDBQT file (<code>.sdf</code>, <code>.mol</code>, <code>.mol2</code>, <code>.pdbqt</code>) with the receptor active, and its molecules become poses in the receptor. Poses from AutoDock Vina, smina, GNINA, Glide, GOLD, DOCK, rDock and DiffDock come with their scores.</p>
       <div class="callout"><p><strong>Note.</strong> Poses open into the active structure, so open the receptor first.</p></div>
@@ -186,7 +210,10 @@
 
       <h2 id="fingerprints">Interaction fingerprints</h2>
       <p>The fingerprint lists every pose's interactions with the receptor residues around it, as a pose × residue table. Use it to find the poses that keep the interactions you trust, such as a hinge hydrogen bond or a salt bridge.</p>
-      <p><strong>Export CSV</strong> saves the scores and fingerprints.</p>
+      <p><strong>Export CSV</strong> saves the scores, fingerprints and pose checks.</p>
+
+      <h2 id="pose-table-checks">Pose checks of docking poses</h2>
+      <p>The pose table's <strong>Checks</strong> column gives how many of PoseBusters' checks each pose passes (see <a href="#pose-checks">Pose checks</a>); hover over it for the failing ones. A pose is not checked against a crystal ligand it was docked over. MOL2 files in the SYBYL convention write carboxylates, phosphates, amidinium and guanidinium groups with aromatic bonds; Proteoscope reads them with the charges and bond orders RDKit gives them.</p>
 
       <h2 id="crystal-ligand">Poses, crystal ligands and sessions</h2>
       <ul>
