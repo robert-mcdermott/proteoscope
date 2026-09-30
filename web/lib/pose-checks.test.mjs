@@ -186,6 +186,27 @@ test('a glycan\'s asparagine: the linked atom and its neighbor are no contacts',
   assert.deepEqual(checkPose(pose.ligand, pose.environment, { bondedKeys: new Set([...pose.bondedKeys].filter((key) => model.atoms[key].name === 'ND2')) }).failed, ['protein-distance']);
 });
 
+test('a definition that lists bonds only (as OpenFold3 writes) still types the ligand', () => {
+  // The 1M17 file without its _chem_comp_atom loop: the bond table alone remains.
+  const lines = exampleText('1m17').split('\n');
+  const start = lines.findIndex((line) => line.startsWith('_chem_comp_atom.')) - 1;
+  const end = lines.findIndex((line, index) => index > start && line.startsWith('#'));
+  const structure = deriveStructure(parseStructure([...lines.slice(0, start), ...lines.slice(end)].join('\n'), '1m17.cif'));
+  const model = structure.models[0];
+  const residue = model.residues.find((item) => item.resName === 'AQ4');
+  assert.equal(residue.chemistry, 'file');
+  assert.equal(model.bonds.filter((bond) => model.atomResidue[bond.a] === residue.index && bond.order === 2).length, 8);
+  const pose = residuePose(model, residue, residue.component);
+  // The same bond orders as with the complete definition.
+  const complete = deriveStructure(parseStructure(exampleText('1m17'), '1m17.cif')).models[0];
+  const full = complete.residues.find((item) => item.resName === 'AQ4');
+  const orders = (ligand) => ligand.bonds.map((bond) => `${ligand.atoms[bond.a].name}-${ligand.atoms[bond.b].name}:${bond.order}`).sort();
+  assert.deepEqual(orders(pose.ligand), orders(residuePose(complete, full, full.component).ligand));
+  const result = checkPose(pose.ligand, pose.environment, { bondedKeys: pose.bondedKeys });
+  assert.deepEqual(result.failed, []);
+  assert.equal(result.checked, 17);
+});
+
 test('contact classes follow PoseBusters: metals and halides by element, waters, polymer and hetero records', () => {
   assert.equal(contactClass({ element: 'ZN', resName: 'ZN', hetero: true }), 'inorganic');
   assert.equal(contactClass({ element: 'O', resName: 'SO4', hetero: true }), 'inorganic');

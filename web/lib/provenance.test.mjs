@@ -57,6 +57,9 @@ test('the methods paragraph states only what ran', () => {
   assert.match(poses.text, /stereocenters and double bonds were compared with the Chemical Component Dictionary/);
   assert.match(poses.text, /scored by pDockQ alone, which needs none/);
   assert.ok(['posebusters', 'rdkit', 'uff', 'ccd'].every((key) => poses.references.includes(key)));
+  const predicted = methodsText(entry({ smilesLigands: true, poseChecks: { stereo: false, smiles: true } })).text;
+  assert.match(predicted, /stereocenters and double bonds were compared with the SMILES the structure predictor was given/);
+  assert.match(predicted, /ligands given to a structure predictor as SMILES were read from the SMILES of the job's input/);
   const docked = methodsText(entry({ poseChecks: { stereo: false } }));
   assert.doesNotMatch(docked.text, /stereocenters/);
   assert.ok(!docked.references.includes('ccd'));

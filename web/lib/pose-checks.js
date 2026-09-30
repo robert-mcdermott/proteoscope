@@ -32,6 +32,7 @@ import { componentName } from './chemistry.js';
 import { boundsMatrix } from './dg-bounds.js';
 import { symmetricEigen3 } from './math3d.js';
 import { bondBetween, elementRecord, otherAtom, perceiveMolecule } from './perception.js';
+import { centerTarget, cisIn, signedVolume } from './smiles.js';
 
 export const POSE_CHECKS = [
   { id: 'sanitization', group: 'chemistry', label: 'Chemistry', title: 'RDKit accepts the molecule: no atom over its allowed valence' },
@@ -42,8 +43,8 @@ export const POSE_CHECKS = [
   { id: 'aromatic-flatness', group: 'geometry', label: 'Aromatic rings flat', title: 'Five- and six-membered aromatic rings within 0.25 Å of a plane' },
   { id: 'ring-nonflatness', group: 'geometry', label: 'Saturated rings puckered', title: 'Isolated non-aromatic six-membered rings at least 0.05 Å out of plane' },
   { id: 'double-bond-flatness', group: 'geometry', label: 'Double bonds flat', title: 'C=C bonds and their substituents within 0.25 Å of a plane' },
-  { id: 'chirality', group: 'stereo', label: 'Stereocenters', title: 'Tetrahedral stereocenters as in the dictionary definition' },
-  { id: 'double-bond-stereo', group: 'stereo', label: 'Double-bond geometry', title: 'E/Z double bonds as in the dictionary definition' },
+  { id: 'chirality', group: 'stereo', label: 'Stereocenters', title: 'Tetrahedral stereocenters as in the dictionary definition or the SMILES' },
+  { id: 'double-bond-stereo', group: 'stereo', label: 'Double-bond geometry', title: 'E/Z double bonds as in the dictionary definition or the SMILES' },
   { id: 'protein-distance', group: 'contacts', label: 'Distance to protein', title: 'No atom pair closer than 0.75 of the sum of van der Waals radii' },
   { id: 'protein-near', group: 'contacts', label: 'Near the protein', title: 'At least one protein atom within 5 Å' },
   { id: 'organic-distance', group: 'contacts', label: 'Distance to cofactors', title: 'Organic cofactors and other ligands: 0.75 of the van der Waals radii' },
@@ -131,7 +132,7 @@ export function checkPose(ligand, environment = [], options = {}) {
   }
   if (!molecule.problem) flatnessChecks(molecule, organicPositions, set);
   if (options.reference) stereoChecks(molecule, organic, options.reference, set);
-  else for (const id of ['chirality', 'double-bond-stereo']) set(id, { detail: 'Needs the dictionary definition of the molecule to compare with.' });
+  else for (const id of ['chirality', 'double-bond-stereo']) set(id, { detail: 'Needs the dictionary definition of the molecule, or the SMILES it was predicted from, to compare with.' });
   contactChecks(ligand, positions, metal, environment, options, setOriginal);
 
   return summarize(molecule, [...results.values()]);
@@ -163,7 +164,7 @@ function isMetal(z) {
 // atoms covalently bonded to the residue, and their neighbors, are listed to be left out.
 export function residuePose(model, residue, component = null, options = {}) {
   const heavy = residue.atoms.filter((atom) => !atom.isHydrogen);
-  const typed = component && !component.untyped && (residue.chemistry === 'ccd' || residue.chemistry === 'file');
+  const typed = component && !component.untyped && ['ccd', 'file', 'smiles'].includes(residue.chemistry);
   let bonds = null;
   const atoms = heavy.map((atom) => {
     const name = typed ? componentName(component, atom.name) : null;
@@ -197,7 +198,8 @@ export function residuePose(model, residue, component = null, options = {}) {
     }
   }
   const environment = modelEnvironment(model, (other) => other === residue || Boolean(options.skip?.has(other.key)));
-  const reference = typed && component.source === 'ccd' ? componentReference(component) : null;
+  // Stereo from a dictionary entry's ideal coordinates, or from the SMILES a predictor was given.
+  const reference = !typed ? null : component.source === 'ccd' ? componentReference(component) : component.source === 'smiles' ? component.stereo : null;
   return { ligand: { atoms, bonds }, typed: Boolean(typed), environment, bondedKeys, reference };
 }
 
@@ -521,92 +523,97 @@ function flatResult(set, id, systems, noun, passes, puckering = false) {
   });
 }
 
-/* ---------- Stereochemistry against the dictionary ---------- */
+/* ---------- Stereochemistry against a definition ---------- */
 
-function signedVolume(center, a, b, c) {
-  const u = [a[0] - center[0], a[1] - center[1], a[2] - center[2]];
-  const v = [b[0] - center[0], b[1] - center[1], b[2] - center[2]];
-  const w = [c[0] - center[0], c[1] - center[1], c[2] - center[2]];
-  const volume = u[0] * (v[1] * w[2] - v[2] * w[1]) - u[1] * (v[0] * w[2] - v[2] * w[0]) + u[2] * (v[0] * w[1] - v[1] * w[0]);
-  const scale = Math.hypot(...u) * Math.hypot(...v) * Math.hypot(...w);
-  return scale > 0 ? volume / scale : 0;
-}
-
-function stereoChecks(molecule, ligand, reference, set) {
-  const names = ligand.atoms.map((atom) => String(atom.name ?? '').toUpperCase());
+// The configuration the pose must have: tetrahedral centers as three partner atoms and the sign
+// of their volume, double bonds as a substituent on each end and whether they are cis. A
+// dictionary entry gives it by its ideal coordinates, for the atoms it labels R or S and the
+// bonds it labels E or Z; a SMILES (smiles.js) by @ and @@, / and \, with atoms by name.
+// Centers with two terminal neighbors of one element (the phosphorus of a phosphate, whose
+// oxygens are equivalent by resonance and named in any order) are not stereocenters to InChI
+// either and are left out.
+function stereoTargets(molecule, names, reference) {
   const index = new Map(names.map((name, position) => [name, position]));
-  const position = (i) => [ligand.atoms[i].x, ligand.atoms[i].y, ligand.atoms[i].z];
+  const neighborsOf = (i) => molecule.neighbors[i].map((bondIndex) => otherAtom(molecule.bonds[bondIndex], i));
+  const pseudo = (i) => {
+    const terminal = neighborsOf(i).filter((j) => molecule.neighbors[j].length === 1).map((j) => molecule.atoms[j].z);
+    return terminal.some((z, k) => terminal.indexOf(z) !== k);
+  };
+  const centers = [];
+  const doubleBonds = [];
+  if (reference.smiles) {
+    for (const item of reference.centers ?? []) {
+      const i = index.get(item.center);
+      if (i === undefined || pseudo(i)) continue;
+      const slots = item.order.map((name) => (name === null ? null : index.get(name)));
+      if (slots.includes(undefined)) continue;
+      centers.push({ i, ...centerTarget(slots, item.parity) });
+    }
+    for (const item of reference.doubleBonds ?? []) {
+      const atoms = [item.a, item.b, item.sa, item.sb].map((name) => index.get(name));
+      if (atoms.includes(undefined)) continue;
+      doubleBonds.push({ a: atoms[0], b: atoms[1], sa: atoms[2], sb: atoms[3], cis: item.cis });
+    }
+    return { source: 'the SMILES', centers, doubleBonds };
+  }
   const ideal = (name) => {
     const atom = reference.atoms.get(name);
     return atom && [atom.x, atom.y, atom.z].every(Number.isFinite) ? [atom.x, atom.y, atom.z] : null;
-  };
-  // Tetrahedral centers the dictionary labels R or S, with three heavy neighbors present. Centers
-  // with two terminal neighbors of one element (the phosphorus of a phosphate, whose oxygens are
-  // equivalent by resonance and named in any order) are not stereocenters to InChI either.
-  const inverted = [];
-  const flattened = [];
-  let centers = 0;
-  const pseudo = (i) => {
-    const terminal = molecule.neighbors[i].map((bondIndex) => otherAtom(molecule.bonds[bondIndex], i)).filter((j) => molecule.neighbors[j].length === 1).map((j) => molecule.atoms[j].z);
-    return terminal.some((z, k) => terminal.indexOf(z) !== k);
   };
   for (const [name, atom] of reference.atoms) {
     if (atom.stereo !== 'R' && atom.stereo !== 'S') continue;
     const i = index.get(name);
     if (i === undefined || !ideal(name) || pseudo(i)) continue;
-    const partners = molecule.neighbors[i].map((bondIndex) => otherAtom(molecule.bonds[bondIndex], i)).filter((j) => ideal(names[j])).sort((a, b) => (names[a] < names[b] ? -1 : 1)).slice(0, 3);
+    const partners = neighborsOf(i).filter((j) => ideal(names[j])).sort((a, b) => (names[a] < names[b] ? -1 : 1)).slice(0, 3);
     if (partners.length < 3) continue;
-    centers += 1;
-    const pose = signedVolume(position(i), ...partners.map(position));
-    const dictionary = signedVolume(ideal(name), ...partners.map((j) => ideal(names[j])));
-    if (Math.abs(pose) < 0.05) flattened.push(i);
-    else if (Math.sign(pose) !== Math.sign(dictionary)) inverted.push(i);
+    centers.push({ i, partners, sign: Math.sign(signedVolume(ideal(name), ...partners.map((j) => ideal(names[j])))) });
   }
-  const labelOf = (i) => names[i] || `${molecule.atoms[i].symbol}${i + 1}`;
-  if (!centers) set('chirality', { passed: true, detail: 'No stereocenters in the dictionary definition.' });
-  else {
-    const bad = [...inverted, ...flattened];
-    set('chirality', {
-      passed: bad.length === 0,
-      value: bad.length,
-      detail: bad.length ? `${[inverted.length ? `${inverted.length} inverted (${inverted.map(labelOf).join(', ')})` : '', flattened.length ? `${flattened.length} flattened (${flattened.map(labelOf).join(', ')})` : ''].filter(Boolean).join('; ')} of ${count(centers, 'stereocenter')}.` : centers === 1 ? 'The stereocenter is as in the dictionary.' : `All ${centers} stereocenters are as in the dictionary.`,
-      atoms: bad,
-    });
-  }
-  // Double bonds the dictionary labels E or Z: a substituent on each end, cis or trans.
-  const flipped = [];
-  let doubleBonds = 0;
   for (const bond of reference.bonds ?? []) {
     if (bond.stereo !== 'E' && bond.stereo !== 'Z') continue;
     const a = index.get(bond.a);
     const b = index.get(bond.b);
     if (a === undefined || b === undefined || !ideal(bond.a) || !ideal(bond.b)) continue;
-    const substituent = (end, other) => molecule.neighbors[end].map((bondIndex) => otherAtom(molecule.bonds[bondIndex], end)).filter((j) => j !== other && ideal(names[j])).sort((x, y) => (names[x] < names[y] ? -1 : 1))[0];
+    const substituent = (end, other) => neighborsOf(end).filter((j) => j !== other && ideal(names[j])).sort((x, y) => (names[x] < names[y] ? -1 : 1))[0];
     const sa = substituent(a, b);
     const sb = substituent(b, a);
     if (sa === undefined || sb === undefined) continue;
-    doubleBonds += 1;
-    const cisIn = (p) => {
-      const axis = [p(b)[0] - p(a)[0], p(b)[1] - p(a)[1], p(b)[2] - p(a)[2]];
-      const u = [p(sa)[0] - p(a)[0], p(sa)[1] - p(a)[1], p(sa)[2] - p(a)[2]];
-      const v = [p(sb)[0] - p(b)[0], p(sb)[1] - p(b)[1], p(sb)[2] - p(b)[2]];
-      const length2 = axis[0] ** 2 + axis[1] ** 2 + axis[2] ** 2;
-      const project = (w) => {
-        const t = (w[0] * axis[0] + w[1] * axis[1] + w[2] * axis[2]) / length2;
-        return [w[0] - t * axis[0], w[1] - t * axis[1], w[2] - t * axis[2]];
-      };
-      const pu = project(u);
-      const pv = project(v);
-      return pu[0] * pv[0] + pu[1] * pv[1] + pu[2] * pv[2] > 0;
-    };
-    if (cisIn(position) !== cisIn((j) => ideal(names[j]))) flipped.push(a, b);
+    doubleBonds.push({ a, b, sa, sb, cis: cisIn((j) => ideal(names[j]), a, b, sa, sb) });
   }
-  if (!doubleBonds) set('double-bond-stereo', { passed: true, detail: 'No E/Z double bonds in the dictionary definition.' });
+  return { source: 'the dictionary', centers, doubleBonds };
+}
+
+function stereoChecks(molecule, ligand, reference, set) {
+  const names = ligand.atoms.map((atom) => String(atom.name ?? '').toUpperCase());
+  const position = (i) => [ligand.atoms[i].x, ligand.atoms[i].y, ligand.atoms[i].z];
+  const { source, centers, doubleBonds } = stereoTargets(molecule, names, reference);
+  const inverted = [];
+  const flattened = [];
+  for (const { i, partners, sign } of centers) {
+    const pose = signedVolume(position(i), ...partners.map(position));
+    if (Math.abs(pose) < 0.05) flattened.push(i);
+    else if (Math.sign(pose) !== sign) inverted.push(i);
+  }
+  const labelOf = (i) => names[i] || `${molecule.atoms[i].symbol}${i + 1}`;
+  if (!centers.length) set('chirality', { passed: true, detail: `No stereocenters in ${source}.` });
+  else {
+    const bad = [...inverted, ...flattened];
+    set('chirality', {
+      passed: bad.length === 0,
+      value: bad.length,
+      detail: bad.length ? `${[inverted.length ? `${inverted.length} inverted (${inverted.map(labelOf).join(', ')})` : '', flattened.length ? `${flattened.length} flattened (${flattened.map(labelOf).join(', ')})` : ''].filter(Boolean).join('; ')} of ${count(centers.length, 'stereocenter')}.` : centers.length === 1 ? `The stereocenter is as in ${source}.` : `All ${centers.length} stereocenters are as in ${source}.`,
+      atoms: bad,
+    });
+  }
+  const flipped = [];
+  for (const { a, b, sa, sb, cis } of doubleBonds) {
+    if (cisIn(position, a, b, sa, sb) !== cis) flipped.push(a, b);
+  }
+  if (!doubleBonds.length) set('double-bond-stereo', { passed: true, detail: `No E/Z double bonds in ${source}.` });
   else {
     set('double-bond-stereo', {
       passed: flipped.length === 0,
       value: flipped.length / 2,
-      detail: flipped.length ? `${flipped.length / 2} of ${count(doubleBonds, 'double bond')} with the wrong E/Z geometry (${labelOf(flipped[0])}=${labelOf(flipped[1])}).` : doubleBonds === 1 ? 'The E/Z double bond is as in the dictionary.' : `All ${doubleBonds} E/Z double bonds are as in the dictionary.`,
+      detail: flipped.length ? `${flipped.length / 2} of ${count(doubleBonds.length, 'double bond')} with the wrong E/Z geometry (${labelOf(flipped[0])}=${labelOf(flipped[1])}).` : doubleBonds.length === 1 ? `The E/Z double bond is as in ${source}.` : `All ${doubleBonds.length} E/Z double bonds are as in ${source}.`,
       atoms: flipped,
     });
   }

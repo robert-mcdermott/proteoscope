@@ -49,7 +49,8 @@ Highlights:
   - Pose checks: PoseBusters' checks of a ligand pose (bond lengths and
     angles, clashes, flat rings, stereocenters, contacts with the protein),
     for co-folded, docked and deposited ligands, matching PoseBusters'
-    verdicts on the validation suite's poses.
+    verdicts on the validation suite's poses. Ligands given to a predictor as
+    SMILES are checked against their SMILES, stereocenters included.
   - Bond orders, aromaticity and charges from the Chemical Component
     Dictionary, used to draw ligands and to type their interactions.
   - Docking poses from AutoDock Vina, smina, GNINA, Glide, GOLD, DOCK, rDock
@@ -69,10 +70,10 @@ Highlights:
   its models from AlphaFold DB, SWISS-MODEL and other 3D-Beacons providers.
   Open or add any of them, superposed on the active structure. No account or
   API key.
-- **Bundled examples.** 27 curated structures (drug targets, degraders,
-  antibodies, chromatin, Cas9, conformational changes, a capsid, the spike
-  and an AlphaFold model), each with a description and an opening view that
-  shows its point.
+- **Bundled examples.** 29 curated examples (drug targets, degraders,
+  antibodies, chromatin, Cas9, conformational changes, a capsid, the spike,
+  an AlphaFold model and two folders of prediction output), each with a
+  description and an opening view that shows its point.
 - **AlphaFold.** Fetch any UniProt accession from AlphaFold DB; view pLDDT
   coloring, an interactive PAE plot linked to the 3D view, rigid domains
   clustered from the PAE, and MSA depth.
@@ -217,7 +218,7 @@ lists what changed in each release.
 | **Density map** | Open or drop a `.map`, `.mrc` or `.ccp4` file (optionally gzipped) with its structure active, or load the map of a PDB entry. See [Density Maps](#density-maps). |
 | **Prediction output** | Drop a prediction folder or an AlphaFold Server `.zip`, or click **Open prediction folder…**. AlphaFold 3, AlphaFold Server, Boltz-1/2, Chai-1, ColabFold, Protenix and OpenFold3 layouts are recognized; see [Predicted Complexes](#predicted-complexes). |
 | **Command line** | `proteoscope structure.cif model.pdb.gz af3_output/my_job/` opens every file and folder at startup; the first structure is active. |
-| **Examples** | **Bundled examples** opens one of 27 curated structures with its opening view; see [Bundled Examples](#bundled-examples). |
+| **Examples** | **Bundled examples** opens one of 29 curated examples with its opening view; see [Bundled Examples](#bundled-examples). |
 | **Deep link** | `http://127.0.0.1:8765/#fetch=4HHB` fetches on load. `#fetch=4AKE,1AKE&superpose` loads both and superposes the second onto the first. |
 
 A new structure replaces the scene unless **Add to the scene instead of
@@ -291,6 +292,12 @@ they work offline. Each has a short description and an opening view: the
 ligand focused, the interface shown, or a comparison set up. `example add <id>`
 adds one to the scene without its view; `example` lists them.
 
+Two examples are folders of structure-prediction output (0.5 MB), opened as
+if dropped on the page, so the Prediction table, interface scores and ligand
+pose checks can be tried without running a predictor. Their sources, licenses
+and the changes made to them are in
+[data/predictions/README.md](data/predictions/README.md).
+
 | Group | Examples |
 | --- | --- |
 | Drugs and their targets | 1M17 EGFR–erlotinib, 2HYY ABL–imatinib, 3OG7 BRAF V600E–vemurafenib, 6OIM KRAS G12C–sotorasib, 8GUB PI3Kα H1047R–alpelisib, 6VEI IDH1 R132H–vorasidenib, 7KK4 PARP1–olaparib, 8EF5 μ-opioid receptor–fentanyl with its G protein |
@@ -298,7 +305,7 @@ adds one to the scene without its view; `example` lists them.
 | Antibodies and immune recognition | 4ZQK PD-1–PD-L1, 5XXY atezolizumab Fab–PD-L1, 1N8Z trastuzumab Fab–HER2, 7OW6 T-cell receptor with a KRAS G12D neoantigen |
 | DNA, chromatin and gene editing | 1TUP p53 on DNA, 1YCR MDM2–p53 peptide, 1T29 BRCA1 BRCT–phosphopeptide, 7LYB nucleosome with BRCA1–BARD1, 4OO8 Cas9 with guide RNA and target DNA |
 | Conformational change | 4AKE and 1AKE adenylate kinase open and closed (superposed on the CORE domain), 4HHB and 1HHO hemoglobin T and R states, 1JM7 BRCA1–BARD1 NMR ensemble |
-| Predicted structures | AF-P04637-F1, the AlphaFold model of p53 with its PAE |
+| Predicted structures | AF-P04637-F1, the AlphaFold model of p53 with its PAE; 8C3U-COFOLDING, interleukin-1β with a ligand given as SMILES, five models each from Boltz-1 and Protenix (from Runs N' Poses), triaged by pose so the models that invert the ligand's stereocenter stand out; UL144-MOTSC, the five best ColabFold models of a viral protein with a peptide, a borderline interface for the interface scores |
 | Viruses and assemblies | 6VXX SARS-CoV-2 spike, 1LP3 AAV2 capsid (60 copies, 249,120 atoms) |
 
 ## The Workspace
@@ -542,9 +549,11 @@ rebuilding geometry; clipped atoms are capped.
   iron) are left out of the chemistry and geometry checks, which RDKit cannot
   run on them; and atoms covalently bonded to the ligand (a glycan's
   asparagine, a covalent inhibitor's cysteine), and their neighbors, do not
-  count as clashes. A ligand whose bond orders neither the dictionary nor the
-  file gives (a ligand given to a predictor as SMILES, when the output lists
-  no bonds) gets the contact checks only.
+  count as clashes. A ligand given to a structure predictor as SMILES is
+  checked against the SMILES, stereocenters and double bonds included (see
+  [Predicted Complexes](#predicted-complexes)); a ligand whose bond orders
+  neither the dictionary, the file nor the job's input gives gets the contact
+  checks only.
 - **Commands.** `compound [<selection>]` shows the card and returns its
   facts to scripts; `diagram [<selection>] [names]` opens the diagram, and
   returns it to scripts as SVG and PNG (to an AI agent, as an image);
@@ -797,12 +806,35 @@ Prediction table and the triage table; the card lists them for the ligand you
 select. Boltz-2's predicted affinity (log10 IC50 in µM, lower binds tighter)
 and binder probability, predicted per job, join the triage table.
 
-Sessions keep the model, its PAE, contact probabilities, scores and pose
-checks.
+**Ligands given as SMILES.** Predictors write such a ligand without its bond
+orders, but its atoms in the order of the SMILES. When the job's input is at
+hand, Proteoscope reads the SMILES (as RDKit reads it, including @, @@, / and
+\\), pairs its atoms with the model's (by that order, else by their bonds),
+and gives the ligand the SMILES's bond orders, charges and hydrogens: it is
+drawn and its interactions typed like a dictionary ligand, and it gets every
+pose check, its stereocenters and double bonds compared with the SMILES, so a
+model that inverted a stereocenter fails. Only the marks RDKit keeps count
+(not those of a center with two equivalent neighbors, say), and a symmetric
+molecule such as a meso compound is compared under its best pairing.
+
+![Interleukin-1β co-folded with a small-molecule antagonist by Protenix (the 8C3U-COFOLDING example): the ligand drawn with the bond orders of the SMILES the job was given, and its pose checks, 18 of 19 passing, with the stereocenter C9 inverted against the SMILES](docs/images/smiles-stereo.jpg)
+
+| Tool | Where the SMILES comes from |
+| --- | --- |
+| AlphaFold 3 | `<job>_data.json` in the output folder, read with it |
+| Boltz | the job's input, `<name>.yaml` or `<name>.fasta`, opened with the results (for example the folder that holds both): the one beside `boltz_results_<name>/`, or in the input folder that `boltz_results_<folder>/` names |
+| Chai-1 | the input FASTA, put in the output folder |
+| Protenix | the input JSON, `<name>.json`, opened with the results (for example beside the `<name>/` output folder); Protenix does not copy it there |
+| OpenFold3 | no SMILES needed: its model files list the ligand's bond orders |
+
+Without its input, a ligand given as SMILES gets the contact checks only.
+
+Sessions keep the model, its PAE, contact probabilities, scores, pose checks
+and the SMILES of its ligands.
 
 ### Batch triage
 
-![Two predictions from two tools ranked on one table: Aurora A with TPX2 from AlphaFold Server (the example of the IPSAE repository) and RAF1–KSR1–MEK1 from ColabFold, with ipSAE, pDockQ2, LIS, ipTM and pLDDT, and a gallery of the models](docs/images/prediction-triage.jpg)
+![The two bundled prediction examples on one table, three jobs from three tools ranked by pLDDT: interleukin-1β co-folded with a ligand by Protenix and by Boltz-1, whose ligands get pose checks (19 of 19 pass for Protenix's best model, 17 of 19 for Boltz-1's), and UL144 with the MOTS-c peptide from ColabFold, whose two chains get ipSAE, pDockQ2 and LIS; below, a gallery of the three models](docs/images/prediction-triage.jpg)
 
 A design campaign or a screen of interaction partners produces many jobs,
 more than anyone opens one by one. Drop or choose several prediction folders
@@ -835,6 +867,35 @@ table**):
 From the command line: `triage` (rank, for example `triage by pdockq2 top 10
 pair A B`, or `triage by pose`), `triage show 3`, `triage gallery 12` and
 `triage export`.
+
+**Without a window.** On a cluster or in a pipeline, `proteoscope triage`
+scores the jobs, prints the ranking and writes it to files, then exits:
+
+```sh
+proteoscope triage campaign/ --by ipsae --csv ranking.csv --json ranking.json --gallery best/
+```
+
+```text
+Scoring in a hidden Google Chrome…
+Opened 2 prediction jobs (2 models) and ranked them by ipSAE; the best, aurka_0_tpx2_0, is shown.
+#  Job                   Model                                  Chains  ipSAE  pDockQ2  pDockQ  LIS    pLDDT
+1  aurka_0_tpx2_0        Model 0                                A–B     0.867  0.712    0.523   0.656  92.5
+2  RAF1_KSR1_MEK1_9f755  Rank 1 · multimer v3 model 1 seed 000  A–C     0.598  0.119    0.306   0.315  55.2
+2 of 2 jobs, ranked by ipSAE.
+```
+
+- `--by` takes the metrics of `triage by`; `--models` ranks models rather
+  than jobs; `--pair A,B` scores that chain pair; `--top` sets the rows
+  printed.
+- `--csv` writes the table's CSV and `--json` the ranked rows (`-` for
+  standard output); `--gallery` saves the best models as images
+  (`--gallery-count`, `--gallery-width`).
+- The scores are the page's, computed the same way: `proteoscope triage` runs
+  the page in a hidden Chrome, Chromium, Edge or Brave, found where they are
+  usually installed, or named with `--browser` or `PROTEOSCOPE_BROWSER`
+  (on a headless Linux server, `apt install chromium` or Google Chrome).
+  `--offline` works as in the window: ligands whose dictionary entries are
+  not cached get fewer pose checks.
 
 ## Validation
 
@@ -1241,6 +1302,9 @@ it under *Cite this repository*).
 ```text
 proteoscope [flags] [structure files or prediction folders...]
 proteoscope mcp [flags]    an MCP server for AI agents (see Scripting)
+proteoscope triage [flags] <prediction folders...>
+                           rank predictions without a window (see Batch triage;
+                           proteoscope triage -h lists its flags)
 
   --host string       interface to bind (default 127.0.0.1)
   --port int          preferred port; nearby ports are tried if busy (default 8765)
@@ -1452,7 +1516,7 @@ node validation/run.mjs
 
 The last command compares Proteoscope's analyses with numbers from their
 reference tools (limma, MSstatsPTM, US-align, Capra and Singh's scorer, EMDB,
-MolProbity and PoseBusters); see [validation/README.md](validation/README.md). GitHub
+MolProbity, PoseBusters and RDKit); see [validation/README.md](validation/README.md). GitHub
 Actions run gofmt, `go vet`, the Go tests with the race detector, the
 JavaScript tests, the offline validation suites and the cross-compilation on
 every pull request and every push to `main`, and the whole validation suite
@@ -1484,6 +1548,7 @@ weekly.
 | `web/lib/mvs.js`, `web/lib/zip.js`, `web/lib/codec.js` | MolViewSpec export, ZIP reading and writing, session compression and links |
 | `remote.go` | Remote control for scripts (`--remote-control`): commands, opening files by path |
 | `mcp.go` | The MCP server for AI agents (`proteoscope mcp`) |
+| `triage.go` | Batch triage without a window (`proteoscope triage`): the page in a hidden browser, the ranking, CSV, JSON and gallery written to files |
 | `web/lib/triage.js` | Batch triage: ranking the models of many prediction jobs, CSV rows |
 | `web/lib/scene.js`, `web/lib/coloring.js` | Representation and color-scheme logic |
 | `web/lib/renderer.js` | WebGPU renderer: impostors, G-buffer, SSAO, outlines, FXAA, picking, capture |
@@ -1494,6 +1559,7 @@ weekly.
 | `web/lib/chemistry.js`, `web/lib/molfile.js` | Ligand chemistry from the CCD (bond orders, aromaticity, charges, hydrogens); SDF, MOL2 and PDBQT docking poses |
 | `web/lib/depict.js`, `web/lib/ligand-diagram.js` | 2D layout of small molecules; ligand interaction diagrams as SVG |
 | `web/lib/perception.js`, `web/lib/dg-bounds.js`, `web/lib/pose-checks.js` | Chemical perception and distance-geometry bounds as RDKit computes them; PoseBusters' pose checks |
+| `web/lib/smiles.js` | SMILES as RDKit reads them (Kekulé bonds, hydrogens, @/@@ and / \\), and pairing their atoms with a model's |
 | `web/lib/volume.js`, `web/lib/volume-worker.js` | CCP4/MRC and volume-server maps, isosurfaces, map fit, difference-map peaks |
 | `web/lib/tmalign.js` | TM-align and MM-align, ported from US-align |
 | `web/lib/stats.js` | Moderated t-test, normalization, imputation, q-values, PTM adjustment |
@@ -1558,6 +1624,12 @@ for the full license text.
   of p53 with its PAE (AF-P04637-F1, CC BY 4.0; Jumper et al., *Nature* 2021;
   Varadi et al., *Nucleic Acids Research* 2024). Each example's citation is in
   `data/examples.json`.
+- The bundled prediction examples come from
+  [Runs N' Poses](https://github.com/plinder-org/runs-n-poses) (Škrinjar et
+  al., bioRxiv 2025; Apache-2.0), Boltz-1 and Protenix predictions of 8C3U,
+  and from a ColabFold data release by Büttiker (Zenodo 2026,
+  doi:[10.5281/zenodo.21471604](https://doi.org/10.5281/zenodo.21471604);
+  CC BY 4.0); see [data/predictions/README.md](data/predictions/README.md).
 - Searches use RCSB PDB, UniProt, PDBe and 3D-Beacons (Varadi et al.,
   *GigaScience* 2022); models downloaded from a 3D-Beacons provider carry
   that provider's terms.

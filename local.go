@@ -39,6 +39,7 @@ type startupInfo struct {
 	Offline       bool        `json:"offline"`
 	RemoteControl bool        `json:"remoteControl"`
 	Files         []localFile `json:"files"`
+	Blank         bool        `json:"blank,omitempty"`
 }
 
 func loadLocalFiles(paths []string) []localFile {
@@ -198,7 +199,8 @@ func isLocalFile(name string) bool {
 		return true
 	}
 	switch strings.ToLower(filepath.Ext(base)) {
-	case ".bcif", ".json", ".npz", ".npy", ".a3m", ".csv", ".zip":
+	// Prediction inputs (Boltz YAML, FASTA) give the SMILES of ligands.
+	case ".bcif", ".json", ".npz", ".npy", ".a3m", ".csv", ".zip", ".yaml", ".yml", ".fasta", ".fa", ".fas":
 		return true
 	default:
 		return false
@@ -244,7 +246,7 @@ func trimGzip(name string) string {
 
 func (a *app) serveStartup(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, startupInfo{Version: version, Offline: a.offline, RemoteControl: a.control != nil, Files: a.startupFiles})
+	writeJSON(w, startupInfo{Version: version, Offline: a.offline, RemoteControl: a.control != nil, Files: a.startupFiles, Blank: a.blank})
 }
 
 func (a *app) serveLocal(w http.ResponseWriter, r *http.Request) {

@@ -7,6 +7,7 @@ import {
   detectPredictionSets,
   flatSquare,
   insidePredictionFolder,
+  ligandSMILES,
   modelTokens,
   parseAF3Confidences,
   parseAF3Summary,
@@ -80,6 +81,48 @@ test('prediction folders of each tool are recognized and grouped into models', (
   // Each set knows the folder its predictor wrote; other files there are not annotations.
   assert.deepEqual(['server', 'af3', 'boltz', 'chai', 'colabfold', 'protenix', 'openfold3:q1', 'openfold3:result'].map((key) => byTool[key].root), ['fold_pd1', 'job', 'boltz_results_x', 'chai', 'cf', 'px', 'of/q1', 'svc/results']);
   assert.deepEqual(['fold_pd1/templates/fold_pd1_template_hit_0_chains_a.cif', 'boltz_results_x/processed/records/x.json', 'svc/results/timing.json', 'notes/1abc.cif'].map((path) => insidePredictionFolder(file(path), sets)), [true, true, true, false]);
+});
+
+test('the SMILES of ligand chains come from the jobs\' inputs', () => {
+  const erlotinib = 'COCCOc1cc2ncnc(Nc3cccc(C#C)c3)c2cc1OCCOC';
+  const af3 = JSON.stringify({ sequences: [{ protein: { id: 'A', sequence: 'MK' } }, { ligand: { id: ['B', 'C'], smiles: erlotinib } }, { ligand: { id: 'D', ccdCodes: ['ATP'] } }] });
+  assert.deepEqual([...ligandSMILES('af3', af3, 'job_data.json')], [['B', erlotinib], ['C', erlotinib]]);
+  const yaml = [
+    'version: 1', 'sequences:', '  - protein:', '      id: A', '      sequence: MKT',
+    '  - ligand:', '      id: [C, D]', `      smiles: '${erlotinib}'`,
+    '  - ligand:', '      id: E', '      ccd: SAH',
+    '  - ligand:', '      id:', '        - F', '      smiles: "N[C@@H](C)C(=O)O"  # alanine',
+  ].join('\n');
+  assert.deepEqual([...ligandSMILES('boltz', yaml, 'job.yaml')], [['C', erlotinib], ['D', erlotinib], ['F', 'N[C@@H](C)C(=O)O']]);
+  assert.deepEqual([...ligandSMILES('boltz', '>A|protein|./a.a3m\nMKTAY\n>B|smiles\nCC\nO\n>C|ccd\nSAH\n', 'job.fasta')], [['B', 'CCO']]);
+  // Chai-1 letters the chains in input order.
+  assert.deepEqual([...ligandSMILES('chai', '>protein|name=kinase\nMKT\n>ligand|name=drug\nc1ccccc1O\n', 'input.fasta')], [['B', 'c1ccccc1O']]);
+  assert.equal(ligandSMILES('af3', 'not json', 'job_data.json').size, 0);
+  // Protenix letters its entities in order and numbers their copies; the job is picked by name.
+  const protenix = JSON.stringify([
+    { name: 'other', sequences: [{ ligand: { ligand: 'CC', count: 1 } }] },
+    { name: 'px', sequences: [{ proteinChain: { sequence: 'MKT', count: 1 } }, { ligand: { ligand: erlotinib, count: 2 } }, { ligand: { ligand: 'CCD_ATP', count: 1 } }, { ligand: { ligand: 'CCO' } }] },
+  ]);
+  assert.deepEqual([...ligandSMILES('protenix', protenix, 'px.json', 'px')], [['B0', erlotinib], ['B1', erlotinib], ['D0', 'CCO']]);
+  assert.equal(ligandSMILES('protenix', protenix, 'px.json', 'missing').size, 0, 'no job of that name among several');
+  // Boltz inputs pair with their job by name; Chai-1's FASTA sits in the job's folder.
+  const { sets } = detectPredictionSets([
+    'inputs/egfr.yaml', 'inputs/other.yaml',
+    'boltz_results_inputs/predictions/egfr/egfr_model_0.cif', 'boltz_results_inputs/predictions/egfr/confidence_egfr_model_0.json',
+    'chai/pred.model_idx_0.cif', 'chai/input.fasta',
+  ].map(file));
+  assert.deepEqual(sets.map((set) => [set.tool, set.input?.path]), [['boltz', 'inputs/egfr.yaml'], ['chai', 'chai/input.fasta']]);
+  // Two screens with a job of the same name each take their own input; equally near ones, none.
+  const boltzJob = (root, name) => [`${root}/predictions/${name}/${name}_model_0.cif`, `${root}/predictions/${name}/confidence_${name}_model_0.json`];
+  const inputs = (paths) => detectPredictionSets(paths.map(file)).sets.map((set) => set.input?.path ?? null);
+  assert.deepEqual(inputs([...boltzJob('a/boltz_results_inputs', 'lig1'), ...boltzJob('b/boltz_results_inputs', 'lig1'), 'a/inputs/lig1.yaml', 'b/inputs/lig1.yaml']), ['a/inputs/lig1.yaml', 'b/inputs/lig1.yaml']);
+  assert.deepEqual(inputs([...boltzJob('run/boltz_results_lig1', 'lig1'), 'run/lig1.fasta', 'run/lig1.yaml']), ['run/lig1.yaml']);
+  assert.deepEqual(inputs([...boltzJob('x/boltz_results_inputs', 'lig1'), 'p/lig1.yaml', 'q/lig1.yaml']), [null]);
+  // Protenix names its files <job>_seed_<seed>_sample_<k>: the seeds form one job, whose input
+  // <job>.json sits beside the results.
+  const seedJob = (seed) => [`run/px/seed_${seed}/predictions/px_seed_${seed}_sample_0.cif`, `run/px/seed_${seed}/predictions/px_seed_${seed}_summary_confidence_sample_0.json`];
+  const named = detectPredictionSets([...seedJob(11), ...seedJob(22), 'run/px.json', 'run/other.json'].map(file)).sets;
+  assert.deepEqual(named.map((set) => [set.tool, set.name, set.root, set.input?.path, set.models.map((model) => model.id)]), [['protenix', 'px', 'run/px', 'run/px.json', ['seed-11_sample-0', 'seed-22_sample-0']]]);
 });
 
 test('confidence files of each predictor parse into one score shape', () => {

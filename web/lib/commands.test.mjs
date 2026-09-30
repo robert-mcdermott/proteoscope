@@ -66,10 +66,13 @@ test('triage, info and interactions', () => {
   assert.deepEqual(fields(parseCommand('batch lis best jobs'), 'name', 'metric', 'level', 'pair'), { name: 'triage', metric: 'lis', level: 'jobs', pair: null });
   assert.deepEqual(fields(parseCommand('triage show #3'), 'action', 'position'), { action: 'show', position: 3 });
   assert.deepEqual([parseCommand('triage by pose').metric, parseCommand('triage by affinity').metric, parseCommand('triage by binder').metric], ['pose', 'affinity', 'binder']);
-  assert.deepEqual(fields(parseCommand('triage gallery'), 'action', 'count'), { action: 'gallery', count: 12 });
+  assert.deepEqual(fields(parseCommand('triage gallery'), 'action', 'count', 'width'), { action: 'gallery', count: 12, width: null });
+  assert.deepEqual(fields(parseCommand('triage gallery 6 width 1200'), 'count', 'width'), { count: 6, width: 1200 });
+  assert.deepEqual(fields(parseCommand('triage gallery width 800'), 'count', 'width'), { count: 12, width: 800 });
+  assert.throws(() => parseCommand('triage gallery 6 width 50'), /120 to 4000/);
   assert.equal(parseCommand('triage csv').action, 'export');
   assert.equal(parseCommand('triage by auto top 20 jobs best').metric, 'auto');
-  assert.throws(() => parseCommand('triage by rmsd'), /Rank by ipsae/);
+  assert.throws(() => parseCommand('triage by rmsd'), /Rank by ipsae.*pose, affinity or binder/);
   assert.throws(() => parseCommand('triage gallery 40'), /1 to 24/);
   assert.throws(() => parseCommand('triage pair A'), /triage pair <chain> <chain>/);
   assert.throws(() => parseCommand('triage show'), /Usage/);

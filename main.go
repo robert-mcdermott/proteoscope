@@ -26,7 +26,7 @@ import (
 //go:embed web/index.html web/styles.css web/app.js web/favicon.svg web/lib/*.js data
 var content embed.FS
 
-var version = "0.9.0"
+var version = "0.10.0"
 
 type sample struct {
 	ID             string `json:"id"`
@@ -49,7 +49,10 @@ type sample struct {
 	View        []string `json:"view,omitempty"`
 	Credit      string   `json:"credit,omitempty"`
 	PAE         string   `json:"pae,omitempty"`
-	Accession   string   `json:"accession,omitempty"`
+	// A folder example's files, and where its data come from.
+	Files     []sampleFile   `json:"files,omitempty"`
+	Source    *exampleSource `json:"source,omitempty"`
+	Accession string         `json:"accession,omitempty"`
 }
 
 type config struct {
@@ -63,14 +66,17 @@ type config struct {
 	dev         bool
 	showVersion bool
 	remote      bool
-	// mcp: started as "proteoscope mcp"; the agent talks to the hub in-process.
-	mcp   bool
+	// mcp: started as "proteoscope mcp" or "proteoscope triage"; the hub is driven in-process.
+	mcp bool
+	// blank: the page opens nothing until it is told to (proteoscope triage).
+	blank bool
 	files []string
 }
 
 type app struct {
 	offline  bool
 	dev      bool
+	blank    bool
 	control  *remoteHub
 	assetDir string
 	assets   fs.FS
@@ -93,6 +99,9 @@ func init() {
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "mcp" {
 		os.Exit(runMCP(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "triage" {
+		os.Exit(runTriage(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	cfg, err := parseConfig(os.Args[1:])
 	if errors.Is(err, flag.ErrHelp) {
@@ -187,6 +196,7 @@ func parseConfig(args []string) (config, error) {
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "Usage: proteoscope [flags] [structure files or prediction folders...]")
 		fmt.Fprintln(flags.Output(), "       proteoscope mcp [flags]   (an MCP server for AI agents, on stdin and stdout)")
+		fmt.Fprintln(flags.Output(), "       proteoscope triage [flags] <prediction folders...>   (rank predictions without a window; see proteoscope triage -h)")
 		flags.PrintDefaults()
 	}
 	files, err := parseArgs(flags, args)
@@ -216,6 +226,7 @@ func newApp(cfg config) (*app, error) {
 	a := &app{
 		offline: cfg.offline,
 		dev:     cfg.dev,
+		blank:   cfg.blank,
 		assets:  content,
 		files:   loadLocalFiles(cfg.files),
 		cache:   openCache(cfg.cacheDir, cfg.noCache, cfg.cacheMaxAge),

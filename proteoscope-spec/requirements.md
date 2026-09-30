@@ -437,6 +437,7 @@ selection, distance measurement, and PNG export.
 1. THE System SHALL embed the examples as gzipped mmCIF and list them by category with a description and credit
 2. WHEN an example is opened, THE System SHALL run its opening view, starting from the default style
 3. WHEN the examples are compared (open and closed adenylate kinase, T and R hemoglobin), THE System SHALL set up the comparison offline
+4. THE System SHALL include prediction-output examples, opened as prediction folders, whose licenses allow redistribution, with their sources and changes stated
 
 ### Requirement 34: Search-Engine Reports
 
@@ -659,3 +660,24 @@ selection, distance measurement, and PNG export.
 
 1. THE triage table SHALL rank by the share of pose checks a model's ligands pass, and by Boltz-2's predicted affinity (lowest first) and binder probability
 2. THE triage CSV and the records returned to scripts SHALL include each model's pose checks and each Boltz-2 job's affinity and binder probability
+
+### Requirement 55: Triage Without a Window
+
+**User Story:** As a researcher running prediction campaigns on a cluster, I want the triage ranking from the command line, so that I can rank jobs in a pipeline without opening a browser window.
+
+#### Acceptance Criteria
+
+1. `proteoscope triage <folders>` SHALL score every model of every job as the Triage table does and print the ranking, then exit
+2. IT SHALL write the table's CSV, the ranked rows as JSON and the best models as image files when asked, and take the ranking settings `triage` takes (metric, jobs or models, chain pair)
+3. IT SHALL run the page in a hidden browser with a profile of its own, and say what to install when no suitable browser is found
+
+### Requirement 56: Ligands Given as SMILES
+
+**User Story:** As a researcher co-folding ligands given as SMILES, I want those ligands checked like dictionary ligands, so that a model with broken chemistry or an inverted stereocenter stands out.
+
+#### Acceptance Criteria
+
+1. WHEN a prediction job's input gives a ligand chain as SMILES (AlphaFold 3's data file; a Boltz, Chai-1 or Protenix input opened with the results), THE ligand SHALL take the SMILES's bond orders, charges and hydrogens, read as RDKit reads SMILES, once its atoms pair with the model's
+2. THE pose checks SHALL compare such a ligand's stereocenters and double bonds with the SMILES
+3. Definitions that list a ligand's bonds without its atoms (OpenFold3) SHALL type the ligand
+4. THE reading of SMILES SHALL be checked against RDKit in the validation suite

@@ -229,6 +229,35 @@
       "credit": "AlphaFold DB (Jumper et al., Nature 2021; Varadi et al., Nucleic Acids Res 2024), CC BY 4.0"
     },
     {
+      "id": "8c3u-cofolding",
+      "folder": "predictions/8c3u-cofolding",
+      "label": "IL-1β and a ligand co-folded by Boltz-1 and Protenix",
+      "category": "Predicted structures",
+      "description": "Interleukin-1β with a small-molecule antagonist (the complex of PDB 8C3U), predicted from its SMILES by Boltz-1 and by Protenix, five models each, with the jobs' inputs. The pose checks compare each model with the SMILES: three Boltz-1 models and two Protenix models invert the ligand's stereocenter, and Boltz-1 puts the ligand too close to Lys103.",
+      "view": [
+        "triage by pose models",
+        "focus ligand"
+      ],
+      "credit": "Runs N' Poses (Škrinjar et al., bioRxiv 2025), Apache-2.0: one seed of each tool, jobs renamed; Boltz-1 (Wohlwend et al. 2024), Protenix (ByteDance)",
+      "source": {
+        "label": "Runs N' Poses",
+        "url": "https://github.com/plinder-org/runs-n-poses"
+      }
+    },
+    {
+      "id": "ul144-motsc",
+      "folder": "predictions/ul144-motsc",
+      "label": "UL144 and the MOTS-c peptide, ColabFold",
+      "category": "Predicted structures",
+      "description": "The cysteine-rich domain of the cytomegalovirus protein UL144 with the 16-residue MOTS-c peptide, predicted by ColabFold (AlphaFold 2 Multimer): the 5 best of 80 models, with their predicted aligned error. A borderline interface: ipTM near 0.5 and ipSAE near 0.15, the kind of prediction the interface scores are there to question.",
+      "view": [],
+      "credit": "Büttiker, Zenodo 2026, doi:10.5281/zenodo.21471604, CC BY 4.0: 5 of 80 models; ColabFold 1.5.5 (Mirdita et al. 2022), AlphaFold-Multimer (Evans et al. 2021)",
+      "source": {
+        "label": "Zenodo",
+        "url": "https://doi.org/10.5281/zenodo.21471604"
+      }
+    },
+    {
       "id": "6vxx",
       "file": "6vxx.cif.gz",
       "label": "SARS-CoV-2 spike, closed",
