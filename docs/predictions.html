@@ -143,6 +143,7 @@
       </ul>
       <div class="code"><pre><code><span class="prompt">$ </span>proteoscope af3_output/my_job/</code></pre></div>
       <div class="callout"><p><strong>Tip.</strong> Open the whole output folder, or the AlphaFold Server <code>.zip</code>, rather than a single model file, so the confidence files come along.</p></div>
+      <p><strong>Try it first.</strong> Two bundled examples are real prediction output and open like a dropped folder: <strong>8C3U-COFOLDING</strong> (interleukin-1β with a ligand given as SMILES, five models each from Boltz-1 and Protenix, from <a href="https://github.com/plinder-org/runs-n-poses">Runs N' Poses</a>) and <strong>UL144-MOTSC</strong> (the five best ColabFold models of a viral protein with a peptide). Choose them under <strong>Bundled examples</strong>, or type <code>example 8c3u-cofolding</code>.</p>
 
       <h3 id="tools">What is read from each tool</h3>
       <div class="table-wrap">
@@ -161,8 +162,8 @@
       </div>
       <ul>
         <li>AlphaFold 3 runs saved with <code>--compress_large_output_files</code> (<code>.zst</code> models and confidences) open as they are.</li>
-        <li>Samples from several seeds form one ranked set.</li>
-        <li>Other files in a prediction folder (logs, settings, templates, inputs) are left alone.</li>
+        <li>Samples from several seeds form one ranked set, including Protenix runs that put the seed in their file names.</li>
+        <li>Other files in a prediction folder (logs, settings, templates) are left alone; a job's input is read for the SMILES of its ligands (see <a href="#smiles">Ligands given as SMILES</a>).</li>
         <li>Chai-1 does not write PAE to disk, so its models get the scores Chai reports but not the PAE-based ones.</li>
       </ul>
 
@@ -197,6 +198,26 @@
       <p><strong>Without a PAE.</strong> Chai-1, and Boltz or Protenix run without their PAE options, write no PAE, so ipSAE, pDockQ2 and LIS cannot be computed. pDockQ needs only pLDDT and contacts: those models are scored and ranked by it.</p>
       <p><strong>Ligands.</strong> Each model's ligands get PoseBusters' checks (see <a href="ligands.html#pose-checks">Pose checks</a>), shown in a Pose column and in the model's details.</p>
 
+      <h3 id="smiles">Ligands given as SMILES</h3>
+      <p>Predictors write a ligand given as SMILES without its bond orders, but with its atoms in the order of the SMILES. When the job's input is at hand, Proteoscope reads the SMILES as RDKit reads it (including <code>@</code>, <code>@@</code>, <code>/</code> and <code>\</code>), pairs its atoms with the model's (by that order, else by their bonds), and gives the ligand the SMILES's bond orders, charges and hydrogens. The ligand is then drawn and its interactions typed like a dictionary ligand, and it gets every pose check, its stereocenters and double bonds compared with the SMILES: a model that inverted a stereocenter fails.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tool</th><th>Where the SMILES comes from</th></tr></thead>
+          <tbody>
+            <tr><td><strong>AlphaFold 3</strong></td><td><code>&lt;job&gt;_data.json</code> in the output folder, read with it</td></tr>
+            <tr><td><strong>Boltz</strong></td><td>the job's input, <code>&lt;name&gt;.yaml</code> or <code>&lt;name&gt;.fasta</code>, opened with the results (for example the folder that holds both)</td></tr>
+            <tr><td><strong>Chai-1</strong></td><td>the input FASTA, put in the output folder</td></tr>
+            <tr><td><strong>Protenix</strong></td><td>the input JSON, <code>&lt;name&gt;.json</code>, opened with the results; Protenix does not copy it there</td></tr>
+            <tr><td><strong>OpenFold3</strong></td><td>none needed: its model files list the ligand's bond orders</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figure>
+        <div class="shot"><img src="../assets/img/smiles-stereo.webp" width="1600" height="1000" loading="lazy" alt="A Protenix model of interleukin-1β with a small-molecule antagonist, the ligand drawn with the bond orders of its SMILES, failing 1 of 19 pose checks: stereocenter C9 inverted against the SMILES" /></div>
+        <figcaption>The 8C3U-COFOLDING example: a Protenix model whose ligand has its stereocenter C9 inverted against the SMILES the job was given.</figcaption>
+      </figure>
+      <p>Only the stereo marks RDKit keeps count (not those of a center with two equivalent neighbors, say), and a symmetric molecule such as a meso compound is compared under its best pairing. Without its input, a ligand given as SMILES gets the contact checks only.</p>
+
       <h3 id="ipsae-check">Checked against ipsae.py</h3>
       <p>These scores reproduce <code>ipsae.py</code> (version 4) to its printed precision on the AlphaFold 3 (Aurora A–TPX2) and AlphaFold 2 multimer (RAF1–KSR1–MEK1) examples of the IPSAE repository, and on a Boltz-2 prediction. A unit test pins them to <code>ipsae.py</code> output at both PAE cutoffs. The example outputs in that repository predate version 4 and count PAE = 12 Å in LIS, so their LIS differs in the fourth decimal.</p>
 
@@ -211,10 +232,19 @@
         <li><strong>Scale.</strong> A folder named on the command line or opened by path can hold up to 20,000 files. Alignments are read only when a model opens, so scoring stays fast.</li>
       </ul>
       <figure>
-        <div class="shot"><img src="../assets/img/prediction-triage.webp" width="1600" height="1000" loading="lazy" alt="The Prediction triage table ranking Aurora A with TPX2 from AlphaFold Server and RAF1–KSR1–MEK1 from ColabFold by ipSAE, with pDockQ2, LIS, ipTM and pLDDT, and a gallery of the two models" /></div>
-        <figcaption>Two jobs from two tools on one table: Aurora A–TPX2 from AlphaFold Server (ipSAE 0.87) and RAF1–KSR1–MEK1 from ColabFold (0.60 on its best interface, A–C), with the gallery below.</figcaption>
+        <div class="shot"><img src="../assets/img/prediction-triage.webp" width="1600" height="1000" loading="lazy" alt="The two bundled prediction examples on one triage table ranked by pLDDT: Protenix and Boltz-1 co-folding of interleukin-1β with their pose checks, 19 of 19 and 17 of 19, and ColabFold models of UL144 with the MOTS-c peptide with ipSAE, pDockQ2 and LIS, and a gallery of the three models" /></div>
+        <figcaption>The two bundled prediction examples on one table: the co-folded ligands get pose checks (19 of 19 for Protenix's best model, 17 of 19 for Boltz-1's), and ColabFold's two chains get ipSAE, pDockQ2 and LIS.</figcaption>
       </figure>
       <p>From the command line: <code>triage</code> ranks the jobs (for example <code>triage by pdockq2 top 10 pair A B</code>), <code>triage show 3</code> shows a row, <code>triage gallery 12</code> renders the gallery and <code>triage export</code> saves the CSV (<code>triage by pose</code> and <code>triage by affinity</code> rank by the ligands). The table ranks the jobs of the current scene: opening a structure in place of the scene clears it, and adding jobs extends it. An AI agent can do all of this too; see <a href="agents.html">AI agents (MCP)</a>.</p>
+
+      <h3 id="triage-headless">Triage without a window</h3>
+      <p>On a cluster or in a pipeline, <code>proteoscope triage</code> ranks the jobs without a window: it prints the ranking and writes the table as CSV, the ranked rows as JSON and images of the best models.</p>
+      <div class="code"><pre><code><span class="prompt">$ </span>proteoscope triage campaign/ --by ipsae --csv ranking.csv --json ranking.json --gallery best/</code></pre></div>
+      <ul>
+        <li><code>--by</code>, <code>--top</code>, <code>--models</code> and <code>--pair A,B</code> set the ranking as the <code>triage</code> command does; <code>--gallery-count</code> and <code>--gallery-width</code> (up to 1,600 pixels) size the gallery.</li>
+        <li>It runs Proteoscope's page in a hidden Chrome, Chromium, Edge or Brave, so the scores are exactly the window's. <code>--browser</code> or <code>PROTEOSCOPE_BROWSER</code> names the browser.</li>
+        <li>Ctrl-C, SIGTERM and a closed output pipe stop the browser and remove its temporary profile. On Linux it runs in containers (with <code>--no-sandbox</code> as root). <code>proteoscope triage -h</code> lists every option.</li>
+      </ul>
 
       <h2 id="more-confidence">More confidence data</h2>
       <ul>
@@ -225,7 +255,7 @@
       </ul>
 
       <h2 id="sessions">Predictions in sessions</h2>
-      <p>Sessions keep the model, its PAE, contact probabilities and scores:</p>
+      <p>Sessions keep the model, its PAE, contact probabilities, scores, pose checks and the SMILES of its ligands:</p>
       <ul>
         <li>PAE matrices and contact probabilities you opened are saved (at 0.125 Å and 1/255 steps), with the prediction scores and MSA depth.</li>
         <li>PAE domains are recomputed when the session opens, and AlphaFold DB PAE matrices are fetched again.</li>

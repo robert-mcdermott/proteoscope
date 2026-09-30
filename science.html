@@ -57,13 +57,14 @@
             <tr><td><strong>Map fit</strong></td><td>EMDB validation</td><td>Model 8GUB in map EMD-34272 at the recommended contour</td><td class="agree">0.8935 vs 0.896</td></tr>
             <tr><td><strong>Ramachandran classes</strong></td><td>MolProbity, through the wwPDB report</td><td>1M17</td><td class="agree">308 of 308</td></tr>
             <tr><td><strong>Pose checks</strong></td><td>PoseBusters 0.6.5 (RDKit 2026.03)</td><td>18 PDB ligands as deposited and broken on purpose (moved, stretched, puckered, flattened, flipped, mirrored): 127 poses</td><td class="agree">2,392 of 2,401 verdicts; the other 9 are heme's, which RDKit rejects</td></tr>
+            <tr><td><strong>Reading SMILES</strong></td><td>RDKit 2026.03 (<code>MolFromSmiles</code>, randomized SMILES)</td><td>51 drugs, cofactors and heterocycles written up to 8 ways each: 407 SMILES</td><td class="agree">All atoms, charges, hydrogens, bonds and kept stereo marks; 92 of 94 stereocenters and all 8 stereo bonds hold in RDKit's 3D coordinates (the other 2 are ATP's phosphorus, left out on purpose)</td></tr>
           </tbody>
         </table>
       </div>
       <p>Other checks were run while each feature was built:</p>
       <ul>
         <li><strong>Interface scores</strong> reproduce Dunbrack's <code>ipsae.py</code> (version 4) to its printed precision on the AlphaFold 3 (Aurora A–TPX2) and AlphaFold 2 multimer (RAF1–KSR1–MEK1) examples of the IPSAE repository and on a Boltz-2 prediction.</li>
-        <li><strong>Distance-geometry bounds</strong> for the pose checks match RDKit's <code>GetMoleculeBoundsMatrix</code> on 4,017 Chemical Component Dictionary entries, and MOL2 charged groups match RDKit's reading on 15 molecules.</li>
+        <li><strong>Distance-geometry bounds</strong> for the pose checks match RDKit's <code>GetMoleculeBoundsMatrix</code> on 4,017 Chemical Component Dictionary entries, and MOL2 charged groups match RDKit's reading on 15 molecules. For ligands given as SMILES, 618 further randomized SMILES of 52 molecules agree with RDKit, and on ten co-folded models of 8C3U the stereocenters called inverted are those RDKit's <code>AssignStereochemistryFrom3D</code> finds.</li>
         <li><strong>TM-align</strong> matches US-align on 606 all-against-all pairs of 25 protein chains and 3 RNAs, and on edge cases from 3-residue chains to the 959-residue SARS-CoV-2 spike.</li>
         <li><strong>Superposition</strong> gives the expected results on known cases: adenylate kinase closed onto open, 1.08 Å over 112 core pairs; SUMO-1 onto ubiquitin by structure alone, TM-score 0.654, as US-align gives.</li>
         <li><strong>Conservation</strong> of p53 from 1,384 sequences ranks the zinc ligands C176, H179, C238 and C242 first, then S241, R175, R248 and R273.</li>
@@ -164,11 +165,11 @@
 
       <h2 id="cite">Cite Proteoscope</h2>
       <p>If you use Proteoscope in your research, please cite it, together with the methods and data you used (the <strong>Methods</strong> dialog lists them):</p>
-      <div class="callout"><p>McDermott R. Proteoscope: a viewer and analysis workbench for protein structures and structural proteomics. Version 0.9.0. 2026. <a href="https://github.com/robert-mcdermott/proteoscope">https://github.com/robert-mcdermott/proteoscope</a></p></div>
+      <div class="callout"><p>McDermott R. Proteoscope: a viewer and analysis workbench for protein structures and structural proteomics. Version 0.10.0. 2026. <a href="https://github.com/robert-mcdermott/proteoscope">https://github.com/robert-mcdermott/proteoscope</a></p></div>
       <div class="code"><span class="code-label">bibtex</span><pre><code>@software{proteoscope2026,
   author = {McDermott, R.},
   title = {Proteoscope: a viewer and analysis workbench for protein structures and structural proteomics},
-  version = {0.9.0},
+  version = {0.10.0},
   year = {2026},
   url = {https://github.com/robert-mcdermott/proteoscope}
 }</code></pre></div>

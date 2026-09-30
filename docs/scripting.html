@@ -87,6 +87,8 @@
       <p>Flags come first, followed by any structure files or prediction folders to open at startup. Every file and folder you name opens, and the first structure is active.</p>
       <div class="code"><span class="code-label">text</span><pre><code>proteoscope [flags] [structure files or prediction folders...]
 proteoscope mcp [flags]    an MCP server for AI agents (see AI agents)
+proteoscope triage [flags] <prediction folders...>
+                           rank predictions without a window (see Batch triage)
 
   --host string       interface to bind (default 127.0.0.1)
   --port int          preferred port; nearby ports are tried if busy (default 8765)
@@ -102,6 +104,7 @@ proteoscope mcp [flags]    an MCP server for AI agents (see AI agents)
       <div class="code"><pre><code><span class="prompt">$ </span>proteoscope structure.cif model.pdb.gz af3_output/my_job/</code></pre></div>
       <ul>
         <li><strong>Port.</strong> If the preferred port is busy, Proteoscope tries nearby ports. Use the address it prints in the terminal.</li>
+        <li><strong>Triage without a window.</strong> <code>proteoscope triage</code> ranks prediction jobs on a cluster or in a pipeline and writes CSV, JSON and images; see <a href="predictions.html#triage-headless">Triage without a window</a> and <code>proteoscope triage -h</code>.</li>
         <li><strong>Working offline.</strong> <code>--offline</code> turns off all network access. Cached entries and the bundled examples still work.</li>
         <li><strong>The download cache.</strong> Downloads are cached in your user cache folder: <code>~/Library/Caches/proteoscope</code> on macOS, <code>~/.cache/proteoscope</code> on Linux (or <code>$XDG_CACHE_HOME/proteoscope</code>), and <code>%LocalAppData%\proteoscope</code> on Windows. They are fetched again after 30 days (<code>--cache-max-age</code>), and searches after a day.</li>
       </ul>

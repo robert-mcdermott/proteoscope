@@ -48,14 +48,14 @@
   <main id="main">
     <section class="hero">
       <div class="container hero-grid">
-        <a class="eyebrow" href="https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.9.0"><span class="pill">v0.9.0</span> Ligand pose checks, pDockQ without a PAE and affinity triage</a>
+        <a class="eyebrow" href="https://github.com/robert-mcdermott/proteoscope/releases/tag/v0.10.0"><span class="pill">v0.10.0</span> Triage without a window, SMILES ligands and prediction examples</a>
         <h1>Explore, check and explain <span class="accent">protein structures</span></h1>
         <p class="lede">Proteoscope is a 3D viewer and analysis workbench for protein and nucleic-acid structures, predicted complexes, density maps and structural proteomics data. It runs on your own computer as one self-contained program, installed with a single command and needing nothing else: no packages, no account. Your files never leave your machine.</p>
         <figure class="hero-shot">
           <div class="shot shot-window" data-url="127.0.0.1:8765">
             <img src="assets/img/workspace.webp" width="2000" height="1250" alt="The Proteoscope workspace showing the nucleosome with BRCA1–BARD1 (7LYB) as a cartoon, with the Structure panel, chain list and sequence panel" fetchpriority="high" />
           </div>
-          <figcaption>The nucleosome with BRCA1–BARD1 and UbcH5c (7LYB), one of 27 bundled examples.</figcaption>
+          <figcaption>The nucleosome with BRCA1–BARD1 and UbcH5c (7LYB), one of 29 bundled examples.</figcaption>
         </figure>
         <div class="btn-row">
           <a class="btn btn-primary" href="install.html">
@@ -124,7 +124,7 @@
             <ul class="checklist">
               <li>Open any of them, or add it superposed on the active structure</li>
               <li>PDB, PDBx/mmCIF and BinaryCIF, gzip or Zstandard compressed</li>
-              <li>27 bundled examples that work offline, each with an opening view</li>
+              <li>29 bundled examples that work offline, each with an opening view</li>
             </ul>
             <a class="more-link" href="docs/finding.html">Finding structures</a>
           </div>
@@ -190,6 +190,24 @@
 
         <article class="feature">
           <div class="feature-text">
+            <span class="kicker">SMILES ligands</span>
+            <h3>Check co-folded ligands against the SMILES you gave</h3>
+            <p>AlphaFold 3, Boltz, Chai-1 and Protenix write a ligand given as SMILES without its bond orders. Open the job's input with its results and Proteoscope reads the SMILES as RDKit does: the ligand gets its bond orders, charges and hydrogens, every pose check, and its stereocenters compared with the SMILES, so a model that inverted one fails.</p>
+            <ul class="checklist">
+              <li>@, @@, / and \ read as RDKit reads them, checked on 407 SMILES</li>
+              <li>AlphaFold 3, Boltz, Chai-1 and Protenix inputs; OpenFold3's bond tables</li>
+              <li>Symmetric molecules such as meso compounds are not called inverted</li>
+            </ul>
+            <a class="more-link" href="docs/predictions.html#smiles">Ligands given as SMILES</a>
+          </div>
+          <figure>
+            <div class="shot"><img src="assets/img/smiles-stereo.webp" width="1600" height="1000" loading="lazy" alt="A Protenix model of interleukin-1β with a small-molecule antagonist, the ligand drawn with the bond orders of its SMILES, failing 1 of 19 pose checks: stereocenter C9 inverted against the SMILES" /></div>
+            <figcaption>Interleukin-1β co-folded by Protenix (the 8C3U-COFOLDING example): the ligand's stereocenter C9 is inverted against the SMILES the job was given.</figcaption>
+          </figure>
+        </article>
+
+        <article class="feature reverse">
+          <div class="feature-text">
             <span class="kicker">Predicted complexes</span>
             <h3>Decide which predicted interfaces to believe</h3>
             <p>Drop an output folder from AlphaFold 3, AlphaFold Server, Boltz, Chai-1, ColabFold, Protenix or OpenFold3. Proteoscope ranks the models by the tool's own score and scores every chain pair from its PAE: ipTM, ipSAE, pDockQ, pDockQ2 and LIS, reproducing Dunbrack's <code>ipsae.py</code>. Models without a PAE, such as Chai-1's, still get pDockQ.</p>
@@ -206,25 +224,25 @@
           </figure>
         </article>
 
-        <article class="feature reverse">
+        <article class="feature">
           <div class="feature-text">
             <span class="kicker">Batch triage</span>
             <h3>Rank a whole prediction campaign</h3>
-            <p>Open a design campaign or a screen of partners at once: hundreds of jobs from any mix of predictors. Every model is scored and ranked on one table by ipSAE, pDockQ2, LIS, ipTM, pLDDT, your cross-links, the ligand pose checks or Boltz-2's predicted affinity, for each model's best interface or the chains you name.</p>
+            <p>Open a design campaign or a screen of partners at once: hundreds of jobs from any mix of predictors. Every model is scored and ranked on one table by ipSAE, pDockQ2, LIS, ipTM, pLDDT, your cross-links, the ligand pose checks or Boltz-2's predicted affinity, for each model's best interface or the chains you name. On a cluster or in a pipeline, <code>proteoscope triage</code> does the same without a window.</p>
             <ul class="checklist">
               <li>Scores computed alike for every tool, so jobs compare across tools</li>
               <li>A gallery of the best models, superposed and framed alike</li>
-              <li>Every model and interface as CSV, and <code>triage</code> from the command line</li>
+              <li>Every model and interface as CSV; <code>proteoscope triage</code> writes CSV, JSON and images headless</li>
             </ul>
             <a class="more-link" href="docs/predictions.html#triage">Batch triage</a>
           </div>
           <figure>
-            <div class="shot"><img src="assets/img/prediction-triage.webp" width="1600" height="1000" loading="lazy" alt="The Prediction triage table ranking an AlphaFold Server job and a ColabFold job by ipSAE, with pDockQ2, LIS, ipTM and pLDDT, and a gallery of the models" /></div>
-            <figcaption>Aurora A–TPX2 from AlphaFold Server and RAF1–KSR1–MEK1 from ColabFold, ranked on one table by ipSAE.</figcaption>
+            <div class="shot"><img src="assets/img/prediction-triage.webp" width="1600" height="1000" loading="lazy" alt="The two bundled prediction examples on one triage table: Protenix and Boltz-1 co-folding of interleukin-1β with their pose checks, and ColabFold models of UL144 with the MOTS-c peptide with ipSAE, pDockQ2 and LIS, and a gallery of the three models" /></div>
+            <figcaption>The bundled prediction examples: Protenix, Boltz-1 and ColabFold jobs on one table, with interface scores and pose checks.</figcaption>
           </figure>
         </article>
 
-        <article class="feature">
+        <article class="feature reverse">
           <div class="feature-text">
             <span class="kicker">AI agents</span>
             <h3>Let an agent do the legwork while you watch</h3>
@@ -252,7 +270,7 @@
           </figure>
         </article>
 
-        <article class="feature reverse">
+        <article class="feature">
           <div class="feature-text">
             <span class="kicker">Validation and density</span>
             <h3>Check the model against the data</h3>
@@ -271,7 +289,7 @@
           </figure>
         </article>
 
-        <article class="feature">
+        <article class="feature reverse">
           <div class="feature-text">
             <span class="kicker">Comparison</span>
             <h3>Compare structures, conformations and predictions</h3>
@@ -289,7 +307,7 @@
           </figure>
         </article>
 
-        <article class="feature reverse">
+        <article class="feature">
           <div class="feature-text">
             <span class="kicker">Docking</span>
             <h3>Triage docking poses</h3>
@@ -308,7 +326,7 @@
           </figure>
         </article>
 
-        <article class="feature">
+        <article class="feature reverse">
           <div class="feature-text">
             <span class="kicker">Proteomics</span>
             <h3>Put your mass spectrometry results on the structure</h3>
@@ -326,7 +344,7 @@
           </figure>
         </article>
 
-        <article class="feature reverse">
+        <article class="feature">
           <div class="feature-text">
             <span class="kicker">Evolution and variants</span>
             <h3>See what evolution conserves, and which variants matter</h3>
@@ -344,7 +362,7 @@
           </figure>
         </article>
 
-        <article class="feature">
+        <article class="feature reverse">
           <div class="feature-text">
             <span class="kicker">Reproducible</span>
             <h3>Figures, sessions and methods you can publish</h3>
@@ -408,8 +426,8 @@
           </a>
           <a class="card" href="docs/getting-started.html#examples">
             <span class="icon-badge mint"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5a2 2 0 0 1 2-2h13v14H6a2 2 0 0 0-2 2Zm0 0a2 2 0 0 0 2 2h13"/></svg></span>
-            <h3>27 curated examples</h3>
-            <p>Drug targets, degraders, antibodies, chromatin, Cas9, conformational changes, a capsid and the spike.</p>
+            <h3>29 curated examples</h3>
+            <p>Drug targets, degraders, antibodies, chromatin, Cas9, conformational changes, a capsid, the spike and real prediction output.</p>
           </a>
           <a class="card" href="docs/proteomics.html#crosslinks">
             <span class="icon-badge"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.5 8.5l7 7"/></svg></span>
@@ -454,7 +472,7 @@
         <div class="cta">
           <div>
             <h2 id="get-title">Get started in a minute</h2>
-            <p>Install with one command, then run <code>proteoscope</code>. It opens in your browser, with 27 examples ready to explore.</p>
+            <p>Install with one command, then run <code>proteoscope</code>. It opens in your browser, with 29 examples ready to explore.</p>
             <div class="btn-row">
               <a class="btn btn-primary" href="docs/getting-started.html">Getting started</a>
               <a class="btn" href="https://github.com/robert-mcdermott/proteoscope/releases/latest">All downloads</a>

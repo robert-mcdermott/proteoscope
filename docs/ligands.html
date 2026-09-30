@@ -170,7 +170,7 @@
           <tbody>
             <tr><td><strong>Chemistry</strong></td><td>RDKit accepts the molecule (no atom over its allowed valence), and it is one piece.</td></tr>
             <tr><td><strong>Geometry</strong></td><td>Bond lengths and angles within 25% of RDKit's distance-geometry bounds; no clash inside the ligand; five- and six-membered aromatic rings and C=C bonds flat within 0.25 Å; saturated six-membered rings puckered.</td></tr>
-            <tr><td><strong>Stereochemistry</strong></td><td>Stereocenters and E/Z double bonds as in the Chemical Component Dictionary's ideal coordinates.</td></tr>
+            <tr><td><strong>Stereochemistry</strong></td><td>Stereocenters and E/Z double bonds as in the Chemical Component Dictionary's ideal coordinates, or, for a ligand given to a predictor as SMILES, as in the SMILES.</td></tr>
             <tr><td><strong>Contacts</strong></td><td>No atom closer to the protein, cofactors, ions or waters than 0.75 of the sum of their radii; a protein atom within 5 Å; at most 7.5% of the ligand's volume inside them.</td></tr>
           </tbody>
         </table>
@@ -178,7 +178,7 @@
       <ul>
         <li><strong>On the card</strong>, the summary says how many checks pass; click it for the list. <strong>Show</strong> on a failing check draws the atoms involved as measurements and selects the residues they touch.</li>
         <li><strong>Everywhere else:</strong> prediction models get a Pose column (see <a href="predictions.html#triage">Batch triage</a>), and docking poses a Checks column. <code>posecheck [&lt;selection&gt;]</code> returns every check to scripts and agents.</li>
-        <li><strong>Bond orders</strong> come from the dictionary, the file's own definition, or an SDF or MOL2 file. Without them (PDBQT, or a ligand given to a predictor as SMILES when the output lists no bonds), only the contact checks run.</li>
+        <li><strong>Bond orders</strong> come from the dictionary, the file's own definition, an SDF or MOL2 file, or the SMILES in a prediction job's input (see <a href="predictions.html#smiles">Ligands given as SMILES</a>). Without them (PDBQT, or a SMILES ligand opened without the job's input), only the contact checks run.</li>
       </ul>
       <p>The bond and angle limits come from a port of RDKit's code that matches RDKit on 4,017 dictionary components, and the verdicts match PoseBusters 0.6.5 on 127 test poses except for heme's. Where Proteoscope differs from PoseBusters: its energy ratio is left out, so a passing pose is not called “PB-valid”; metal atoms of a ligand (heme's iron) are left out of the chemistry and geometry checks, which RDKit cannot run on them; and atoms covalently bonded to the ligand (a glycan's asparagine, a covalent inhibitor's cysteine), and their neighbors, do not count as clashes.</p>
 
