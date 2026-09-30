@@ -10,8 +10,9 @@ evidence; `wave9`: prediction checks; `wave10`: headless triage and SMILES
 ligands), a review of the bundled
 examples and of the public databases Proteoscope can use without API keys, and
 a prioritized plan for what comes next. Waves 1 to 6 were released together
-as version 0.6.0, wave 7 as version 0.7.0, wave 8 as version 0.8.0 and wave 9
-as version 0.9.0 ([CHANGELOG.md](../CHANGELOG.md)).
+as version 0.6.0, wave 7 as version 0.7.0, wave 8 as version 0.8.0, wave 9
+as version 0.9.0 and wave 10 as version 0.10.0
+([CHANGELOG.md](../CHANGELOG.md)).
 
 ## 1. Where v0.4 stood
 
@@ -1440,6 +1441,7 @@ orders, charges and the stereochemistry the SMILES states.
 | Boltz (`LIG1`, atoms named by canonical rank, the YAML beside the results) and Chai-1 (`LIG2`, `C1_1` names, the FASTA in the folder) | 19 of 19 checks each |
 | Erlotinib in 1M17 with only its `_chem_comp_bond` loop, as OpenFold3 writes | The same bond orders as with the complete definition; all 17 checks pass |
 | A session saved and opened again | The SMILES ligand keeps its chemistry: "All 4 stereocenters are as in the SMILES" |
+| Ligand chemistry, sessions and CSV files against v0.9.0 | The 17 bundled structures with ligands give the same 715 interactions, ligand cards and pose checks (only a detail's wording changed); CSV columns are unchanged. A v0.9.0 session of a Protenix job opens as saved, and a v0.10.0 session opens in v0.9.0, which ignores the SMILES |
 | The 8C3U co-folding example (Boltz-1 and Protenix, 10 models) against RDKit's `AssignStereochemistryFrom3D` | The same verdict for all 10 models: Boltz-1 models 2–4 and Protenix samples 1 and 3 inverted; Boltz-1's contact failure confirmed (O26 2.08 Å from Lys103 NZ, 0.66 of the van der Waals sum) |
 
 ## 13. The bundled examples

@@ -817,6 +817,8 @@ model that inverted a stereocenter fails. Only the marks RDKit keeps count
 (not those of a center with two equivalent neighbors, say), and a symmetric
 molecule such as a meso compound is compared under its best pairing.
 
+![Interleukin-1β co-folded with a small-molecule antagonist by Protenix (the 8C3U-COFOLDING example): the ligand drawn with the bond orders of the SMILES the job was given, and its pose checks, 18 of 19 passing, with the stereocenter C9 inverted against the SMILES](docs/images/smiles-stereo.jpg)
+
 | Tool | Where the SMILES comes from |
 | --- | --- |
 | AlphaFold 3 | `<job>_data.json` in the output folder, read with it |
@@ -832,7 +834,7 @@ and the SMILES of its ligands.
 
 ### Batch triage
 
-![Two predictions from two tools ranked on one table: Aurora A with TPX2 from AlphaFold Server (the example of the IPSAE repository) and RAF1–KSR1–MEK1 from ColabFold, with ipSAE, pDockQ2, LIS, ipTM and pLDDT, and a gallery of the models](docs/images/prediction-triage.jpg)
+![The two bundled prediction examples on one table, three jobs from three tools ranked by pLDDT: interleukin-1β co-folded with a ligand by Protenix and by Boltz-1, whose ligands get pose checks (19 of 19 pass for Protenix's best model, 17 of 19 for Boltz-1's), and UL144 with the MOTS-c peptide from ColabFold, whose two chains get ipSAE, pDockQ2 and LIS; below, a gallery of the three models](docs/images/prediction-triage.jpg)
 
 A design campaign or a screen of interaction partners produces many jobs,
 more than anyone opens one by one. Drop or choose several prediction folders

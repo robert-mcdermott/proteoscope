@@ -492,3 +492,6 @@ the completed v0.1 application.
 
 - [x] 101. Prediction examples: folder entries in `data/examples.json` served with their files, opened as prediction folders; 8C3U co-folding (Boltz-1 and Protenix, Runs N' Poses) and UL144–MOTS-c (ColabFold), with `data/predictions/README.md` for sources, licenses and changes
   - _Requirements: 33, 56_
+
+- [x] 102. Release 0.10.0: version in `main.go`, `CITATION.cff` and the page's asset tags, `CHANGELOG.md`, a README image of a stereocenter checked against the SMILES, the triage image retaken from the bundled prediction examples; ligand chemistry, sessions and CSV files checked against v0.9.0
+  - _Requirements: 45, 56_

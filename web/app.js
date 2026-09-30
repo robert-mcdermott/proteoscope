@@ -2259,7 +2259,7 @@ function renderPoseChecks(entry, residue) {
   const notes = [];
   if (!result.typed) {
     notes.push(entry.prediction
-      ? 'Only the contact checks ran: no bond orders are known for this ligand. For a ligand given to the predictor as SMILES, open the job\'s input with its results (a Boltz YAML, a Chai-1 FASTA; AlphaFold 3 keeps it in the folder).'
+      ? 'Only the contact checks ran: no bond orders are known for this ligand. For a ligand given to the predictor as SMILES, open the job\'s input with its results (a Boltz YAML, a Chai-1 FASTA, a Protenix JSON; AlphaFold 3 keeps it in the folder).'
       : 'Only the contact checks ran: this ligand has no dictionary entry and its file gives no bond orders.');
   }
   else if (!result.stereo) notes.push(result.stereoPending ? 'Stereocenters are compared once the dictionary entry arrives.' : 'No dictionary coordinates to compare stereocenters with.');

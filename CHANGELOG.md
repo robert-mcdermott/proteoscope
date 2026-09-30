@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 (2026-09-29)
 
 - `proteoscope triage <folders>` ranks prediction jobs without a window, for
   clusters and pipelines: it prints the ranking and writes the CSV, the
@@ -10,10 +10,9 @@
 - Ligands given to a structure predictor as SMILES now get their bond orders,
   charges and stereochemistry from the SMILES: from AlphaFold 3's
   `_data.json`, or a Boltz, Chai-1 or Protenix input opened with the
-  results. They are
-  drawn and typed like dictionary ligands and get every pose check, with
-  stereocenters and double bonds compared with the SMILES. OpenFold3's ligand
-  bond orders, which were dropped, are now read.
+  results. They are drawn and typed like dictionary ligands and get every
+  pose check, with stereocenters and double bonds compared with the SMILES.
+  OpenFold3's ligand bond orders, which were dropped, are now read.
 - `triage gallery <n> width <px>` renders larger gallery images for scripts.
 - Two prediction examples in the Examples menu, opened as prediction folders:
   interleukin-1β co-folded with a ligand by Boltz-1 and Protenix (from Runs
