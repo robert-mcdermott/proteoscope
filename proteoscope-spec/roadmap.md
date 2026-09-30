@@ -6,7 +6,8 @@ competes in (researched September 2026), what each wave of work delivered
 commands, sessions and scripting; `wave4`: predicted complexes, validation and
 variants; `wave5`: bring your data, find public data; `wave6`: maps, ligand
 chemistry and statistics; `wave7`: agents and batch triage; `wave8`: ligand
-evidence; `wave9`: prediction checks), a review of the bundled
+evidence; `wave9`: prediction checks; `wave10`: headless triage and SMILES
+ligands), a review of the bundled
 examples and of the public databases Proteoscope can use without API keys, and
 a prioritized plan for what comes next. Waves 1 to 6 were released together
 as version 0.6.0, wave 7 as version 0.7.0, wave 8 as version 0.8.0 and wave 9
@@ -565,7 +566,7 @@ and reading the output of every widely used structure predictor.
 ### Bundled examples (`examples.go`, `data/examples.json`)
 
 - The 18 legacy PDB files (16 MB) became 27 gzipped mmCIF entries (6.2 MB,
-  anisotropic records removed), following the review in section 12: 108D
+  anisotropic records removed), following the review in section 13: 108D
   dropped, 5DS3 replaced by 7KK4, and the AlphaFold model of p53 with its PAE,
   1HHO, 4AKE, 1AKE, 5T35, 5FQD, 4OO8, 8EF5, 1LP3 and 6VXX added. 1LP3 (AAV2)
   was chosen over 1STM for its relevance to gene therapy.
@@ -1306,7 +1307,142 @@ triage.
 | MDM2–p53 (1YCR) opened as a prediction without a PAE | Ranked by pDockQ; the Prediction panel shows pDockQ for chains A–B and the note |
 | MOL2 reading and ligand chemistry against v0.8.0 | 12 MOL2 files without charged groups read identically; in 15 with them only the carboxylate, sulfonate, phosphate, amidinium and guanidinium atoms change. The 27 bundled structures get the same ligand chemistry and bonds, and the same 562 interactions for up to 12 ligands in each |
 
-## 12. The bundled examples
+## 12. Wave 10: triage without a window, and ligands given as SMILES
+
+Wave 10 takes batch triage to clusters and pipelines, and gives the ligands a
+structure predictor was given as SMILES what the pose checks need: bond
+orders, charges and the stereochemistry the SMILES states.
+
+### Triage without a window (`triage.go`)
+
+- `proteoscope triage <folders…>` starts Proteoscope with remote control,
+  opens the page in a hidden (headless) Chrome, Chromium, Edge or Brave with
+  a profile of its own, has it open the jobs by path, and prints the ranking.
+  `--csv` and `--json` write the table's CSV and the ranked rows, `--gallery`
+  the best models as images (`triage gallery <n> width <px>`, a new option of
+  the page's command, gives them at 1,200 pixels). `--by`, `--models`,
+  `--pair` and `--top` set the ranking as `triage` does; `--browser` or
+  `PROTEOSCOPE_BROWSER` names the browser.
+- The page computes the scores, so they are the window's, not a second
+  implementation: the page starts blank (`blank` in `/api/startup`) instead
+  of opening the default example, and the run ends when the files are
+  written. On Linux the browser gets `--disable-dev-shm-usage`, and
+  `--no-sandbox` when run as root (containers).
+- Ctrl-C, SIGTERM and a closed output pipe end a run through its cleanup
+  (the browser stopped, its profile removed); on Linux the browser also dies
+  with Proteoscope if Proteoscope is killed outright.
+- Tests start the test binary itself as the "browser": it connects to the
+  event stream as the page does and answers like it, so the whole path runs
+  without Chrome.
+
+### SMILES ligands (`smiles.js`, `chemistry.js`, `predictions.js`)
+
+- **Reading SMILES** as RDKit does: bracket and organic-subset atoms,
+  charges, isotopes, written hydrogens, ring closures (including `%nn`),
+  branches and bond symbols; aromatic rings kekulized by a matching over the
+  atoms that need a double bond, with written hydrogens deciding ([nH] takes
+  none); implicit hydrogens from the default valences; tetrahedral centers
+  (@, @@, with a hydrogen or a lone pair in RDKit's place) and double bonds
+  (/ and \\).
+- **Where the SMILES comes from.** AlphaFold 3's `<job>_data.json` (read
+  only for models with ligands, since it also holds the MSAs); a Boltz job's
+  input (`<name>.yaml` or `.fasta`) opened with its results, where the
+  results folder names it (`boltz_results_<stem>/` from `<stem>.yaml` or a
+  folder `<stem>/`), else the nearest; a FASTA in a Chai-1 output folder;
+  Protenix's input JSON (`<name>.json`, which Protenix does not copy into its
+  results) opened with them, the job picked by name and its entities lettered
+  and numbered as Protenix names the chains (A0, B0, B1…). The server now
+  serves `.yaml`, `.yml`, `.fasta`, `.fa` and `.fas` files of folders opened
+  by path; inputs no job claims are left alone.
+- **Protenix seeds.** Protenix names its files
+  `<name>_seed_<seed>_sample_<k>`; each seed was a job of its own, with its
+  own table. The seeds of one job now form one set, as with the other tools.
+- **Pairing with the model.** The predictors write the ligand's heavy atoms
+  in the order of the SMILES (checked in the source of each), so that order
+  is kept when every bond of the SMILES joins atoms a bond apart; otherwise
+  the SMILES graph is matched to the model's bonds, and a pose too broken
+  for that keeps the string's order while half its bonds hold (so it is
+  checked and fails rather than left untyped). Among the pairings the
+  molecule's symmetry allows, the one that best fits the SMILES's stereo is
+  taken, so a meso compound or trans-decalin is not called inverted.
+- **Which marks count.** As RDKit (and so the predictors) reads them: a
+  center with two equivalent neighbors (graph-symmetry classes), an amine
+  outside a three-membered ring, and a double bond in a ring under eight
+  atoms or with two alike substituents lose their marks, since a model's
+  geometry there is arbitrary; equivalent ring neighbors count when another
+  marked center shares the ring system.
+- **What it gives.** A per-residue definition of the residue's own atom
+  names (`smilesComponent`), which `applyChemistry` uses before the file's
+  and the dictionary's: the ligand is drawn with its bond orders, typed for
+  interactions, and gets every pose check, its stereocenters and double bonds
+  compared with the SMILES (`stereoTargets` now reads a dictionary entry's
+  ideal coordinates or a SMILES into the same comparison). Such ligands need
+  no dictionary lookup (their LIG-style names are not codes). Sessions keep
+  the SMILES.
+- **OpenFold3** writes `_chem_comp_bond` without `_chem_comp_atom`; such
+  definitions were dropped. They now type the ligand, completed with the
+  residue's elements, the hydrogens the table lists (or those its bonds
+  leave room for) and the charges the valences imply; bonds to metals do not
+  count. Standard residues keep the built-in table.
+- The card's note for a predicted ligand without bond orders says where the
+  SMILES can come from, and the methods paragraph names the SMILES as the
+  source of bond orders and stereochemistry.
+
+### Prediction examples (`examples.go`, `data/predictions/`)
+
+- An example can be a folder of `data/` (its files gzipped), listed with its
+  files; the page opens it as a dropped prediction folder, then runs its
+  view. The credit links to the data's source.
+- **8C3U-COFOLDING:** interleukin-1β with a ligand given as SMILES, five
+  models each from Boltz-1 and Protenix, from Runs N' Poses (Apache-2.0),
+  with the jobs' inputs. It opens triaged by pose: three Boltz-1 models and
+  two Protenix models invert the ligand's stereocenter, and Boltz-1 puts the
+  ligand too close to Lys103.
+- **UL144-MOTSC:** the five best of 80 ColabFold models of a viral protein
+  with a 16-residue peptide (CC BY 4.0), a borderline interface for the
+  interface scores.
+- Together 0.5 MB. Only openly licensed outputs are bundled: AlphaFold Server
+  and AlphaFold 3 outputs (non-commercial terms) and Chai-1 outputs made
+  under its earlier non-commercial license are not. `data/predictions/README.md`
+  lists the sources, licenses and changes (jobs renamed, a subset of seeds
+  and models).
+
+### Validation
+
+- **Tests.** 10 new JavaScript tests, 287 in total, and 4 new Go tests (81):
+  the SMILES reader (atoms and Kekulé bonds, stereo marks and which count,
+  stereo against RDKit-embedded coordinates and their mirror image, pairing
+  by order and by bonds, symmetric molecules, refusals); SMILES inputs of each predictor and their detection;
+  typing a ligand from SMILES; a definition with bonds only; the gallery's
+  width; `proteoscope triage` end to end with a stand-in browser; and folder
+  examples, the bundled ones served file by file.
+- **The `smiles` suite** (validation/README.md): 51 molecules written up to 8
+  ways each by RDKit's randomized SMILES, 407 strings: elements, charges,
+  hydrogens, bonds, Kekulé valences and the stereo marks kept, as RDKit
+  reads them, and 92 of RDKit's 94 stereocenters and 8 stereo bonds holding
+  in its embedded coordinates; mirror images fail for chiral molecules and
+  pass for achiral ones (the other 2 centers are ATP's phosphorus, left out
+  on purpose).
+- **Fixed before release:** a stray YAML or
+  FASTA made a whole open fail; Boltz inputs of one name in several screens
+  were confused; an interrupted run left the browser running; marks RDKit
+  drops were checked; a badly broken pose lost its SMILES chemistry and
+  ranked better; bond-only tables counted hydrogens and metals as valence;
+  meso compounds paired through their bonds could look inverted; AlphaFold
+  3's input was read for protein-only jobs; the SMILES cache was unbounded.
+- **Checks on real data:**
+
+| Check | Result |
+| --- | --- |
+| 618 randomized SMILES of 52 molecules against RDKit (outside the suite) | All agree; 1,116 stereocenters and 96 E/Z bonds hold, and all 372 chiral mirror images are caught |
+| `proteoscope triage` on the IPSAE repository's examples (Aurora A–TPX2 from AlphaFold Server, RAF1–KSR1–MEK1 from ColabFold) | ipSAE 0.867 and 0.598 (A–C), pDockQ2 0.712, as in the window; CSV, JSON and a 1,200-pixel gallery written in 9 seconds |
+| AlphaFold 3–style jobs built from 5T35 (the PROTAC MZ1, 4 stereocenters) and 1M17 (erlotinib), the ligand as SMILES | 19 of 19 checks where before only the contact checks ran; with one stereocenter inverted in the SMILES, "1 inverted (C21) of 4 stereocenters"; erlotinib's atoms written out of order pair through their bonds |
+| Boltz (`LIG1`, atoms named by canonical rank, the YAML beside the results) and Chai-1 (`LIG2`, `C1_1` names, the FASTA in the folder) | 19 of 19 checks each |
+| Erlotinib in 1M17 with only its `_chem_comp_bond` loop, as OpenFold3 writes | The same bond orders as with the complete definition; all 17 checks pass |
+| A session saved and opened again | The SMILES ligand keeps its chemistry: "All 4 stereocenters are as in the SMILES" |
+| The 8C3U co-folding example (Boltz-1 and Protenix, 10 models) against RDKit's `AssignStereochemistryFrom3D` | The same verdict for all 10 models: Boltz-1 models 2–4 and Protenix samples 1 and 3 inverted; Boltz-1's contact failure confirmed (O26 2.08 Å from Lys103 NZ, 0.66 of the van der Waals sum) |
+
+## 13. The bundled examples
 
 **Done in wave 5** (section 7): the recommendations below were followed, with
 1LP3 as the capsid and 8EF5 as the GPCR complex. The review is kept for the
@@ -1370,7 +1506,7 @@ AlphaFold DB's complex entries (`/api/complex/…`) or a ModelArchive entry with
 PAE (for example `ma-dm-prc-171`, EZH2–PCGF5 from ColabFold) are the
 candidates. Both are better fetched than bundled; see the next section.
 
-## 13. Public databases without API keys
+## 14. Public databases without API keys
 
 Everything Proteoscope fetches goes through its own server, which allows only
 known hosts, caches downloads, and honors `--offline`. Services checked live
@@ -1433,7 +1569,7 @@ Each new source is a small Go route (host allowlist, size limit, cache kind,
 User-Agent) plus a page-side parser. The RCSB, NCBI, STRING and gnomAD limits
 argue for caching and one request at a time.
 
-## 14. Roadmap
+## 15. Roadmap
 
 Priorities are ordered by value to researchers, weighed against effort.
 Wave 6 delivered density maps, ligand chemistry, docking poses, structure-only
@@ -1443,7 +1579,8 @@ delivered batch triage, results as data for scripts, opening files by path
 and the MCP server (section 9). Wave 8 delivered the ligand card, 2D
 interaction diagrams and difference-map peaks (section 10). Wave 9 delivered
 pDockQ without a PAE, PoseBusters' pose checks and ligands in triage (section
-11).
+11). Wave 10 delivered triage without a window and SMILES ligands (section
+12).
 
 Proteoscope's lead is breadth in one private session: prediction triage,
 experimental validation, density, docking and structural proteomics with
@@ -1454,9 +1591,6 @@ model.
 
 ### Next: prediction-era workflows
 
-- **Triage without a window.** The same ranking from the command line
-  (`proteoscope triage campaign/ --csv ranking.csv`), for clusters and
-  pipelines, with the gallery as image files.
 - **MCP follow-ups.** The Streamable HTTP transport next to stdio, and the
   session and the methods paragraph as MCP resources.
 - **Predicted complexes to fetch.** AlphaFold DB complexes and ModelArchive
@@ -1469,11 +1603,12 @@ model.
     DB, for remote homologs that sequence search misses.
 - **Maps.** Maps in MolViewSpec exports, and MolViewSpec import; Q-score for
   any model and map.
-- **Ligand follow-ups.** Bond orders for SMILES ligands of predictions, from
-  the job's input (AlphaFold 3's `data.json`, Boltz's YAML), so they get every
-  pose check; PoseBusters' energy ratio (UFF energy against generated
-  conformers); 2D diagrams for docking poses side by side; and
-  stereochemistry (wedges) in the diagram.
+- **Ligand follow-ups.** PoseBusters' energy ratio (UFF energy against
+  generated conformers, which needs conformer generation and a UFF
+  minimizer); Boltz's bond table in
+  `processed/structures/*.npz` for jobs opened without their input; 2D
+  diagrams for docking poses side by side; and stereochemistry (wedges) in
+  the diagram.
 - **Statistics.** More than two groups, paired designs and protein-level
   summarization.
 
@@ -1542,7 +1677,7 @@ model.
 - **Publication.** A software paper (an application note or JOSS), a Zenodo
   DOI for each release, and short videos of the main workflows.
 
-## 15. Known limitations
+## 16. Known limitations
 
 - **Structure-only superposition** is rigid: in a hinge motion it fits one
   domain, as TM-align does. MM-align switches to US-align's faster, slightly
@@ -1578,19 +1713,24 @@ model.
   Ramachandran classes but no rotamer outliers or clashscore, because those
   need hydrogens added by Reduce and contact dots from Probe. Cryo-EM atom
   inclusion needs the map loaded (*Map fit*).
-- **Batch triage** needs the page open: scoring runs in the browser. Sessions
-  keep the prediction models that are open, not the whole campaign. The
-  tools' own ranking scores do not compare across tools; the table says so.
+- **Batch triage** runs in the browser page; `proteoscope triage` runs that
+  page in a hidden Chrome-family browser, which must be installed (on a
+  server, Chromium or Google Chrome). Sessions keep the prediction models
+  that are open, not the whole campaign. The tools' own ranking scores do not
+  compare across tools; the table says so.
 - **2D diagrams** draw no stereochemistry (no wedges), and some bridged and
   caged ligands (camphor) and crowded macrocycles cannot be drawn flat without
   overlapping atoms; the diagram says so. Residues are placed from the current
   view, so a dense site (ATP's phosphates) can still have crossing lines;
   rotating and drawing again changes them.
 - **Pose checks** leave out PoseBusters' energy ratio, so a passing pose is
-  not "PB-valid". Ligands without bond orders from a dictionary entry or the
-  file (ligands given to a predictor as SMILES when the output lists no
-  bonds, PDBQT poses) get the contact checks only, and ligands without a
-  dictionary entry no stereo checks. Metal atoms are left out of the geometry
+  not "PB-valid". Ligands without bond orders from a dictionary entry, the
+  file or the job's SMILES (a Boltz, Chai-1 or Protenix job opened without
+  its input, PDBQT poses) get the contact checks
+  only, and ligands with neither a dictionary entry nor a SMILES no stereo
+  checks. A SMILES ligand whose atoms pair neither in the SMILES's order nor
+  through the model's bonds (a pose broken badly enough to lose a bond, and
+  written out of order) keeps its geometry-inferred chemistry. Metal atoms are left out of the geometry
   checks, and hydrogens of a docking file are dropped (PoseBusters keeps them
   in its bounds, which can move a heavy-atom bound slightly). Covalently bound ligands are checked as
   residues; atoms bonded to them are not counted as clashes, but PoseBusters
@@ -1605,9 +1745,9 @@ model.
   after 30 seconds. Any program that can start `proteoscope mcp` controls the
   page and can open local files in it, as can any program on this computer
   that reads the token Proteoscope prints for remote control.
-- **Prediction folders.** AlphaFold 3, AlphaFold Server, Boltz-2, ColabFold,
-  Protenix and OpenFold3 were checked with real outputs; Chai-1 only with the
-  documented layout.
+- **Prediction folders.** AlphaFold 3, AlphaFold Server, Boltz-1 and -2,
+  ColabFold, Protenix and OpenFold3 were checked with real outputs; Chai-1
+  only with the documented layout.
   - Chai-1 does not write PAE, and Boltz writes it only with
     `--write_full_pae` and Protenix only with `--need_atom_confidence`;
     without it a model gets pDockQ but not ipSAE, pDockQ2 or LIS.

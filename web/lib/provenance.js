@@ -86,6 +86,7 @@ export function methodsText(context) {
 
   if (uses('dssp').length) sentences.push(`Secondary structure was assigned with a DSSP implementation ${cite('dssp')}.`);
   if (uses('chemistry').length) sentences.push(`Bond orders, aromaticity and formal charges of ligands and modified residues were taken from the wwPDB Chemical Component Dictionary ${cite('ccd')}.`);
+  if (uses('smilesLigands').length) sentences.push('Bond orders, formal charges and stereochemistry of ligands given to a structure predictor as SMILES were read from the SMILES of the job\'s input.');
   if (uses('interactions').length) {
     sentences.push(`Non-covalent interactions (hydrogen bonds, salt bridges, π-stacking, cation–π, hydrophobic contacts, halogen bonds, metal coordination and water bridges) were detected with the geometric criteria of PLIP ${cite('plip', 'plip2021')}.`);
   }
@@ -107,7 +108,9 @@ export function methodsText(context) {
   }
   if (uses('poseChecks').length) {
     const stereo = uses('poseChecks').some((entry) => entry.uses.poseChecks.stereo);
-    sentences.push(`Ligand poses were checked as in PoseBusters ${cite('posebusters')} (version 0.6, its docking checks without the energy ratio): bond lengths, bond angles and internal clashes against RDKit's distance-geometry bounds ${cite('rdkit')} from UFF parameters ${cite('uff')}, the planarity of aromatic rings and double bonds, and the distances to and volume overlap with the protein, cofactors, ions and waters${stereo ? `; stereocenters and double bonds were compared with the Chemical Component Dictionary ${cite('ccd')}` : ''}.`);
+    const smiles = uses('poseChecks').some((entry) => entry.uses.poseChecks.smiles);
+    const compared = [stereo ? `the Chemical Component Dictionary ${cite('ccd')}` : '', smiles ? 'the SMILES the structure predictor was given' : ''].filter(Boolean).join(' or ');
+    sentences.push(`Ligand poses were checked as in PoseBusters ${cite('posebusters')} (version 0.6, its docking checks without the energy ratio): bond lengths, bond angles and internal clashes against RDKit's distance-geometry bounds ${cite('rdkit')} from UFF parameters ${cite('uff')}, the planarity of aromatic rings and double bonds, and the distances to and volume overlap with the protein, cofactors, ions and waters${compared ? `; stereocenters and double bonds were compared with ${compared}` : ''}.`);
   }
   if (uses('domains').length) sentences.push(`Rigid domains were clustered from the predicted aligned error as in ChimeraX ${cite('chimerax')}.`);
   if (uses('validation').length) sentences.push(`Validation data were taken from the wwPDB validation reports ${cite('validation')}; Ramachandran classes follow the MolProbity Top8000 contours ${cite('molprobity')}.`);

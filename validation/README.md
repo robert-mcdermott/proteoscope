@@ -3,8 +3,8 @@
 Proteoscope's analyses are reimplementations of published methods. This folder
 checks them against the reference implementations those methods come from:
 limma, MSstatsPTM, US-align, Capra and Singh's conservation scorer, EMDB's
-validation pipeline, MolProbity (through the wwPDB validation reports) and
-PoseBusters.
+validation pipeline, MolProbity (through the wwPDB validation reports),
+PoseBusters and RDKit.
 
 The reference tools are not part of Proteoscope and are not in this
 repository. Only their numbers are: `reference/` holds what each tool
@@ -26,7 +26,7 @@ whole run takes about 8 seconds.
 
 | Option | Effect |
 | --- | --- |
-| `limma`, `msstatsptm`, `usalign`, `conservation`, `emdb`, `ramachandran`, `posebusters` | Run only these suites |
+| `limma`, `msstatsptm`, `usalign`, `conservation`, `emdb`, `ramachandran`, `posebusters`, `smiles` | Run only these suites |
 | `--offline` | Skip suites whose inputs are not cached |
 | `--verbose` | Print every check, not only failures |
 
@@ -46,6 +46,7 @@ this folder (`.github/workflows/validation.yml`).
 | `emdb` | `mapFit` (`volume.js`) | EMDB validation analysis | Model 8GUB in map EMD-34272 at the recommended contour, 0.136 | Atom inclusion within 0.005; per residue identical or one atom apart | 0.8935 vs 0.896; 1,234 of 1,254 residues identical, 20 one atom apart |
 | `ramachandran` | `classifyRamachandran` (`ramachandran.js`) | The wwPDB report of 1M17 (MolProbity's Top8000 analysis) | Bundled 1M17 | Every class agrees | 308 of 308 |
 | `posebusters` | `checkPose` (`pose-checks.js`, with `perception.js` and `dg-bounds.js`) | PoseBusters 0.6.5 with RDKit 2026.03.6, redock configuration (the dock checks, and stereochemistry against the dictionary's ideal coordinates) | 18 ligands in their PDB entries (kinase inhibitors, a cyclic urea, biotin, benzamidine, a zinc-bound succinate, ATP with manganese, methotrexate, 4-hydroxytamoxifen, oseltamivir, thymidine, progesterone, camphor next to heme, heme, a PROTAC), each as deposited and up to 8 copies broken on purpose: 127 poses | The same verdict on every check, except the differences noted below; bond, angle, clash and contact ratios within 1e-4 (relative); volume overlaps within 0.02 | 2,392 of 2,401 verdicts agree, the other 9 are heme's; ratios within 4.7e-6 (the reference keeps 6 digits); overlaps within 0.003 |
+| `smiles` | `readSMILES` and `smilesMapping` (`smiles.js`) and the stereo checks of `checkPose` | RDKit 2026.03.6: `MolFromSmiles`, `Kekulize`, `FindMolChiralCenters`, ETKDGv3 coordinates, randomized SMILES | 51 molecules (steroids, sugars, β-lactams, ATP, SAM, a sulfoxide, E/Z drugs such as tamoxifen and retinoic acid, charged and [nH] heterocycles, a PROTAC, ring junctions, a meso diol, and marks RDKit drops), each written up to 8 ways: 407 SMILES | The same elements, charges, hydrogens, bonds and Kekulé valences as RDKit, and the same stereocenters and stereo bonds kept; every one holds in RDKit's coordinates; the mirror image of a chiral molecule fails, that of an achiral one (meso, trans-decalin) passes | All 407 agree: 92 of RDKit's 94 stereocenters and 8 stereo bonds checked, the other 2 being ATP's phosphorus centers, left out on purpose (their oxygens are equivalent) |
 
 Notes:
 
@@ -80,6 +81,19 @@ Notes:
   whose axis signs follow Proteoscope's eigensolver rather than RDKit's, which
   moves the grid by a fraction of a spacing. At PDB precision the ratios
   agree to the reference's 6 digits.
+- **SMILES.** Randomized SMILES write the same molecule with other atom
+  orders, ring numbers, branches and placements of @, @@, / and \\, so each
+  variant tests the reading of the stereo marks, not just one string. A
+  lone pair (a sulfoxide or sulfonium center) counts, as in RDKit, after the
+  three neighbors. Marks RDKit drops as not stereogenic (two equivalent
+  neighbors, amines, double bonds in small rings) are dropped too, since a
+  predictor's geometry there is arbitrary; equivalent ring neighbors count
+  when another marked center shares the ring system (decalin, 1,4-diols). For
+  achiral molecules RDKit may write both marks of a pair flipped, which
+  describes the same molecule: atoms are paired as the page pairs them,
+  choosing among the molecule's symmetries the pairing that fits the stereo.
+  A Kekulé structure may differ from RDKit's where a ring has several, but
+  the valence of every atom is the same.
 - **Constant features.** When a feature's values are identical within each
   group, limma's QR decomposition leaves a residual SD of about 1e-15
   (occasionally exactly 0), where Proteoscope computes exactly 0. The results
@@ -102,6 +116,7 @@ they call are shipped with Proteoscope; install them locally.
 | `conservation.json` | `python3 validation/scripts/port-score-conservation.py /path/to/conservation_code`, then `SCORE_CONSERVATION=/path/to/conservation_code node validation/scripts/conservation-reference.mjs` | Capra & Singh's `conservation_code` from <https://compbio.cs.princeton.edu/conservation/> (Python 2 code; the first command makes a Python 3 copy that prints 12 decimals) |
 | `emdb-34272.json` | `node validation/scripts/emdb-reference.mjs` | Network access to EMDB's API |
 | `posebusters.json` | `PYTHON=/path/to/python node validation/scripts/posebusters-reference.mjs` | A Python with PoseBusters and RDKit (`pip install posebusters`) |
+| `smiles.json` | `PYTHON=/path/to/python node validation/scripts/smiles-reference.mjs` | A Python with RDKit (`pip install rdkit`) |
 
 The simulated data are generated with fixed seeds inside the R scripts and
 stored with the results, so the checks never need R.

@@ -37,7 +37,7 @@ export const COMMANDS = [
   { name: 'interactions', aliases: ['plip'], syntax: 'interactions <selection>', summary: 'Focus residues or a ligand and list their interactions' },
   { name: 'overlay', aliases: [], syntax: 'overlay [on|off]', summary: 'Overlay all models of an ensemble' },
   { name: 'ranking', aliases: ['models', 'predictions'], syntax: 'ranking [<rank>]', summary: 'List the models of an opened prediction, or show the one at a rank' },
-  { name: 'triage', aliases: ['batch', 'campaign'], syntax: 'triage [by <metric>] [top <n>] [jobs|models] [pair <chain> <chain>|best] · triage show <n> · triage gallery [<n>] · triage export', summary: 'Rank every opened prediction job by ipSAE, pDockQ, pDockQ2, LIS, ipTM, pLDDT, ligand pose checks, Boltz-2 affinity or another score; show a job, render a gallery of the best, or export the table' },
+  { name: 'triage', aliases: ['batch', 'campaign'], syntax: 'triage [by <metric>] [top <n>] [jobs|models] [pair <chain> <chain>|best] · triage show <n> · triage gallery [<n>] [width <px>] · triage export', summary: 'Rank every opened prediction job by ipSAE, pDockQ, pDockQ2, LIS, ipTM, pLDDT, ligand pose checks, Boltz-2 affinity or another score; show a job, render a gallery of the best, or export the table' },
   { name: 'domains', aliases: ['paedomains'], syntax: 'domains', summary: 'Find rigid domains in the PAE matrix and color by them' },
   { name: 'msa', aliases: [], syntax: 'msa', summary: 'Color by MSA depth (AlphaFold DB models, prediction folders, dropped .a3m files)' },
   { name: 'validate', aliases: ['validation', 'report'], syntax: 'validate [clashes|fit|refresh|off]', summary: 'Load the wwPDB validation report and color outliers, show clashes or density fit' },
@@ -303,7 +303,8 @@ export function parseCommand(text, options = {}) {
   }
 }
 
-// "triage by ipsae top 10 models pair A B", "triage show 3", "triage gallery 12", "triage export".
+// "triage by ipsae top 10 models pair A B", "triage show 3", "triage gallery 12 width 1200",
+// "triage export".
 function parseTriage(parsed, words) {
   const usage = () => new CommandError(`Usage: ${parsed.command.syntax}`);
   const first = words[0]?.toLowerCase();
@@ -313,9 +314,18 @@ function parseTriage(parsed, words) {
     return { ...parsed, action: 'show', position };
   }
   if (first === 'gallery') {
-    const count = words[1] === undefined ? 12 : Number(words[1]);
-    if (words.length > 2 || !Number.isInteger(count) || count < 1 || count > 24) throw new CommandError('Usage: triage gallery [<n>], with n from 1 to 24.');
-    return { ...parsed, action: 'gallery', count };
+    const usage = new CommandError('Usage: triage gallery [<n>] [width <px>], with n from 1 to 24 and a width from 120 to 4000 pixels.');
+    const rest = words.slice(1);
+    let width = null;
+    const at = rest.findIndex((word) => word.toLowerCase() === 'width');
+    if (at >= 0) {
+      width = Number(rest[at + 1]);
+      if (!Number.isInteger(width) || width < 120 || width > 4000) throw usage;
+      rest.splice(at, 2);
+    }
+    const count = rest[0] === undefined ? 12 : Number(rest[0]);
+    if (rest.length > 1 || !Number.isInteger(count) || count < 1 || count > 24) throw usage;
+    return { ...parsed, action: 'gallery', count, width };
   }
   if (first === 'export' || first === 'csv') {
     if (words.length > 1) throw usage();
@@ -326,7 +336,7 @@ function parseTriage(parsed, words) {
     const word = words[index].toLowerCase();
     if (word === 'by' || word === 'sort') {
       result.metric = /^(auto|default)$/i.test(words[index + 1] ?? '') ? 'auto' : triageMetric(words[index + 1]);
-      if (!result.metric) throw new CommandError(`Rank by ipsae, pdockq2, pdockq, lis, iptm, ranking, ptm, plddt or crosslinks, not "${words[index + 1] ?? ''}".`);
+      if (!result.metric) throw new CommandError(`Rank by ipsae, pdockq2, pdockq, lis, iptm, ranking, ptm, plddt, crosslinks, pose, affinity or binder, not "${words[index + 1] ?? ''}".`);
       index += 1;
     } else if (word === 'top') {
       result.limit = Number(words[index + 1]);

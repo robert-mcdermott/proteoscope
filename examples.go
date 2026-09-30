@@ -19,7 +19,9 @@ import (
 
 // The bundled examples are gzipped mmCIF files in data/, described by data/examples.json: an id
 // (shown upper-cased as the example's name), a menu label, a category, a description, a credit,
-// and the commands that set up each example's opening view. Structure files in data/ that the manifest does not list are still offered, after the
+// and the commands that set up each example's opening view. An example can instead be a folder
+// of data/ (structure-prediction output, its files gzipped), which the page opens like a dropped
+// prediction folder. Structure files in data/ that the manifest does not list are still offered, after the
 // listed ones, so a file dropped into data/ in --dev mode shows up.
 
 const exampleManifestPath = "data/examples.json"
@@ -31,6 +33,7 @@ type exampleManifest struct {
 type exampleEntry struct {
 	ID          string   `json:"id"`
 	File        string   `json:"file"`
+	Folder      string   `json:"folder"`
 	PAE         string   `json:"pae"`
 	Accession   string   `json:"accession"`
 	Label       string   `json:"label"`
@@ -38,6 +41,21 @@ type exampleEntry struct {
 	Description string   `json:"description"`
 	View        []string `json:"view"`
 	Credit      string   `json:"credit"`
+	// Where the data come from, for an example that is not a PDB entry.
+	Source *exampleSource `json:"source"`
+}
+
+type exampleSource struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
+// A file of a folder example, named as the page reads it.
+type sampleFile struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	URL  string `json:"url"`
+	Size int    `json:"size"`
 }
 
 func readExampleManifest(fsys fs.FS) ([]exampleEntry, error) {
@@ -64,9 +82,14 @@ func loadSamples(fsys fs.FS) ([]sample, error) {
 	seen := map[string]bool{}
 	var samples []sample
 	for _, entry := range manifest {
-		item, err := listedSample(fsys, entry)
+		var item sample
+		if entry.Folder != "" {
+			item, err = folderSample(fsys, entry)
+		} else {
+			item, err = listedSample(fsys, entry)
+		}
 		if err != nil {
-			return nil, fmt.Errorf("%s lists %s: %w", exampleManifestPath, entry.File, err)
+			return nil, fmt.Errorf("%s lists %s%s: %w", exampleManifestPath, entry.File, entry.Folder, err)
 		}
 		if seen[item.ID] {
 			return nil, fmt.Errorf("%s lists the example id %q twice", exampleManifestPath, item.ID)
@@ -86,6 +109,7 @@ func loadSamples(fsys fs.FS) ([]sample, error) {
 		item.Description = entry.Description
 		item.View = entry.View
 		item.Credit = entry.Credit
+		item.Source = entry.Source
 		samples = append(samples, item)
 	}
 
@@ -121,16 +145,9 @@ func listedSample(fsys fs.FS, entry exampleEntry) (sample, error) {
 	if strings.Contains(name, "/") || !isStructureFile(trimGzip(name)) {
 		return sample{}, fmt.Errorf("%q is not a structure file in data/", name)
 	}
-	body, err := fs.ReadFile(fsys, "data/"+name)
+	size, err := dataFileSize(fsys, "data/"+name)
 	if err != nil {
 		return sample{}, err
-	}
-	size := len(body)
-	if isGzipName(name) {
-		if len(body) < 18 || body[0] != 0x1f || body[1] != 0x8b {
-			return sample{}, errors.New("not a gzip file")
-		}
-		size = int(binary.LittleEndian.Uint32(body[len(body)-4:]))
 	}
 	plain := trimGzip(name)
 	item := sample{ID: sampleID(plain), URL: "/data/" + plain, SizeBytes: size}
@@ -138,6 +155,58 @@ func listedSample(fsys fs.FS, entry exampleEntry) (sample, error) {
 		item.ID = strings.ToLower(entry.ID)
 	}
 	item.Name = strings.ToUpper(item.ID)
+	item.Title = item.Name
+	if entry.Label != "" {
+		item.Title += ": " + entry.Label
+	}
+	return item, nil
+}
+
+// The uncompressed size of a data file: a gzip copy's is read from its trailer.
+func dataFileSize(fsys fs.FS, name string) (int, error) {
+	body, err := fs.ReadFile(fsys, name)
+	if err != nil {
+		return 0, err
+	}
+	if !isGzipName(name) {
+		return len(body), nil
+	}
+	if len(body) < 18 || body[0] != 0x1f || body[1] != 0x8b {
+		return 0, errors.New("not a gzip file")
+	}
+	return int(binary.LittleEndian.Uint32(body[len(body)-4:])), nil
+}
+
+// A folder example: its files, listed with the names the page reads (dataHandler serves a .gz
+// copy under the plain name) and paths inside a folder of the example's id, so the page sees the
+// prediction folder's layout.
+func folderSample(fsys fs.FS, entry exampleEntry) (sample, error) {
+	folder := path.Clean(entry.Folder)
+	if entry.ID == "" || folder == "." || folder == ".." || strings.HasPrefix(folder, "../") || path.IsAbs(folder) {
+		return sample{}, errors.New("a folder example needs an id and a folder inside data/")
+	}
+	root := "data/" + folder
+	id := strings.ToLower(entry.ID)
+	item := sample{ID: id, Name: strings.ToUpper(id)}
+	err := fs.WalkDir(fsys, root, func(name string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		size, err := dataFileSize(fsys, name)
+		if err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		plain := trimGzip(strings.TrimPrefix(name, root+"/"))
+		item.Files = append(item.Files, sampleFile{Name: path.Base(plain), Path: id + "/" + plain, URL: "/data/" + folder + "/" + plain, Size: size})
+		item.SizeBytes += size
+		return nil
+	})
+	if err != nil {
+		return sample{}, err
+	}
+	if len(item.Files) == 0 {
+		return sample{}, errors.New("the folder has no files")
+	}
 	item.Title = item.Name
 	if entry.Label != "" {
 		item.Title += ": " + entry.Label

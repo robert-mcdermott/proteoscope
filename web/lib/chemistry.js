@@ -5,6 +5,11 @@
 // residues below, or from a CCD entry fetched on demand. applyChemistry() writes them onto a
 // model: bond.order (1–3) and bond.aromatic, atom.aromatic and atom.hydrogens (hydrogens of the
 // dictionary definition, leaving atoms excluded, so a residue inside a chain counts as linked).
+// A ligand given to a structure predictor as SMILES is typed from the SMILES instead, when the
+// page knows it (structure.ligandSMILES, by chain) and its atoms pair with the residue's.
+
+import { METAL_ELEMENTS } from './residues.js';
+import { readSMILES, smilesMapping } from './smiles.js';
 
 // Multiple (A=B, A#B) and aromatic (A:B) bonds of the standard residues and a few common
 // modified ones, then hydrogens on N, O and S as NAME/COUNT; generated from the CCD (CC0).
@@ -57,6 +62,91 @@ const PLACEHOLDERS = new Set(['UNL', 'UNK', 'UNX', 'DUM', 'N', 'DN']);
 const standardCache = new Map();
 
 // The component for a residue name: the file's or a fetched one first, then the built-in table.
+// A ligand residue as its SMILES defines it, for the chain's SMILES (a predictor's input): a
+// component of the residue's own atom names with the SMILES's bond orders, charges, hydrogens
+// and stereo (for the pose checks). Null when the heavy atoms do not pair (smiles.js) or the
+// residue's atom names are not unique. Read SMILES are kept for the most recent 1,000.
+const smilesCache = new Map();
+const SMILES_CACHE_SIZE = 1000;
+
+export function smilesComponent(residue, ligandSMILES, inferred = []) {
+  const smiles = residue.kind === 'ligand' ? ligandSMILES?.get(residue.chain) : null;
+  if (!smiles) return null;
+  let molecule = smilesCache.get(smiles);
+  if (molecule === undefined) {
+    molecule = null;
+    try {
+      molecule = readSMILES(smiles);
+    } catch {
+      // Refused: the residue keeps the chemistry inferred from its geometry.
+    }
+    if (smilesCache.size >= SMILES_CACHE_SIZE) smilesCache.delete(smilesCache.keys().next().value);
+  } else {
+    smilesCache.delete(smiles);
+  }
+  smilesCache.set(smiles, molecule);
+  if (!molecule) return null;
+  const heavy = residue.atoms.filter((atom) => !atom.isHydrogen);
+  const names = heavy.map((atom) => String(atom.name ?? '').trim().toUpperCase());
+  if (new Set(names).size !== names.length) return null;
+  const position = new Map(heavy.map((atom, index) => [atom.id, index]));
+  const bonds = inferred.filter((bond) => position.has(bond.a) && position.has(bond.b)).map((bond) => ({ a: position.get(bond.a), b: position.get(bond.b) }));
+  const mapping = smilesMapping(molecule, heavy, bonds);
+  if (!mapping) return null;
+  const nameOf = (index) => names[mapping[index]];
+  const component = { id: String(residue.resName).toUpperCase(), source: 'smiles', smiles, atoms: new Map(), bonds: new Map() };
+  molecule.atoms.forEach((atom, index) => {
+    component.atoms.set(nameOf(index), { element: atom.element, charge: atom.charge || null, aromatic: atom.aromatic, leaving: false, hydrogens: atom.hydrogens, allHydrogens: atom.hydrogens });
+  });
+  for (const bond of molecule.bonds) component.bonds.set(bondKey(nameOf(bond.a), nameOf(bond.b)), { order: bond.order, aromatic: bond.aromatic });
+  component.stereo = {
+    smiles: true,
+    centers: molecule.stereo.centers.map((center) => ({ center: nameOf(center.center), order: center.order.map((slot) => (slot === null ? null : nameOf(slot))), parity: center.parity })),
+    doubleBonds: molecule.stereo.doubleBonds.map((bond) => ({ a: nameOf(bond.a), b: nameOf(bond.b), sa: nameOf(bond.sa), sb: nameOf(bond.sb), cis: bond.cis })),
+  };
+  return component;
+}
+
+// A definition that lists only bonds (OpenFold3 writes _chem_comp_bond without _chem_comp_atom),
+// completed with the residue's atoms: their elements, the hydrogens the table lists (or, when it
+// lists none, those the bonds leave room for) and the charges the valences imply (a nitrogen
+// with four bonds is N⁺, an oxygen with three O⁺, a boron with four B⁻, and, when hydrogens are
+// listed, an oxygen with one bond and none O⁻). Bonds to metals do not count toward valences.
+export function bondTableComponent(residue, component) {
+  const elements = new Map(residue.atoms.map((atom) => [String(atom.name ?? '').trim().toUpperCase(), String(atom.element).toUpperCase()]));
+  const elementOf = (name) => elements.get(name) ?? (/^[HD]/.test(name) ? 'H' : '');
+  const orders = new Map();
+  const listedHydrogens = new Map();
+  const aromatic = new Set();
+  for (const [key, bond] of component.bonds) {
+    const [a, b] = key.split('|');
+    for (const [name, other] of [[a, b], [b, a]]) {
+      const partner = elementOf(other);
+      if (partner === 'H' || partner === 'D') {
+        listedHydrogens.set(name, (listedHydrogens.get(name) ?? 0) + 1);
+        continue;
+      }
+      if (METAL_ELEMENTS.has(partner) || METAL_ELEMENTS.has(elementOf(name))) continue;
+      orders.set(name, (orders.get(name) ?? 0) + bond.order);
+      if (bond.aromatic) aromatic.add(name);
+    }
+  }
+  const hydrogensListed = listedHydrogens.size > 0;
+  const atoms = new Map();
+  for (const atom of residue.atoms) {
+    if (atom.isHydrogen) continue;
+    const name = String(atom.name ?? '').trim().toUpperCase();
+    const element = String(atom.element).toUpperCase();
+    const listed = listedHydrogens.get(name) ?? 0;
+    const sum = (orders.get(name) ?? 0) + (hydrogensListed ? listed : 0);
+    let charge = (element === 'N' || element === 'P') && sum === 4 ? 1 : element === 'O' && sum === 3 ? 1 : element === 'B' && sum === 4 ? -1 : 0;
+    if (hydrogensListed && element === 'O' && sum === 1) charge = -1;
+    const hydrogens = hydrogensListed ? listed : implicitHydrogens(element, sum, charge, false);
+    atoms.set(name, { element, charge: charge || null, aromatic: aromatic.has(name), leaving: false, hydrogens, allHydrogens: hydrogens });
+  }
+  return { ...component, bondsOnly: false, atoms };
+}
+
 export function componentFor(resName, components) {
   const id = String(resName ?? '').toUpperCase();
   return components?.get(id) ?? standardComponent(id);
@@ -146,9 +236,12 @@ export function applyChemistry(model, structure = {}) {
       atom.hydrogens = undefined;
     }
     residue.chemistry = '';
+    residue.component = null;
     if (residue.kind === 'water' || residue.kind === 'ion') continue;
     const resName = String(residue.resName).toUpperCase();
-    const component = PLACEHOLDERS.has(resName) ? null : componentFor(resName, components);
+    const found = smilesComponent(residue, structure.ligandSMILES, inferred.get(residue.index) ?? []) ?? (PLACEHOLDERS.has(resName) ? null : componentFor(resName, components));
+    // Standard residues keep the built-in table when a file lists their bonds only.
+    const component = found?.bondsOnly ? standardComponent(resName) ?? bondTableComponent(residue, found) : found;
     if (!component) {
       if ((residue.kind === 'ligand' || residue.modified) && !PLACEHOLDERS.has(resName)) missing.add(resName);
       continue;
@@ -182,6 +275,7 @@ export function applyChemistry(model, structure = {}) {
       if (Number.isFinite(record.charge) && record.charge !== 0 && !atom.charge && residue.kind === 'ligand') atom.charge = record.charge;
     }
     residue.chemistry = component.source ?? 'file';
+    residue.component = component;
     matched.set(residue.index, { component, names, complete });
   }
 

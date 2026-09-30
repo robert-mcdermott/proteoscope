@@ -1052,7 +1052,11 @@ export function readChemComp(cif) {
     }
   }
   // A component whose atoms were not listed cannot be checked for completeness.
-  for (const [id, item] of components) if (!item.atoms.size) components.delete(id);
+  // OpenFold3 lists a ligand's bonds without its atoms; applyChemistry() fills them in.
+  for (const [id, item] of components) {
+    if (!item.atoms.size && !item.bonds.size) components.delete(id);
+    else if (!item.atoms.size) item.bondsOnly = true;
+  }
   return components;
 }
 

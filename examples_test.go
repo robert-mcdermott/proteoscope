@@ -76,6 +76,50 @@ func TestExamplesFollowTheManifest(t *testing.T) {
 	}
 }
 
+func TestFolderExamples(t *testing.T) {
+	manifest := `{"examples":[{"id":"Run","folder":"predictions/run","label":"A prediction","source":{"label":"Here","url":"https://example.org"}},{"file":"1xyz.cif.gz"}]}`
+	assets := exampleAssets(t, manifest)
+	assets["data/predictions/run/job/model_0.cif.gz"] = &fstest.MapFile{Data: gzipped(t, testCIF)}
+	assets["data/predictions/run/job.yaml"] = &fstest.MapFile{Data: []byte("sequences: []\n")}
+	samples, err := loadSamples(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := samples[0]
+	if run.ID != "run" || run.Title != "RUN: A prediction" || run.URL != "" || run.Source == nil || run.Source.URL != "https://example.org" || len(run.Files) != 2 {
+		t.Fatalf("folder example = %+v", run)
+	}
+	// Files are listed as the folder is walked, gzipped ones by their uncompressed name and size.
+	model, yaml := run.Files[0], run.Files[1]
+	if yaml != (sampleFile{Name: "job.yaml", Path: "run/job.yaml", URL: "/data/predictions/run/job.yaml", Size: len("sequences: []\n")}) {
+		t.Fatalf("input file = %+v", yaml)
+	}
+	if model != (sampleFile{Name: "model_0.cif", Path: "run/job/model_0.cif", URL: "/data/predictions/run/job/model_0.cif", Size: len(testCIF)}) {
+		t.Fatalf("model file = %+v", model)
+	}
+	if run.SizeBytes != yaml.Size+model.Size {
+		t.Fatalf("size %d", run.SizeBytes)
+	}
+	h := testHandler(t, &app{assets: assets})
+	if rec := get(h, model.URL); rec.Code != http.StatusOK || rec.Body.String() != testCIF {
+		t.Fatalf("%s: status %d", model.URL, rec.Code)
+	}
+
+	for _, entry := range []string{
+		`{"folder":"predictions/run"}`,
+		`{"id":"x","folder":"../web"}`,
+		`{"id":"x","folder":"/data"}`,
+		`{"id":"x","folder":"."}`,
+		`{"id":"x","folder":"predictions/missing"}`,
+	} {
+		assets := exampleAssets(t, `{"examples":[`+entry+`]}`)
+		assets["data/predictions/run/job/model_0.cif.gz"] = &fstest.MapFile{Data: gzipped(t, testCIF)}
+		if _, err := loadSamples(assets); err == nil {
+			t.Errorf("entry %s: expected an error", entry)
+		}
+	}
+}
+
 func TestDataHandlerServesCompressedExamples(t *testing.T) {
 	h := testHandler(t, &app{assets: exampleAssets(t, `{"examples":[{"file":"1xyz.cif.gz"}]}`)})
 
@@ -162,10 +206,25 @@ func TestBundledExamples(t *testing.T) {
 		t.Fatalf("%d samples for %d manifest entries: every file in data/ should be described", len(samples), len(manifest))
 	}
 	h := testHandler(t, &app{assets: content})
-	pae := 0
+	pae, folders := 0, 0
 	for _, item := range samples {
 		if item.Label == "" || item.Category == "" || item.Description == "" || item.Credit == "" {
 			t.Errorf("%s is not fully described: %+v", item.ID, item)
+		}
+		if len(item.Files) > 0 {
+			// A prediction folder: every file is served whole, and the credit links to the source.
+			folders++
+			total := 0
+			for _, file := range item.Files {
+				total += file.Size
+				if rec := get(h, file.URL); rec.Code != http.StatusOK || rec.Body.Len() != file.Size {
+					t.Errorf("%s: %s: status %d, %d bytes of %d", item.ID, file.URL, rec.Code, rec.Body.Len(), file.Size)
+				}
+			}
+			if item.Source == nil || !strings.HasPrefix(item.Source.URL, "https://") || item.URL != "" || total != item.SizeBytes {
+				t.Errorf("%s: source %+v, URL %q, %d bytes of %d", item.ID, item.Source, item.URL, total, item.SizeBytes)
+			}
+			continue
 		}
 		// Startup skips parsing the examples, so check here that each one decompresses and parses.
 		described, err := readSample(content, strings.TrimPrefix(item.URL, "/data/")+".gz")
@@ -184,8 +243,8 @@ func TestBundledExamples(t *testing.T) {
 			}
 		}
 	}
-	if pae != 1 {
-		t.Errorf("%d examples with PAE, want the AlphaFold model", pae)
+	if pae != 1 || folders != 2 {
+		t.Errorf("%d examples with PAE, want the AlphaFold model; %d prediction folders, want 2", pae, folders)
 	}
 	first := get(h, samples[0].URL)
 	if first.Code != http.StatusOK || first.Body.Len() != samples[0].SizeBytes || !strings.HasPrefix(first.Body.String(), "data_") {

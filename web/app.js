@@ -37,6 +37,7 @@ import {
   flatSquare,
   insidePredictionFolder,
   MISSING_PAE,
+  ligandSMILES,
   modelTokens,
   parseAF3Confidences,
   parseAF3Summary,
@@ -615,6 +616,8 @@ async function init() {
   } else if (startup?.files?.length) {
     // Files and folders named on the command line open like dropped ones.
     await openFiles(startup.files.map(urlRef));
+  } else if (startup?.blank) {
+    // A hidden page for "proteoscope triage": the jobs arrive by remote control.
   } else if (fetchRequest) {
     // #fetch=4AKE,1AKE loads several entries; adding &superpose fits the others onto the first.
     const ids = fetchRequest.split(',').map((id) => id.trim()).filter(Boolean);
@@ -1246,8 +1249,9 @@ async function openFiles(files, options = {}) {
     const { sets, rest: unclaimed } = detectPredictionSets(refs);
     if (sets.length > 1) await openPredictionBatch(sets, { add: addMode, table: options.table ?? true });
     else if (sets.length) await openPredictionSet(sets[0], { add: addMode });
-    // The logs, settings, templates and inputs in a prediction folder are left alone.
-    const rest = unclaimed.filter((ref) => !insidePredictionFolder(ref, sets));
+    // The logs, settings, templates and inputs in a prediction folder are left alone, as are job
+    // inputs no job claimed (YAML always; FASTA beside prediction jobs, else an alignment).
+    const rest = unclaimed.filter((ref) => !insidePredictionFolder(ref, sets) && !/\.ya?ml$/i.test(ref.name) && !(sets.length && /\.(fasta|fa|fas)$/i.test(ref.name)));
     const molecules = rest.filter((ref) => MOLECULE_FILE.test(ref.name));
     const maps = rest.filter((ref) => MAP_FILE.test(ref.name));
     const structures = rest.filter((ref) => STRUCTURE_FILE.test(ref.name));
@@ -1893,6 +1897,9 @@ function compoundCard(residue, entry = state.active) {
   const pose = docking && poseResidueKey(docking) === residue.key ? docking.molecules[docking.index] : null;
   const local = pose ? `${pose.title || 'Pose'} (pose ${docking.index + 1})` : componentNameOf(residue, entry);
   const heavy = residue.atoms.filter((atom) => !atom.isHydrogen).length;
+  // A ligand given to a predictor as SMILES is described by its SMILES.
+  const smiles = residue.chemistry === 'smiles' ? residue.component?.smiles ?? null : null;
+  const smilesCharge = smiles ? [...residue.component.atoms.values()].reduce((sum, atom) => sum + (atom.charge ?? 0), 0) : null;
   const links = [];
   if (id && record?.status !== 'missing') {
     links.push({ label: 'RCSB', url: `https://www.rcsb.org/ligand/${encodeURIComponent(id)}` });
@@ -1909,15 +1916,15 @@ function compoundCard(residue, entry = state.active) {
     synonyms: info?.synonyms ?? [],
     type: info?.type ?? residue.kind,
     formula: info?.formula || modelFormula(residue),
-    formulaFrom: info?.formula ? 'dictionary' : 'model',
+    formulaFrom: info?.formula ? 'dictionary' : smiles ? 'smiles' : 'model',
     weight: Number.isFinite(info?.weight) ? info.weight : null,
-    charge: Number.isFinite(info?.charge) ? info.charge : null,
-    smiles: info?.smiles ?? null,
+    charge: Number.isFinite(info?.charge) ? info.charge : smilesCharge,
+    smiles: info?.smiles ?? smiles,
     inchiKey: info?.inchiKey ?? null,
     heavyAtoms: { modeled: heavy, expected: info?.heavyAtoms ?? null },
     links,
     peaks: ligandPeaks(entry, residue),
-    status: record?.status ?? (id ? 'loading' : 'model'),
+    status: record?.status ?? (id ? 'loading' : smiles ? 'smiles' : 'model'),
     message: record?.message ?? '',
   };
 }
@@ -1941,7 +1948,7 @@ function renderLigandCard() {
   const rows = [];
   const row = (label, html, options = {}) => rows.push(`<div${options.wide ? ' class="wide"' : ''}><dt>${escapeHTML(label)}</dt><dd${options.mono ? ' class="mono"' : ''} title="${escapeHTML(options.title ?? '')}">${html}</dd></div>`);
   if (card.fullName && card.fullName !== card.name) row('Name', escapeHTML(card.fullName), { wide: true, title: card.fullName });
-  row('Formula', `${formulaHTML(card.formula)}${card.formulaFrom === 'model' ? ' <span class="hint">(model)</span>' : ''}`, { title: card.formulaFrom === 'model' ? 'Counted from the modeled atoms' : '' });
+  row('Formula', `${formulaHTML(card.formula)}${card.formulaFrom === 'dictionary' ? '' : ` <span class="hint">(${card.formulaFrom === 'smiles' ? 'SMILES' : 'model'})</span>`}`, { title: card.formulaFrom === 'model' ? 'Counted from the modeled atoms' : card.formulaFrom === 'smiles' ? 'The modeled atoms with the hydrogens of the SMILES' : '' });
   if (card.weight !== null) row('Weight', `${card.weight.toFixed(2)} g/mol`);
   if (card.charge !== null) row('Charge', card.charge > 0 ? `+${card.charge}` : String(card.charge).replace('-', '−'));
   if (card.heavyAtoms.expected) {
@@ -1958,6 +1965,7 @@ function renderLigandCard() {
     missing: `${residue.resName} is not in the Chemical Component Dictionary; the formula is counted from the model.`,
     error: `${(card.message || 'The dictionary could not be reached').replace(/\.+$/, '')}. The formula is counted from the model.`,
     model: 'No dictionary code (a docking pose or an unnamed ligand): the formula is counted from the model.',
+    smiles: 'Given to the structure predictor as SMILES (read from the job\'s input): its bond orders, charges and stereocenters follow the SMILES.',
   }[card.status] ?? '';
   els.ligandStatus.hidden = !status;
   els.ligandStatus.textContent = status;
@@ -2169,7 +2177,7 @@ function bindLigandEvents() {
 // entry, fetched on demand.
 function ligandPoseChecks(entry, residue) {
   const model = activeModelOf(entry);
-  const component = entry.structure.components?.get(String(residue.resName).toUpperCase()) ?? null;
+  const component = residue.component ?? entry.structure.components?.get(String(residue.resName).toUpperCase()) ?? null;
   const code = compoundCode(residue, entry);
   // The dictionary entry: undefined while it is looked up, then the entry or null.
   const dictionary = code ? state.dictionaryReady.get(code) : null;
@@ -2187,6 +2195,7 @@ function ligandPoseChecks(entry, residue) {
     ...checkPose(pose.ligand, pose.environment, { bondedKeys: pose.bondedKeys, reference }),
     typed: pose.typed,
     stereo: Boolean(reference),
+    stereoSource: reference?.smiles ? 'smiles' : 'dictionary',
     atomIds: pose.ligand.atoms.map((atom) => atom.id),
     stereoPending: pose.typed && !reference && dictionary === undefined,
   };
@@ -2198,7 +2207,14 @@ function ligandPoseChecks(entry, residue) {
 // stereo comparison when a dictionary definition was there to compare with.
 function notePoseChecks(entry, result) {
   entry.poseChecked = true;
-  if (result.stereo) entry.poseStereo = true;
+  if (result.stereo) (entry.poseStereo ??= new Set()).add(result.stereoSource);
+}
+
+// Which definitions the stereo checks compared with, for the methods text.
+function poseCheckUse(entry, predicted) {
+  const sources = new Set(entry.poseStereo ?? []);
+  for (const item of predicted?.poseChecks ?? []) if (item.stereo) sources.add(item.stereoSource ?? 'dictionary');
+  return { stereo: sources.has('dictionary'), smiles: sources.has('smiles') };
 }
 
 function poseChecksWorthShowing(residue) {
@@ -2241,7 +2257,11 @@ function renderPoseChecks(entry, residue) {
     }
   }
   const notes = [];
-  if (!result.typed) notes.push('Only the contact checks ran: this ligand has no dictionary entry and its file gives no bond orders.');
+  if (!result.typed) {
+    notes.push(entry.prediction
+      ? 'Only the contact checks ran: no bond orders are known for this ligand. For a ligand given to the predictor as SMILES, open the job\'s input with its results (a Boltz YAML, a Chai-1 FASTA; AlphaFold 3 keeps it in the folder).'
+      : 'Only the contact checks ran: this ligand has no dictionary entry and its file gives no bond orders.');
+  }
   else if (!result.stereo) notes.push(result.stereoPending ? 'Stereocenters are compared once the dictionary entry arrives.' : 'No dictionary coordinates to compare stereocenters with.');
   els.ligandCheckList.innerHTML = `${items.join('')}${notes.map((note) => `<li class="check-note">${escapeHTML(note)}</li>`).join('')}`;
 }
@@ -2309,7 +2329,8 @@ async function checkPredictionLigands(structure, parsed, model) {
   const ligands = parsed.residues.filter(poseChecksWorthShowing);
   if (!ligands.length) return;
   structure.components ??= new Map();
-  const wanted = [...new Set(ligands.map((residue) => String(residue.resName).toUpperCase()))].filter((id) => !structure.components.has(id) && /^[A-Z0-9]{1,5}$/.test(id));
+  // Ligands the job's SMILES typed need no dictionary entry (their LIG-style names are not codes).
+  const wanted = [...new Set(ligands.filter((residue) => residue.chemistry !== 'smiles').map((residue) => String(residue.resName).toUpperCase()))].filter((id) => !structure.components.has(id) && /^[A-Z0-9]{1,5}$/.test(id));
   for (const component of await Promise.all(wanted.slice(0, MAX_COMPONENT_REQUESTS).map((id) => dictionaryComponent(id)))) {
     if (component) structure.components.set(component.id, component);
   }
@@ -2317,7 +2338,7 @@ async function checkPredictionLigands(structure, parsed, model) {
   const checks = [];
   for (const residue of ligands) {
     const code = String(residue.resName).toUpperCase();
-    const pose = residuePose(parsed, residue, structure.components.get(code) ?? null);
+    const pose = residuePose(parsed, residue, residue.component ?? structure.components.get(code) ?? null);
     // Files that define their components leave out the ideal coordinates the stereo checks need.
     let reference = pose.reference;
     if (pose.typed && !reference && /^[A-Z0-9]{1,5}$/.test(code)) {
@@ -2325,7 +2346,7 @@ async function checkPredictionLigands(structure, parsed, model) {
       if (dictionary) reference = componentReference(dictionary, pose.ligand);
     }
     const result = checkPose(pose.ligand, pose.environment, { bondedKeys: pose.bondedKeys, reference });
-    checks.push({ ligand: shortResidueLabel(residue), code: residue.resName, passed: result.passed, checked: result.checked, failed: result.failed, bondOrders: pose.typed, stereo: Boolean(reference) });
+    checks.push({ ligand: shortResidueLabel(residue), code: residue.resName, passed: result.passed, checked: result.checked, failed: result.failed, bondOrders: pose.typed, stereo: Boolean(reference), stereoSource: reference?.smiles ? 'smiles' : 'dictionary' });
   }
   model.poseChecks = checks;
 }
@@ -5535,7 +5556,8 @@ function methodsContext() {
           superposition: comparison ? { method: comparison.recipe?.correspondence ?? 'sequence', complex: (comparison.chainPairs?.length ?? 0) > 1 } : null,
           prediction: Boolean(entry.prediction),
           pdockqOnly: Boolean(predicted?.metrics?.pairs.length && !predicted.metrics.pae),
-          poseChecks: entry.poseChecked || entry.docking?.checks?.length || predicted?.poseChecks?.length ? { stereo: Boolean(entry.poseStereo || predicted?.poseChecks?.some((item) => item.stereo)) } : null,
+          poseChecks: entry.poseChecked || entry.docking?.checks?.length || predicted?.poseChecks?.length ? poseCheckUse(entry, predicted) : null,
+          smilesLigands: model.residues.some((residue) => residue.chemistry === 'smiles'),
           domains: Boolean(entry.domains),
           validation: Boolean(entry.validation),
           missense: Boolean(entry.missense),
@@ -5741,6 +5763,8 @@ function predictionSessionFields(entry) {
     toolLabel: set.toolLabel,
     name: set.name,
     affinity: set.affinityResult ?? null,
+    // The SMILES of its ligand chains, which type those ligands again when the session opens.
+    ligandSMILES: entry.structure.ligandSMILES ? [...entry.structure.ligandSMILES] : null,
     model: {
       id: model.id,
       label: model.label,
@@ -5765,6 +5789,11 @@ function restorePrediction(entry, saved) {
   const set = { id: `prediction-${state.nextPredictionId++}`, tool: saved.tool, toolLabel: saved.toolLabel, name: saved.name, models: [model], files: [], affinityResult: saved.affinity, restored: true };
   state.predictionSets.push(set);
   entry.prediction = { setId: set.id, modelId: model.id };
+  if (Array.isArray(saved.ligandSMILES) && saved.ligandSMILES.length) {
+    entry.structure.ligandSMILES = new Map(saved.ligandSMILES.filter((item) => Array.isArray(item) && item.length === 2).map(([chain, smiles]) => [String(chain), String(smiles)]));
+    for (const item of new Set([...entry.structure.baseModels, ...entry.structure.models])) applyChemistry(item, entry.structure);
+    markSceneDirty();
+  }
 }
 
 // PAE matrices opened by hand (or from a prediction folder) are stored as bytes at 0.125 Å
@@ -7765,6 +7794,22 @@ async function readJSONFile(file) {
   return parsePredictionJSON(await file.text());
 }
 
+// The SMILES of a job's ligand chains (Map chain → SMILES), from its input: AlphaFold 3's
+// <job>_data.json, or a Boltz, Chai-1 or Protenix input opened with the results. Read once per
+// job; null when there are none.
+function predictionLigandSMILES(set) {
+  const file = set.tool === 'af3' ? set.data : set.input;
+  if (!file) return Promise.resolve(null);
+  set.ligandSMILES ??= file.text()
+    .then((text) => ligandSMILES(set.tool, text, file.name, set.name))
+    .then((chains) => (chains.size ? chains : null))
+    .catch((error) => {
+      console.warn('Ligand SMILES not read', error);
+      return null;
+    });
+  return set.ligandSMILES;
+}
+
 async function readPredictionScores(set, model) {
   const files = model.files;
   switch (set.tool) {
@@ -7829,6 +7874,12 @@ async function scorePredictionModel(set, model) {
   structure.meta.isPredicted = true;
   deriveStructure(structure, { secondaryMode: 'file' });
   const parsed = structure.models[0];
+  // The job's SMILES type its ligands; the input is read only for models with ligands, since
+  // AlphaFold 3's also holds the MSAs.
+  if (parsed.residues.some((residue) => residue.kind === 'ligand')) {
+    structure.ligandSMILES = await predictionLigandSMILES(set);
+    if (structure.ligandSMILES) applyChemistry(parsed, structure);
+  }
   // Chain-pair matrices from the predictors follow the chain order of the file, ligands included.
   model.chains = [...new Set(parsed.atoms.filter((atom) => atom.kind !== 'water').map((atom) => atom.chain))];
   model.calpha = new Map();
@@ -7919,7 +7970,10 @@ async function loadPredictionModel(set, model, options = {}) {
   // BinaryCIF was converted to mmCIF text; ColabFold, OpenFold3 and some Boltz runs write PDB.
   const fileName = model.files.structure.name.replace(/\.bcif$/i, '.cif');
   const extension = /\.(pdb|ent)$/i.test(fileName) ? '.pdb' : '.cif';
-  const entry = await loadStructureFromText(text, `${set.name}_${model.id}${extension}`, { source: `${set.toolLabel} · ${model.label}`, add, predicted: true, origin: { type: 'file', name: fileName, text } });
+  const label = `${set.name}_${model.id}${extension}`;
+  const structure = parseStructure(text, label);
+  structure.ligandSMILES = await predictionLigandSMILES(set);
+  const entry = await loadStructureFromText(text, label, { structure, source: `${set.toolLabel} · ${model.label}`, add, predicted: true, origin: { type: 'file', name: fileName, text } });
   entry.name = uniqueName(`${set.name} #${model.rank}`);
   entry.prediction = { setId: set.id, modelId: model.id };
   model.entryId = entry.id;
@@ -8440,7 +8494,10 @@ function renderTriageGalleryGrid() {
 
 // Images of the best models, each superposed on the first so they share a view. The models are
 // opened for the images and closed again; the scene is left as it was.
-async function renderTriageGallery(count = 12, overrides = {}) {
+// Gallery images are 480 pixels wide unless a script asks for more (the canvas is the limit).
+const GALLERY_WIDTH = 480;
+
+async function renderTriageGallery(count = 12, overrides = {}, width = GALLERY_WIDTH) {
   checkTriageIdle();
   const { rows, metric } = rankedTriage(overrides);
   const picks = rows.filter((row) => {
@@ -8493,7 +8550,7 @@ async function renderTriageGallery(count = 12, overrides = {}) {
       markSceneDirty();
       await nextFrame();
       const canvas = await renderImageCanvas();
-      images.push({ row: picks[index], metric, url: thumbnailURL(canvas, 480) });
+      images.push({ row: picks[index], metric, url: thumbnailURL(canvas, width) });
     }
   } finally {
     els.exportSize.value = exportSettings.size;
@@ -8596,7 +8653,7 @@ async function triageCommand(parsed, options) {
     return '';
   }
   if (parsed.action === 'gallery') {
-    const images = await renderTriageGallery(parsed.count, { filter: '' });
+    const images = await renderTriageGallery(parsed.count, { filter: '' }, parsed.width ?? GALLERY_WIDTH);
     if (!options.remote) openTriageDialog();
     return { message: `Rendered ${images.length} models, each superposed on the best.`, data: options.remote ? images.map((item) => ({ position: item.row.position, job: item.row.job, model: item.row.model, metric: triageMetricLabel(item.metric), score: Number.isFinite(item.row[item.metric]) ? Number(item.row[item.metric].toFixed(4)) : null, image: item.url })) : undefined };
   }
@@ -12054,6 +12111,13 @@ function findSample(id) {
 // Opens an example (with its PAE, when it has one). options.view runs its opening view;
 // options.select (default: unless adding) shows it in the menu with its description.
 async function openSample(sample, options = {}) {
+  // A folder example (structure-prediction output) opens like a dropped prediction folder.
+  if (sample.files?.length) {
+    await openFiles(sample.files.map(urlRef), { add: Boolean(options.add), rethrow: true });
+    if (options.select ?? !options.add) setSampleSelection(sample);
+    if (options.view) await runSampleView(sample);
+    return state.active;
+  }
   const template = options.view && !options.add ? state.defaults : undefined;
   const entry = await loadStructureFromURL(sample.url, sample.name, { add: options.add, activate: options.activate, template, origin: { type: 'sample', id: sample.id } });
   if (sample.pae) await loadPAEFromURL(sample.pae, entry, 'AlphaFold DB');
@@ -12083,6 +12147,7 @@ function setSampleSelection(sample) {
 }
 
 function sampleSourceURL(sample) {
+  if (sample.source?.url) return { url: sample.source.url, label: sample.source.label || 'Source' };
   if (sample.accession) return { url: `https://alphafold.ebi.ac.uk/entry/${encodeURIComponent(sample.accession)}`, label: 'AlphaFold DB' };
   if (/^[0-9][A-Z0-9]{3}$/i.test(sample.name)) return { url: `https://www.rcsb.org/structure/${encodeURIComponent(sample.name.toUpperCase())}`, label: 'RCSB PDB' };
   return null;

@@ -474,3 +474,21 @@ the completed v0.1 application.
 
 - [x] 95. Release 0.9.0: version in `main.go` and `CITATION.cff`, `CHANGELOG.md`, a README image of the pose checks; MOL2 reading and ligand chemistry checked against v0.8.0
   - _Requirements: 45_
+
+- [x] 96. `proteoscope triage`: the page in a hidden Chrome-family browser, the ranking printed, CSV, JSON and gallery files; a blank page at startup; `triage gallery … width …`; tests with a stand-in browser
+  - _Requirements: 55_
+
+- [x] 97. SMILES reader (`smiles.js`): atoms, charges, hydrogens, kekulization, ring closures, stereo marks with hydrogens and lone pairs in RDKit's places; pairing with a model's atoms by order or by bonds
+  - _Requirements: 56_
+
+- [x] 98. SMILES ligands of predictions: inputs of AlphaFold 3, Boltz, Chai-1 and Protenix read and detected, Protenix seeds grouped into one job, the server serving YAML and FASTA inputs, `smilesComponent` in `applyChemistry`, stereo checks from a SMILES, sessions, the card's note and the methods paragraph; OpenFold3's bond-only definitions
+  - _Requirements: 56_
+
+- [x] 99. The `smiles` validation suite (51 molecules, 407 SMILES against RDKit), its reference script, and the unit tests
+  - _Requirements: 45, 56_
+
+- [x] 100. Documentation: README (Predicted Complexes, batch triage without a window, Ligands, command-line options, code layout), validation README, design, requirements, roadmap (wave 10)
+  - _Requirements: 55, 56_
+
+- [x] 101. Prediction examples: folder entries in `data/examples.json` served with their files, opened as prediction folders; 8C3U co-folding (Boltz-1 and Protenix, Runs N' Poses) and UL144–MOTS-c (ColabFold), with `data/predictions/README.md` for sources, licenses and changes
+  - _Requirements: 33, 56_

@@ -73,6 +73,24 @@ test('1M17: erlotinib takes its bond orders from the file (a triple bond, two ar
   assert.equal(peptide.order, 1);
 });
 
+test('a ligand given to a predictor as SMILES is typed from it, its atoms paired through their bonds', () => {
+  // Erlotinib in 1M17, as if the job's input had given it as SMILES: the file's atom order is not
+  // the string's, so the atoms pair through the bonds.
+  const structure = parseStructure(exampleText('1m17'), '1m17.cif');
+  structure.ligandSMILES = new Map([['A', 'COCCOc1cc2ncnc(Nc3cccc(C#C)c3)c2cc1OCCOC']]);
+  const model = deriveStructure(structure).models[0];
+  const residue = model.residues.find((item) => item.resName === 'AQ4');
+  assert.equal(residue.chemistry, 'smiles');
+  assert.equal(residue.component.source, 'smiles');
+  const orders = residueBonds(model, residue).map((bond) => bond.order);
+  assert.deepEqual([orders.filter((order) => order === 2).length, orders.filter((order) => order === 3).length], [8, 1]);
+  assert.equal(residue.atoms.filter((atom) => atom.aromatic).length, 16);
+  // A SMILES of another molecule leaves the file's own definition in charge.
+  const other = parseStructure(exampleText('1m17'), '1m17.cif');
+  other.ligandSMILES = new Map([['A', 'CCO']]);
+  assert.equal(deriveStructure(other).models[0].residues.find((item) => item.resName === 'AQ4').chemistry, 'file');
+});
+
 test('PDB files lack component definitions until a dictionary entry supplies one', () => {
   const structure = derive(examplePDB('1m17'), '1m17.pdb');
   const model = structure.models[0];

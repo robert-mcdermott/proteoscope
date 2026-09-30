@@ -3,8 +3,8 @@
 //
 //   node validation/run.mjs [suite …] [--offline] [--verbose]
 //
-// Suites: limma, msstatsptm, usalign, conservation, emdb, ramachandran, posebusters (all by
-// default). Inputs that are not in the repository (PDB entries, chemical components, a region of
+// Suites: limma, msstatsptm, usalign, conservation, emdb, ramachandran, posebusters, smiles (all
+// by default). Inputs that are not in the repository (PDB entries, chemical components, a region of
 // an EMDB map, a wwPDB validation report) are downloaded once into validation/cache/; with --offline, suites whose inputs are not cached
 // are skipped. The reference tools are not needed: validation/scripts/ holds the scripts that
 // wrote the reference files. Exits with status 1 when a check fails.
@@ -20,6 +20,7 @@ import { exampleText } from '../web/lib/test-data.mjs';
 import { mmAlign, tmAlign } from '../web/lib/tmalign.js';
 import { mapFit, parseVolumeServerData } from '../web/lib/volume.js';
 import { checkPose, contactClass } from '../web/lib/pose-checks.js';
+import { readSMILES, smilesMapping } from '../web/lib/smiles.js';
 import { caseChains, componentDefinition, componentFile, download, MissingInput, pairsFromRows, pdbFile, poseComplex, readReference, ROOT } from './common.mjs';
 
 const args = process.argv.slice(2);
@@ -355,9 +356,100 @@ async function posebusters() {
   return checks;
 }
 
+/* ---------- SMILES against RDKit ---------- */
+
+// Each molecule written several ways: smiles.js must read the atoms, charges, hydrogens and
+// Kekulé valences RDKit reads, and the stereo it reads must hold in RDKit's embedded coordinates
+// and fail in their mirror image.
+async function smiles() {
+  const reference = readReference('smiles.json');
+  const checks = [];
+  for (const item of reference.molecules) {
+    const problems = [];
+    let centers = 0;
+    let doubleBonds = 0;
+    for (const variant of item.variants) {
+      const label = variant.smiles.length > 40 ? `${variant.smiles.slice(0, 40)}…` : variant.smiles;
+      let molecule;
+      try {
+        molecule = readSMILES(variant.smiles);
+      } catch (error) {
+        problems.push(`${label}: ${error.message}`);
+        continue;
+      }
+      const order = variant.order;
+      const at = new Map(order.map((original, index) => [original, index]));
+      const expect = (field) => order.map((original) => item[field][original]);
+      if (JSON.stringify(molecule.atoms.map((atom) => atom.element)) !== JSON.stringify(expect('elements'))) {
+        problems.push(`${label}: elements`);
+        continue;
+      }
+      if (JSON.stringify(molecule.atoms.map((atom) => atom.charge)) !== JSON.stringify(expect('charges'))) problems.push(`${label}: charges`);
+      if (JSON.stringify(molecule.atoms.map((atom) => atom.hydrogens)) !== JSON.stringify(expect('hydrogens'))) problems.push(`${label}: hydrogens`);
+      // Any Kekulé structure gives each atom the same valence; the bonds themselves must match.
+      const pairs = (bonds) => bonds.map(([a, b]) => (a < b ? `${a}-${b}` : `${b}-${a}`)).sort().join(' ');
+      const theirs = [];
+      for (let index = 0; index < item.bonds.length; index += 3) theirs.push([at.get(item.bonds[index]), at.get(item.bonds[index + 1]), item.bonds[index + 2]]);
+      const ours = molecule.bonds.map((bond) => [bond.a, bond.b, bond.order]);
+      const valence = (bonds) => {
+        const sums = new Array(order.length).fill(0);
+        for (const [a, b, bondOrder] of bonds) {
+          sums[a] += bondOrder;
+          sums[b] += bondOrder;
+        }
+        return sums.join(' ');
+      };
+      if (pairs(ours) !== pairs(theirs)) problems.push(`${label}: bonds`);
+      else if (valence(ours) !== valence(theirs)) problems.push(`${label}: Kekulé structure`);
+      // The marks RDKit (and so the predictors) keeps as stereogenic, and no others.
+      if (molecule.stereo.centers.length !== item.centers || molecule.stereo.doubleBonds.length !== item.stereoBonds) {
+        problems.push(`${label}: ${molecule.stereo.centers.length} stereocenters and ${molecule.stereo.doubleBonds.length} stereo bonds, RDKit ${item.centers} and ${item.stereoBonds}`);
+      }
+      // The model's atoms in the string's order, paired as the page pairs a predictor's (the
+      // symmetric pairing that best fits the SMILES's stereo).
+      const names = molecule.atoms.map((atom, index) => `${atom.element}${index + 1}`);
+      const verdict = (mirror, id) => {
+        const atoms = molecule.atoms.map((atom, index) => {
+          const base = order[index] * 3;
+          return { name: names[index], element: atom.element, charge: atom.charge, x: item.coordinates[base] * (mirror ? -1 : 1), y: item.coordinates[base + 1], z: item.coordinates[base + 2] };
+        });
+        const mapping = smilesMapping(molecule, atoms, molecule.bonds);
+        const nameOf = (index) => names[mapping[index]];
+        const stereo = {
+          smiles: true,
+          centers: molecule.stereo.centers.map((center) => ({ center: nameOf(center.center), order: center.order.map((slot) => (slot === null ? null : nameOf(slot))), parity: center.parity })),
+          doubleBonds: molecule.stereo.doubleBonds.map((bond) => ({ a: nameOf(bond.a), b: nameOf(bond.b), sa: nameOf(bond.sa), sb: nameOf(bond.sb), cis: bond.cis })),
+        };
+        const bonds = molecule.bonds.map((bond) => ({ a: mapping[bond.a], b: mapping[bond.b], order: bond.order }));
+        return checkPose({ atoms, bonds }, [], { reference: stereo }).checks.find((check) => check.id === id);
+      };
+      const chirality = verdict(false, 'chirality');
+      const geometry = verdict(false, 'double-bond-stereo');
+      if (chirality.passed !== true) problems.push(`${label}: ${chirality.detail}`);
+      if (geometry.passed !== true) problems.push(`${label}: ${geometry.detail}`);
+      const counted = Number(/All (\d+) stereocenters/.exec(chirality.detail)?.[1] ?? (/The stereocenter/.test(chirality.detail) ? 1 : 0));
+      centers = Math.max(centers, counted);
+      doubleBonds = Math.max(doubleBonds, molecule.stereo.doubleBonds.length);
+      // A chiral molecule's mirror image is another molecule and fails; an achiral one's (meso,
+      // trans-decalin) is the same molecule and passes.
+      if (counted && item.chiral && verdict(true, 'chirality').passed !== false) problems.push(`${label}: its mirror image passes`);
+      if (counted && !item.chiral && verdict(true, 'chirality').passed !== true) problems.push(`${label}: the mirror image of an achiral molecule fails`);
+      if (verdict(true, 'double-bond-stereo').passed !== true) problems.push(`${label}: the mirror image changes E/Z`);
+    }
+    checks.push({
+      name: `${item.name}, ${item.variants.length} SMILES`,
+      ok: problems.length === 0,
+      detail: problems.length
+        ? problems.slice(0, 4).join('; ')
+        : `atoms, charges, hydrogens, Kekulé bonds and stereo marks as RDKit reads them; ${centers} of RDKit's ${item.centers} stereocenters and ${doubleBonds} E/Z bonds hold in its coordinates${centers ? (item.chiral ? ' and invert in the mirror image' : ' and in the mirror image, the same achiral molecule') : ''}`,
+    });
+  }
+  return checks;
+}
+
 /* ---------- Runner ---------- */
 
-const SUITES = { limma, msstatsptm, usalign, conservation, emdb, ramachandran, posebusters };
+const SUITES = { limma, msstatsptm, usalign, conservation, emdb, ramachandran, posebusters, smiles };
 const requested = args.filter((arg) => !arg.startsWith('--'));
 const unknown = requested.filter((name) => !SUITES[name]);
 if (unknown.length) {

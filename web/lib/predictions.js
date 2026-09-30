@@ -158,10 +158,13 @@ function detectBoltz(files) {
       const affinity = group.find((item) => baseName(item.path).toLowerCase() === `affinity_${name}.json`.toLowerCase()) ?? null;
       const msaDir = directory(directory(dir));
       const msas = files.filter((item) => directory(item.path) === `${msaDir ? `${msaDir}/` : ''}msa` && /\.(a3m|csv)$/i.test(item.path) && baseName(item.path).startsWith(name));
-      const setFiles = [...models.flatMap((model) => Object.values(model.files)), affinity, ...msas].filter(Boolean);
       // boltz_results_<input>/predictions/<name>/ sits beside processed/ and msa/.
       const root = baseName(directory(dir)) === 'predictions' ? msaDir : dir;
-      sets.push(makeSet('boltz', name, root, models, setFiles, { affinity, msas }));
+      // Boltz does not copy its input into the results; the input opened with them gives the
+      // SMILES of its ligands.
+      const input = boltzInput(files, name, root);
+      const setFiles = [...models.flatMap((model) => Object.values(model.files)), affinity, ...msas, input].filter(Boolean);
+      sets.push(makeSet('boltz', name, root, models, setFiles, { affinity, msas, input }));
     }
   }
   return sets;
@@ -187,8 +190,10 @@ function detectChai(files) {
     }
     if (!models.length) continue;
     models.sort((a, b) => a.order - b.order);
-    const setFiles = models.flatMap((model) => Object.values(model.files)).filter(Boolean);
-    sets.push(makeSet('chai', baseName(dir) || 'Chai-1', dir, models, setFiles));
+    // Chai-1 writes into an empty folder; a FASTA put there gives the SMILES of its ligands.
+    const input = group.find((item) => /\.(fasta|fa|fas)$/i.test(item.path)) ?? null;
+    const setFiles = [...models.flatMap((model) => Object.values(model.files)), input].filter(Boolean);
+    sets.push(makeSet('chai', baseName(dir) || 'Chai-1', dir, models, setFiles, { input }));
   }
   return sets;
 }
@@ -234,12 +239,19 @@ function detectColabFold(files) {
 // <name>_summary_confidence_sample_<rank>.json and, when run with --need_atom_confidence,
 // <name>_full_data_sample_<rank>.json. Samples are numbered by rank within each seed.
 function detectProtenix(files) {
-  return detectSamples(files, 'protenix', {
+  const sets = detectSamples(files, 'protenix', {
     structure: /^(.+)_sample_(\d+)\.(cif|pdb|bcif)$/i,
     summary: (name, sample) => `${name}_summary_confidence_sample_${sample}.json`,
     confidences: (name, sample) => [`${name}_full_data_sample_${sample}.json`],
     seedFolder: (dir) => (/^predictions$/i.test(baseName(dir)) ? directory(dir) : null),
   });
+  // Protenix does not copy its input into the results; <name>.json opened with them gives the
+  // SMILES of its ligands.
+  for (const set of sets) {
+    set.input = nearestInput(files, set.name, set.root, ['.json']);
+    if (set.input) set.files.push(set.input);
+  }
+  return sets;
 }
 
 // OpenFold3: <query>/seed_<seed>/<query>_seed_<seed>_sample_<k>_model.cif (or .pdb) with
@@ -278,8 +290,10 @@ function detectSamples(files, tool, pattern) {
     const seedMatch = folder !== null ? baseName(folder).match(/^seed_(\d+)$/i) : null;
     const seedText = pattern.seedInName ? match[2] : seedMatch?.[1];
     const root = seedMatch ? directory(folder) : dir;
-    const key = `${root}|${name}`;
-    if (!jobs.has(key)) jobs.set(key, { name, root, models: [] });
+    // Protenix names its files <name>_seed_<seed>_sample_<k>: the seeds of one job form one set.
+    const job = seedText !== undefined && !pattern.seedInName ? name.replace(new RegExp(`_seed_${seedText}$`, 'i'), '') : name;
+    const key = `${root}|${job}`;
+    if (!jobs.has(key)) jobs.set(key, { name: job, root, models: [] });
     const seed = seedText === undefined ? null : Number(seedText);
     jobs.get(key).models.push({
       id: seed === null ? `sample-${sample}` : `seed-${seed}_sample-${sample}`,
@@ -298,6 +312,143 @@ function detectSamples(files, tool, pattern) {
     sets.push(makeSet(tool, name, root, models, models.flatMap((model) => Object.values(model.files)).filter(Boolean)));
   }
   return sets;
+}
+
+const INPUT_FILE = /\.(ya?ml|fasta|fa|fas)$/i;
+
+// A Boltz job's input: <name>.yaml (or .yml, .fasta) where the results folder says it is —
+// boltz_results_<stem>/ comes from <stem>.yaml beside it or from a folder <stem>/ of inputs —
+// else the nearest input of the job's name. Equally near inputs in different folders are
+// ambiguous, and none is taken.
+function boltzInput(files, name, root) {
+  const extensions = ['.yaml', '.yml', '.fasta', '.fa', '.fas'];
+  const results = baseName(root).match(/^boltz_results_(.+)$/i)?.[1]?.toLowerCase();
+  const parent = directory(root);
+  const named = results && namedInputs(files, name, extensions).find((item) => {
+    const folder = directory(item.path);
+    return (folder === parent && results === name.toLowerCase()) || folder.toLowerCase() === `${parent ? `${parent}/` : ''}${results}`;
+  });
+  return named || nearestInput(files, name, root, extensions);
+}
+
+// Files named <name> with one of the extensions, in the extensions' order of preference.
+function namedInputs(files, name, extensions) {
+  const rank = (item) => extensions.findIndex((extension) => item.path.toLowerCase().endsWith(extension));
+  return files
+    .filter((item) => rank(item) >= 0 && baseName(item.path).slice(0, -extensions[rank(item)].length).toLowerCase() === name.toLowerCase())
+    .sort((a, b) => rank(a) - rank(b));
+}
+
+// The input of a job's name nearest the results: the most leading folders shared with them.
+// Equally near ones in different folders are ambiguous, and none is taken.
+function nearestInput(files, name, root, extensions) {
+  const candidates = namedInputs(files, name, extensions);
+  if (!candidates.length) return null;
+  const segments = (path) => (path ? path.split('/') : []);
+  const shared = (item) => {
+    const a = segments(directory(item.path));
+    const b = segments(root);
+    let count = 0;
+    while (count < a.length && count < b.length && a[count] === b[count]) count += 1;
+    return count;
+  };
+  const best = Math.max(...candidates.map(shared));
+  const nearest = candidates.filter((item) => shared(item) === best);
+  return new Set(nearest.map((item) => directory(item.path))).size === 1 ? nearest[0] : null;
+}
+
+/* ---------- Ligands given as SMILES ---------- */
+
+// The SMILES of each ligand chain, from a job's input: AlphaFold 3's <job>_data.json
+// (sequences[].ligand = { id, smiles }), Boltz's YAML (a ligand entry's id and smiles) or FASTA
+// (>B|smiles), Chai-1's FASTA (>ligand|name=…, whose chains are lettered in input order), and
+// Protenix's JSON (the job named `job` in a list; its entities lettered in order and their copies
+// numbered, A0, B0, B1…). Returns Map(chain → SMILES); ligands given by dictionary code are left
+// out.
+export function ligandSMILES(tool, text, name = '', job = '') {
+  const chains = new Map();
+  const add = (ids, smiles) => {
+    const value = String(smiles ?? '').trim();
+    if (!value) return;
+    for (const id of [].concat(ids ?? [])) if (id !== undefined && id !== null && String(id).trim()) chains.set(String(id).trim(), value);
+  };
+  const source = String(text ?? '');
+  if (tool === 'af3' || tool === 'server' || tool === 'protenix' || /\.json$/i.test(name)) {
+    let data;
+    try {
+      data = JSON.parse(source);
+    } catch {
+      return chains;
+    }
+    if (tool === 'protenix') {
+      const jobs = [].concat(data ?? []);
+      const entry = jobs.find((item) => item?.name === job) ?? (jobs.length === 1 ? jobs[0] : null);
+      (entry?.sequences ?? []).forEach((item, index) => {
+        const ligand = item?.ligand?.ligand;
+        if (typeof ligand !== 'string' || /^(CCD|FILE)_/i.test(ligand)) return;
+        const letter = String.fromCharCode(65 + index);
+        add(Array.from({ length: Math.max(1, Number(item.ligand.count) || 1) }, (_, copy) => `${letter}${copy}`), ligand);
+      });
+      return chains;
+    }
+    for (const item of data?.sequences ?? []) if (item?.ligand?.smiles) add(item.ligand.id, item.ligand.smiles);
+    return chains;
+  }
+  if (/^\s*>/.test(source)) {
+    // FASTA: Boltz names the chain in the header; Chai-1 letters the records in order.
+    const records = [];
+    for (const line of source.split(/\r?\n/)) {
+      if (line.startsWith('>')) records.push({ header: line.slice(1).trim(), body: '' });
+      else if (records.length) records[records.length - 1].body += line.trim();
+    }
+    records.forEach((record, index) => {
+      const fields = record.header.split('|').map((field) => field.trim());
+      if (tool === 'chai' || /^ligand$/i.test(fields[0])) {
+        if (/^ligand$/i.test(fields[0])) add(String.fromCharCode(65 + index), record.body);
+      } else if (fields[1]?.toLowerCase() === 'smiles') add(fields[0], record.body);
+    });
+    return chains;
+  }
+  return boltzYAMLLigands(source, add, chains);
+}
+
+// The ligand entries of a Boltz YAML file: "- ligand:" with its id (a scalar, a [flow] list or a
+// block list) and smiles, quoted or not.
+function boltzYAMLLigands(text, add, chains) {
+  const unquote = (value) => value.trim().replace(/^(['"])(.*)\1$/, '$2');
+  let entry = null;
+  let collecting = false;
+  const finish = () => {
+    if (entry?.smiles) add(entry.ids, entry.smiles);
+  };
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/\s+#.*$/, '');
+    const start = line.match(/^\s*-\s+(protein|dna|rna|ligand)\s*:\s*$/i);
+    if (start) {
+      finish();
+      entry = start[1].toLowerCase() === 'ligand' ? { ids: [], smiles: '' } : null;
+      collecting = false;
+      continue;
+    }
+    if (!entry) continue;
+    const id = line.match(/^\s+id\s*:\s*(.*)$/);
+    if (id) {
+      const value = id[1].trim();
+      collecting = !value;
+      entry.ids = value.startsWith('[') ? value.replace(/[[\]]/g, '').split(',').map(unquote).filter(Boolean) : value ? [unquote(value)] : [];
+      continue;
+    }
+    const item = collecting ? line.match(/^\s+-\s+(.+)$/) : null;
+    if (item) {
+      entry.ids.push(unquote(item[1]));
+      continue;
+    }
+    collecting = false;
+    const smiles = line.match(/^\s+smiles\s*:\s*(.+)$/);
+    if (smiles) entry.smiles = unquote(smiles[1]);
+  }
+  finish();
+  return chains;
 }
 
 function escapeRegExp(text) {

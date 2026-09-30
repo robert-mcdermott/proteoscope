@@ -75,7 +75,7 @@ graph LR
     Camera[camera.js]
     Interactions[interactions.js]
     Surface[surface-worker.js<br/>surface.js + electrostatics.js<br/>tmalign.js]
-    Chem[chemistry.js]
+    Chem[chemistry.js<br/>smiles.js]
     Molfile[molfile.js]
     Poses[pose-checks.js<br/>perception.js + dg-bounds.js]
     Maps[volume-worker.js<br/>volume.js]
@@ -143,7 +143,9 @@ in the surface worker.
 `//go:embed` includes `web/index.html`, `web/styles.css`, `web/app.js`,
 `web/favicon.svg`, `web/lib/*.js` and `data/`: the examples as gzipped mmCIF
 plus `data/examples.json`, which gives each a label, category, description,
-credit and opening view. Test files (`*.test.mjs`) and test data are not
+credit and opening view. An entry with a `folder` names a folder of
+`data/predictions/` instead, whose files (gzipped) the page opens as a
+prediction folder; its `source` links to where the data come from. Test files (`*.test.mjs`) and test data are not
 embedded. `--dev` serves `web/` and `data/` from disk instead.
 
 ### HTTP Routes
@@ -525,7 +527,22 @@ ambient occlusion or outlines.
   each residue's result until the model's chemistry changes; docking poses
   are checked from their molecules against the receptor, so the scene holds
   one pose at a time; prediction scoring checks every model's ligands after
-  fetching the dictionary entries they need.
+  fetching the dictionary entries they need. Stereocenters and double bonds
+  are compared through one target list (`stereoTargets`), read from a
+  dictionary entry's ideal coordinates or from a SMILES's @, @@, / and \\.
+- **SMILES ligands** (`smiles.js`, `chemistry.js`). A prediction set knows
+  its input (AlphaFold 3's `_data.json`; a Boltz YAML or FASTA named like
+  the job; a FASTA in a Chai-1 folder; Protenix's `<name>.json` nearest the
+  results), read once per set into a map of chain
+  to SMILES that the page puts on the structure before deriving it.
+  `applyChemistry` asks `smilesComponent` first: the SMILES read as RDKit
+  reads it (kekulized by a matching, hydrogens from valences, stereo marks in
+  neighbor order), its heavy atoms paired with the residue's by order or by
+  bonds (the pairing that best fits the stereo among those the molecule's
+  automorphisms allow), and a definition of the residue's own names made
+  from it, with the stereo marks RDKit keeps for the pose checks. Definitions that list bonds only (OpenFold3)
+  are completed from the residue's elements (`bondTableComponent`).
+  `residue.component` keeps the definition each residue was typed with.
 
 ## Selections, Commands and Sessions
 
@@ -574,6 +591,13 @@ ambient occlusion or outlines.
   image content, and the data keeps their numbers. Tool calls run concurrently with other messages, can be
   cancelled, and report progress when asked; at end of input they get a
   second before being cancelled. The banner and logs go to stderr.
+- **Triage without a window** (`triage.go`): `proteoscope triage` starts the
+  server as `proteoscope mcp` does, with a blank page (`/api/startup` says
+  not to open the default example), and runs a Chrome-family browser
+  headless on it with a temporary profile. Through the same dispatch it
+  sends an open event for the folders, `triage by …` for the ranking,
+  `triage export` for the CSV and `triage gallery … width …` for the images,
+  writes them, prints the table, and stops the browser and the server.
 
 ## Predictions, Validation and Variants
 
@@ -711,8 +735,10 @@ See `roadmap.md` §15. In particular:
 - Chai-1 prediction folders were checked only against the documented
   layout; the other predictors against real outputs.
 - Pose checks leave out PoseBusters' energy ratio; ligands without bond
-  orders get the contact checks only, and ligands without a dictionary entry
-  no stereo checks.
+  orders (from a dictionary entry, the file or the job's SMILES) get the
+  contact checks only, and ligands with neither a dictionary entry nor a
+  SMILES no stereo checks.
+- `proteoscope triage` needs a Chrome-family browser installed.
 - Search reports, cross-link and HDX importers cover the formats listed in
   the README; others (Scout, mzIdentML cross-links, nested Parquet) are not
   read yet.
